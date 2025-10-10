@@ -16,20 +16,19 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at 70% 50%, rgba(53, 255, 153, 0.2), transparent 55%), var(--bg);
+  background: radial-gradient(circle at 55% 45%, rgba(53, 255, 153, 0.18), transparent 60%), var(--bg);
   color: var(--text);
   min-height: 100vh;
   display: flex;
+  justify-content: center;
 }
 
 main.app {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) 1fr;
-  width: 100%;
-  max-width: 1280px;
-  margin: auto;
-  gap: 1.5rem;
-  padding: 1.5rem;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  width: min(100%, 1440px);
+  gap: clamp(1.25rem, 2vw, 2.5rem);
+  padding: clamp(1rem, 2.5vw, 2.5rem);
 }
 
 .sidebar {
@@ -137,12 +136,13 @@ main.app {
 .radar-container {
   background: rgba(0, 0, 0, 0.25);
   border-radius: 18px;
-  padding: 1rem;
+  padding: clamp(0.75rem, 1.8vw, 2rem);
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(255, 255, 255, 0.05);
   position: relative;
+  min-height: min(75vh, 820px);
 }
 
 .version-chip {
@@ -161,7 +161,9 @@ main.app {
 }
 
 canvas#radar {
-  width: 100%;
+  width: min(100%, 1150px);
+  max-height: min(70vh, 760px);
+  aspect-ratio: 3 / 2;
   height: auto;
   border-radius: 12px;
   background: transparent;
