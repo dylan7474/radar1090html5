@@ -222,7 +222,7 @@ function refreshAudioStreamControls() {
     return;
   }
 
-  updateAudioStatus('Live');
+  updateAudioStatus('Playing');
 }
 
 function ensureAudioUnlockListener() {
@@ -503,12 +503,19 @@ if (audioStreamEl) {
   const shouldStartMuted = savedMuted === 'true';
   audioAutoUnmutePending = !shouldStartMuted;
   audioStreamEl.muted = true;
+  audioStreamEl.defaultMuted = true;
+
+  if (!audioStreamEl.hasAttribute('muted')) {
+    audioStreamEl.setAttribute('muted', '');
+  }
 
   const finalizeAutoUnmute = () => {
     if (!audioAutoUnmutePending || audioStreamEl.paused) {
       return;
     }
+    audioStreamEl.defaultMuted = false;
     audioStreamEl.muted = false;
+    audioStreamEl.removeAttribute('muted');
     audioAutoUnmutePending = false;
     try {
       localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, 'false');
@@ -583,6 +590,15 @@ audioMuteToggleBtn?.addEventListener('click', () => {
   const shouldMute = !currentlyMuted;
   audioAutoUnmutePending = false;
   audioStreamEl.muted = shouldMute;
+  audioStreamEl.defaultMuted = shouldMute;
+
+  if (shouldMute) {
+    if (!audioStreamEl.hasAttribute('muted')) {
+      audioStreamEl.setAttribute('muted', '');
+    }
+  } else {
+    audioStreamEl.removeAttribute('muted');
+  }
 
   try {
     localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, shouldMute ? 'true' : 'false');
