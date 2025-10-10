@@ -20,14 +20,14 @@ needed to run the web dashboard from any modern browser.
 
 ## Features
 
-- Retro-styled radar display that connects to a `dump1090-fa` server.
+- Retro-styled radar display that connects to a preconfigured `dump1090-fa` server at `192.168.50.100`.
 - Keyboard controls that mirror the original desktop client for muscle-memory parity.
 - Optional screen wake-lock support with an audio-based fallback for browsers that lack
   the Wake Lock API.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
-- Persistent configuration via `localStorage`, including server settings, receiver
-  coordinates, wake-lock preference, and audio mute state.
+- Persistent configuration via `localStorage`, including receiver coordinates,
+  wake-lock preference, and audio mute state.
 
 ## Requirements
 
@@ -42,20 +42,20 @@ needed to run the web dashboard from any modern browser.
 1. Clone or download this repository.
 2. Open `index.html` directly in your browser or serve the repo through a static file
    host (e.g. `python3 -m http.server`).
-3. Enter the host and port of your `dump1090-fa` server in the sidebar form.
-4. Click **Apply** to begin polling `receiver.json` and `aircraft.json` every five
-   seconds.
-5. Adjust the wake-lock and audio controls as needed. The **Live Audio** section starts
+3. Adjust the wake-lock and audio controls as needed. The **Live Audio** section starts
    the airband feed automatically—tap the mute toggle if you need to silence it
    temporarily.
+4. The radar immediately polls `receiver.json` and `aircraft.json` every five seconds
+   from the fixed server configuration.
 
 ## Configuration
 
 All user-facing preferences persist automatically. To clear them, remove the
 `radar1090` entry from `localStorage` via your browser's developer tools.
 
-For environments with non-standard JSON paths, update the endpoint URLs in `app.js`.
-The relevant fetch logic lives in `loadAircraftData` and `loadReceiverData`.
+For environments with non-standard JSON paths or alternate hosts, update the
+`DUMP1090_SERVER` configuration near the top of `app.js`. The relevant fetch logic
+continues to live in `loadAircraftData` and `loadReceiverData`.
 
 ## Keyboard Controls
 

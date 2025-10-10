@@ -23,7 +23,6 @@
           <div class="control-row">
             <div class="control-info">
               <span class="control-name" id="volume-label">Volume</span>
-              <span class="control-value" id="volume-value">10</span>
               <span class="control-meta" id="volume-description">Adjust the audio cue loudness.</span>
             </div>
             <div class="control-buttons">
@@ -76,19 +75,6 @@
             </div>
           </div>
         </div>
-      </section>
-      <section class="settings">
-        <h2>Server</h2>
-        <label>
-          Host
-          <input id="server-host" type="text" placeholder="192.168.x.x" />
-        </label>
-        <label>
-          Port
-          <input id="server-port" type="number" min="1" max="65535" />
-        </label>
-        <button id="apply-server">Apply</button>
-        <p class="hint">The server must expose the dump1090-fa JSON endpoints.</p>
       </section>
       <section class="audio">
         <h2>Live Audio</h2>
