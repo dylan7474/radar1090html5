@@ -3,6 +3,7 @@ const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const SWEEP_SPEED_STEPS = [90, 180, 270, 360];
+const APP_VERSION = 'v1.1.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -16,6 +17,7 @@ const statusEl = document.getElementById('status');
 const aircraftInfoEl = document.getElementById('aircraft-info');
 const rangeInfoEl = document.getElementById('range-info');
 const messageEl = document.getElementById('message');
+const versionEl = document.getElementById('version');
 const hostInput = document.getElementById('server-host');
 const portInput = document.getElementById('server-port');
 const applyBtn = document.getElementById('apply-server');
@@ -56,7 +58,8 @@ const state = {
   running: true,
   trackedAircraft: [],
   previousPositions: new Map(),
-  paintedThisTurn: new Set(),
+  paintedRotation: new Map(),
+  currentSweepId: 0,
   activeBlips: [],
   lastPingedAircraft: null,
   inboundAlertDistanceKm: INBOUND_ALERT_DISTANCE_KM,
@@ -77,6 +80,11 @@ state.rotationPeriodMs = 360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex] * 1000;
 
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
+
+if (versionEl) {
+  versionEl.textContent = APP_VERSION;
+  versionEl.setAttribute('title', `Build ${APP_VERSION}`);
+}
 
 applyBtn.addEventListener('click', () => {
   const rawHost = hostInput.value.trim();
@@ -168,6 +176,25 @@ function calculateHeading(prev, curr) {
   if (!prev) return curr.bearing;
   const delta = calculateBearing(prev.lat, prev.lon, curr.lat, curr.lon);
   return Number.isFinite(delta) ? delta : curr.bearing;
+}
+
+function forwardAngleDelta(from, to) {
+  return (to - from + 360) % 360;
+}
+
+function canvasAngleFromNorth(angleDeg) {
+  // Canvas angles start at the positive X axis (east) whereas our sweep logic is
+  // based on 0° being north. Adjust by 90° so the rendered beam lines up with
+  // the computed sweep angle.
+  return deg2rad(angleDeg - 90);
+}
+
+function getCraftKey(craft) {
+  if (craft.hex) return craft.hex;
+  if (craft.flight) return craft.flight;
+  const lat = Number.isFinite(craft.lat) ? craft.lat.toFixed(3) : 'na';
+  const lon = Number.isFinite(craft.lon) ? craft.lon.toFixed(3) : 'na';
+  return `${lat},${lon}`;
 }
 
 function getBeepFrequencyForAltitude(altitude) {
@@ -351,7 +378,7 @@ async function pollData() {
       state.dataConnectionOk = false;
       state.trackedAircraft = [];
       state.previousPositions.clear();
-      state.paintedThisTurn.clear();
+      state.paintedRotation.clear();
       state.activeBlips = [];
       state.server.basePath = null;
       showMessage('Failed to fetch aircraft data. Check server settings.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
@@ -431,6 +458,8 @@ function processAircraftData(data) {
       inbound: false,
     };
 
+    craft.key = getCraftKey(craft);
+
     const inboundResult = evaluateInbound(craft);
     craft.inbound = inboundResult.inbound;
     if (inboundResult.inbound) {
@@ -446,7 +475,15 @@ function processAircraftData(data) {
 
   state.trackedAircraft = aircraft;
   state.previousPositions = nextPositions;
-  state.paintedThisTurn = new Set();
+
+  if (state.paintedRotation.size > 0) {
+    const activeKeys = new Set(aircraft.map((craft) => craft.key));
+    for (const key of state.paintedRotation.keys()) {
+      if (!activeKeys.has(key)) {
+        state.paintedRotation.delete(key);
+      }
+    }
+  }
 
   if (inboundNames.length > 0) {
     const unique = [...new Set(inboundNames)];
@@ -558,15 +595,23 @@ function drawRadar(deltaTime) {
   const previousAngle = state.sweepAngle;
   state.sweepAngle = (state.sweepAngle + sweepAdvance) % 360;
   const sweepWrapped = state.sweepAngle < previousAngle;
+  const sweepDelta = forwardAngleDelta(previousAngle, state.sweepAngle);
+  const sweepTolerance = Math.min(2.5, Math.max(0.75, sweepAdvance * 0.6));
   if (sweepWrapped) {
-    // Reset painted aircraft when the sweep completes a rotation so each
-    // target is redrawn exactly as the beam passes over it.
-    state.paintedThisTurn.clear();
+    // Increment the sweep identifier when a rotation completes so we can
+    // track which aircraft have been painted for the current pass.
+    state.currentSweepId += 1;
+    if (state.currentSweepId > Number.MAX_SAFE_INTEGER - 1) {
+      state.currentSweepId = 0;
+      state.paintedRotation.clear();
+    }
   }
 
   // sweep arc
-  const sweepStart = deg2rad(state.sweepAngle - 2);
-  const sweepEnd = deg2rad(state.sweepAngle + 2);
+  const sweepCenter = canvasAngleFromNorth(state.sweepAngle);
+  const sweepHalfWidth = deg2rad(2);
+  const sweepStart = sweepCenter - sweepHalfWidth;
+  const sweepEnd = sweepCenter + sweepHalfWidth;
   const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radarRadius);
   sweepGradient.addColorStop(0, 'rgba(53,255,153,0.6)');
   sweepGradient.addColorStop(1, 'rgba(53,255,153,0)');
@@ -588,11 +633,11 @@ function drawRadar(deltaTime) {
   const newBlips = [];
 
   for (const craft of state.trackedAircraft) {
-    if (!state.paintedThisTurn.has(craft.hex || craft.flight)) {
+    const key = craft.key || getCraftKey(craft);
+    if (state.paintedRotation.get(key) !== state.currentSweepId) {
       const target = craft.bearing;
-      const crossed =
-        (!sweepWrapped && previousAngle <= target && state.sweepAngle >= target) ||
-        (sweepWrapped && (target >= previousAngle || target <= state.sweepAngle));
+      const distanceFromPrevious = forwardAngleDelta(previousAngle, target);
+      const crossed = distanceFromPrevious <= sweepDelta + sweepTolerance;
       if (crossed) {
         const angleRad = deg2rad(target);
         const screenRadius = Math.min(1, craft.distanceKm / radarRangeKm) * radarRadius;
@@ -608,7 +653,7 @@ function drawRadar(deltaTime) {
           minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
           hex: craft.hex || craft.flight,
         });
-        state.paintedThisTurn.add(craft.hex || craft.flight);
+        state.paintedRotation.set(key, state.currentSweepId);
         state.lastPingedAircraft = craft;
         playBeep(getBeepFrequencyForAltitude(craft.altitude), 50);
       }
@@ -693,12 +738,12 @@ function handleKeyDown(event) {
     case 'ArrowUp':
       state.rangeStepIndex = Math.min(RANGE_STEPS.length - 1, state.rangeStepIndex + 1);
       showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
-      state.paintedThisTurn.clear();
+      state.paintedRotation.clear();
       break;
     case 'ArrowDown':
       state.rangeStepIndex = Math.max(0, state.rangeStepIndex - 1);
       showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
-      state.paintedThisTurn.clear();
+      state.paintedRotation.clear();
       break;
     case 'ArrowLeft':
       state.inboundAlertDistanceKm = Math.max(1, state.inboundAlertDistanceKm - 1);

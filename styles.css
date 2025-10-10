@@ -145,6 +145,21 @@ main.app {
   position: relative;
 }
 
+.version-chip {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(11, 14, 23, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(242, 246, 255, 0.85);
+  pointer-events: none;
+}
+
 canvas#radar {
   width: 100%;
   height: auto;
