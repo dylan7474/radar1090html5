@@ -24,9 +24,10 @@ Open `index.html` in a modern browser (Chrome, Edge, Firefox or Safari).
 2. Once connected the page polls for `receiver.json` (to align the map)
    and `aircraft.json` every five seconds.
 3. Keyboard controls mirror the SDL build (`m`, `+`, `-`, arrow keys).
+4. Use the **Screen Awake** toggle in the sidebar to prevent the display from sleeping while you monitor traffic.
 
 The browser stores the last-used server and receiver coordinates in
-`localStorage` so reloading the page keeps your settings.
+`localStorage` so reloading the page keeps your settings. The wake-lock preference is also remembered.
 
 ### What you should see after clicking **Apply**
 
