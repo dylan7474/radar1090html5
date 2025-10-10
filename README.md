@@ -2,8 +2,10 @@
 
 Simple radar display application built with SDL2.
 
-The interface now features a modern dark theme, refined radar grid and
-DejaVu Sans fonts for a more professional look.
+The repository now also contains a standalone HTML5/WebGL-free radar
+display that mimics the SDL application using Canvas 2D. The web version
+keeps the retro radar styling while adding a responsive layout and a
+configurable server connection panel.
 
 ## Controls
 
@@ -12,6 +14,19 @@ DejaVu Sans fonts for a more professional look.
 - `+`/`-` increase or decrease volume or sweep speed
 - `Up`/`Down` change radar range
 - `Left`/`Right` adjust inbound alert distance
+
+## HTML5 version
+
+Open `index.html` in a modern browser (Chrome, Edge, Firefox or Safari).
+
+1. Enter the host and port of your dump1090-fa server in the sidebar.
+   The server must expose the JSON endpoints (e.g. `http://HOST:PORT/dump1090-fa/data`).
+2. Once connected the page polls for `receiver.json` (to align the map)
+   and `aircraft.json` every five seconds.
+3. Keyboard controls mirror the SDL build (`m`, `+`, `-`, arrow keys).
+
+The browser stores the last-used server and receiver coordinates in
+`localStorage` so reloading the page keeps your settings.
 
 ## Building on Linux
 

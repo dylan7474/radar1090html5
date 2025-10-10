@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Closest Plane Radar (HTML5)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <section class="sidebar">
+      <h1>Closest Plane Radar</h1>
+      <div class="status" id="status"></div>
+      <div class="info-block" id="aircraft-info"></div>
+      <div class="info-block" id="range-info"></div>
+      <div class="message" id="message"></div>
+      <section class="controls">
+        <h2>Controls</h2>
+        <ul>
+          <li><kbd>M</kbd> toggle volume / sweep speed</li>
+          <li><kbd>+</kbd> / <kbd>-</kbd> adjust active control</li>
+          <li><kbd>↑</kbd> / <kbd>↓</kbd> change radar range</li>
+          <li><kbd>←</kbd> / <kbd>→</kbd> change inbound alert distance</li>
+        </ul>
+      </section>
+      <section class="settings">
+        <h2>Server</h2>
+        <label>
+          Host
+          <input id="server-host" type="text" placeholder="192.168.x.x" />
+        </label>
+        <label>
+          Port
+          <input id="server-port" type="number" min="1" max="65535" />
+        </label>
+        <button id="apply-server">Apply</button>
+        <p class="hint">The server must expose the dump1090-fa JSON endpoints.</p>
+      </section>
+    </section>
+    <section class="radar-container">
+      <canvas id="radar" width="960" height="640" aria-label="Radar display"></canvas>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
