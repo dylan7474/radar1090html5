@@ -20,10 +20,15 @@ const hostInput = document.getElementById('server-host');
 const portInput = document.getElementById('server-port');
 const applyBtn = document.getElementById('apply-server');
 
+const DEFAULT_BASE_PATH = 'dump1090-fa/data';
+const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
+
 const state = {
   server: {
+    protocol: localStorage.getItem('dump1090Protocol') || 'http',
     host: localStorage.getItem('dump1090Host') || '',
     port: Number(localStorage.getItem('dump1090Port')) || 8080,
+    basePath: localStorage.getItem('dump1090BasePath') || DEFAULT_BASE_PATH,
   },
   receiver: {
     lat: Number(localStorage.getItem('receiverLat')) || 54,
@@ -53,22 +58,63 @@ const state = {
 state.rotationPeriodMs = 360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex] * 1000;
 
 hostInput.value = state.server.host;
-portInput.value = state.server.port.toString();
+portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
 
 applyBtn.addEventListener('click', () => {
-  const host = hostInput.value.trim();
-  const port = Number(portInput.value);
-  if (!host || Number.isNaN(port)) {
+  const rawHost = hostInput.value.trim();
+  if (!rawHost) {
     showMessage('Enter a valid host and port', { alert: true });
     return;
   }
+
+  let host = rawHost;
+  let protocol = state.server.protocol || 'http';
+  let port = Number(portInput.value);
+
+  if (/^https?:\/\//i.test(rawHost)) {
+    try {
+      const url = new URL(rawHost);
+      protocol = url.protocol.replace(':', '') || 'http';
+      host = url.hostname;
+      port = url.port ? Number(url.port) : port;
+    } catch (error) {
+      showMessage('Unable to parse server address', { alert: true });
+      console.warn('Invalid server URL', error);
+      return;
+    }
+  }
+
+  if (!/^\[.*\]$/.test(host) && host.includes(':')) {
+    const [hostPart, portPart] = host.split(':');
+    if (hostPart && portPart && Number(portPart) > 0) {
+      host = hostPart;
+      port = Number(portPart);
+    }
+  }
+
+  if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
+    showMessage('Enter a valid host and port', { alert: true });
+    return;
+  }
+
+  state.server.protocol = protocol;
   state.server.host = host;
   state.server.port = port;
+  state.server.basePath = null;
+
+  localStorage.setItem('dump1090Protocol', protocol);
   localStorage.setItem('dump1090Host', host);
   localStorage.setItem('dump1090Port', String(port));
+  localStorage.removeItem('dump1090BasePath');
   state.dataConnectionOk = false;
   showMessage(`Server set to ${host}:${port}`);
-  fetchReceiverLocation().catch(() => {});
+  determineServerBasePath()
+    .then(() => {
+      fetchReceiverLocation().catch(() => {});
+    })
+    .catch((error) => {
+      showMessage(`Unable to reach server: ${error.message}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 4 });
+    });
 });
 
 function deg2rad(deg) {
@@ -229,8 +275,10 @@ function playBeep(freq, durationMs) {
 }
 
 function buildUrl(path) {
-  const { host, port } = state.server;
-  return `http://${host}:${port}/dump1090-fa/data/${path}`;
+  const { protocol, host, port, basePath } = state.server;
+  const safeBase = (basePath || DEFAULT_BASE_PATH).replace(/^\/+|\/+$/g, '');
+  const portPart = port ? `:${port}` : '';
+  return `${protocol}://${host}${portPart}/${safeBase}/${path}`;
 }
 
 async function fetchJson(url, { timeout = 4000 } = {}) {
@@ -266,6 +314,16 @@ async function pollData() {
       await new Promise((resolve) => setTimeout(resolve, REFRESH_INTERVAL_MS));
       continue;
     }
+    if (!state.server.basePath) {
+      try {
+        await determineServerBasePath();
+      } catch (error) {
+        console.warn('Failed to determine dump1090 path', error);
+        showMessage(`Unable to reach server: ${error.message}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 4 });
+        await new Promise((resolve) => setTimeout(resolve, REFRESH_INTERVAL_MS));
+        continue;
+      }
+    }
     try {
       const data = await fetchJson(buildUrl('aircraft.json'));
       processAircraftData(data);
@@ -277,12 +335,41 @@ async function pollData() {
       state.previousPositions.clear();
       state.paintedThisTurn.clear();
       state.activeBlips = [];
+      state.server.basePath = null;
+      showMessage('Failed to fetch aircraft data. Check server settings.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
     }
     updateStatus();
     updateRangeInfo();
     updateAircraftInfo();
     await new Promise((resolve) => setTimeout(resolve, REFRESH_INTERVAL_MS));
   }
+}
+
+async function determineServerBasePath() {
+  const { host, port, protocol, basePath } = state.server;
+  if (!host) return null;
+
+  const candidates = basePath
+    ? [basePath, ...SERVER_PATH_OPTIONS.filter((option) => option !== basePath)]
+    : SERVER_PATH_OPTIONS;
+
+  let lastError = null;
+  for (const candidate of candidates) {
+    const safeCandidate = candidate.replace(/^\/+|\/+$/g, '');
+    const portPart = port ? `:${port}` : '';
+    const url = `${protocol}://${host}${portPart}/${safeCandidate}/receiver.json`;
+    try {
+      await fetchJson(url, { timeout: 2500 });
+      state.server.basePath = safeCandidate;
+      localStorage.setItem('dump1090BasePath', safeCandidate);
+      showMessage(`Connected via /${safeCandidate}`, { duration: DISPLAY_TIMEOUT_MS });
+      return safeCandidate;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('No dump1090 endpoints found');
 }
 
 function processAircraftData(data) {
