@@ -87,6 +87,175 @@ const state = {
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 
+let wakeLockSentinel = null;
+let wakeLockFallbackPrepared = false;
+let wakeLockFallbackEnabled = false;
+let wakeLockFallbackNeedsGesture = false;
+let wakeLockAudioContext = null;
+
+async function requestScreenWakeLock() {
+  if (document.visibilityState !== 'visible') {
+    return;
+  }
+
+  if (!('wakeLock' in navigator)) {
+    enableWakeLockFallback();
+    return;
+  }
+
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    wakeLockSentinel.addEventListener('release', () => {
+      wakeLockSentinel = null;
+      if (document.visibilityState === 'visible') {
+        requestScreenWakeLock().catch(() => {});
+      }
+    });
+  } catch (error) {
+    wakeLockSentinel = null;
+    console.warn('Unable to acquire screen wake lock', error);
+    enableWakeLockFallback();
+  }
+}
+
+function releaseScreenWakeLock() {
+  if (!wakeLockSentinel) {
+    return;
+  }
+
+  wakeLockSentinel
+    .release()
+    .catch((error) => {
+      console.warn('Error releasing wake lock', error);
+    })
+    .finally(() => {
+      wakeLockSentinel = null;
+    });
+}
+
+function prepareWakeLockFallback() {
+  if (wakeLockFallbackPrepared) {
+    return;
+  }
+
+  wakeLockFallbackPrepared = true;
+  const triggerEvents = ['pointerdown', 'touchstart', 'click'];
+  const handleInteraction = () => {
+    if (!wakeLockFallbackEnabled) {
+      return;
+    }
+    requestScreenWakeLock().catch(() => {});
+    resumeWakeLockFallback({ viaUserInteraction: true }).catch(() => {});
+  };
+
+  triggerEvents.forEach((eventName) => {
+    document.addEventListener(eventName, handleInteraction, { passive: true });
+  });
+}
+
+function enableWakeLockFallback() {
+  prepareWakeLockFallback();
+  wakeLockFallbackEnabled = true;
+  resumeWakeLockFallback().catch(() => {});
+}
+
+async function resumeWakeLockFallback(options = {}) {
+  const { viaUserInteraction = false } = options;
+  if (!wakeLockFallbackEnabled) {
+    return;
+  }
+
+  if (wakeLockFallbackNeedsGesture && !viaUserInteraction) {
+    return;
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+
+  if (!wakeLockAudioContext) {
+    try {
+      const audioContext = new AudioContextCtor();
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 0.001;
+      const oscillator = audioContext.createOscillator();
+      oscillator.frequency.value = 1;
+      oscillator.type = 'square';
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start();
+      wakeLockAudioContext = audioContext;
+      wakeLockFallbackNeedsGesture = false;
+    } catch (error) {
+      console.warn('Unable to activate wake lock audio fallback', error);
+      if (error && error.name === 'NotAllowedError') {
+        wakeLockFallbackNeedsGesture = true;
+      } else {
+        shutdownWakeLockFallback();
+      }
+    }
+    return;
+  }
+
+  if (wakeLockAudioContext.state === 'suspended') {
+    try {
+      await wakeLockAudioContext.resume();
+      wakeLockFallbackNeedsGesture = false;
+    } catch (error) {
+      console.warn('Unable to resume wake lock audio fallback', error);
+      if (error && error.name === 'NotAllowedError') {
+        wakeLockFallbackNeedsGesture = true;
+      } else {
+        shutdownWakeLockFallback();
+      }
+    }
+  }
+}
+
+function suspendWakeLockFallback() {
+  if (!wakeLockFallbackEnabled || !wakeLockAudioContext) {
+    return;
+  }
+
+  if (wakeLockAudioContext.state === 'running') {
+    wakeLockAudioContext.suspend().catch((error) => {
+      console.warn('Unable to suspend wake lock audio fallback', error);
+    });
+  }
+}
+
+function shutdownWakeLockFallback() {
+  wakeLockFallbackEnabled = false;
+  wakeLockFallbackNeedsGesture = false;
+  if (!wakeLockAudioContext) {
+    return;
+  }
+
+  const context = wakeLockAudioContext;
+  wakeLockAudioContext = null;
+  context.close().catch((error) => {
+    console.warn('Unable to close wake lock audio fallback', error);
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    requestScreenWakeLock().catch(() => {});
+    resumeWakeLockFallback().catch(() => {});
+  } else {
+    releaseScreenWakeLock();
+    suspendWakeLockFallback();
+  }
+});
+
+window.addEventListener('beforeunload', () => {
+  releaseScreenWakeLock();
+  shutdownWakeLockFallback();
+});
+
+prepareWakeLockFallback();
+
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
 
@@ -601,9 +770,13 @@ function drawRadar(deltaTime) {
   const { width, height } = canvas;
   ctx.clearRect(0, 0, width, height);
 
-  const centerX = width * 0.7;
+  const squareSize = Math.min(width, height);
+  const centerX = width / 2;
   const centerY = height / 2;
-  const radarRadius = height * 0.4;
+  const labelPadding = squareSize * 0.05;
+  const radarRadius = Math.max(10, squareSize / 2 - labelPadding);
+  const maxCompassOffset = squareSize / 2 - squareSize * 0.02;
+  const compassOffset = Math.min(radarRadius + squareSize * 0.03, maxCompassOffset);
 
   // background glow
   const gradient = ctx.createRadialGradient(centerX, centerY, radarRadius * 0.1, centerX, centerY, radarRadius);
@@ -671,11 +844,19 @@ function drawRadar(deltaTime) {
   ctx.closePath();
   ctx.fill();
 
-  // draw range text
-  ctx.fillStyle = 'rgba(200,230,220,0.6)';
-  ctx.font = `${Math.round(radarRadius * 0.09)}px "Share Tech Mono", monospace`;
+  // compass labels
+  ctx.save();
+  ctx.fillStyle = 'rgba(200,230,220,0.75)';
+  ctx.font = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
+  ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
-  ctx.fillText(`${RANGE_STEPS[state.rangeStepIndex]} km`, centerX, centerY + radarRadius + radarRadius * 0.12);
+  ctx.fillText('N', centerX, centerY - compassOffset);
+  ctx.fillText('S', centerX, centerY + compassOffset);
+  ctx.textAlign = 'left';
+  ctx.fillText('E', centerX + compassOffset, centerY);
+  ctx.textAlign = 'right';
+  ctx.fillText('W', centerX - compassOffset, centerY);
+  ctx.restore();
 
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   const now = performance.now();
@@ -749,41 +930,6 @@ function drawRadar(deltaTime) {
   updateAircraftInfo();
 }
 
-function handleKeyDown(event) {
-  if (event.target instanceof HTMLInputElement) return;
-  const key = event.key.toLowerCase();
-  const prevent = ['arrowup', 'arrowdown', 'arrowleft', 'arrowright', '+', '-', '='];
-  if (prevent.includes(key) || event.key === '+' || event.key === '-') {
-    event.preventDefault();
-  }
-
-  switch (event.key) {
-    case '+':
-    case '=':
-      adjustVolume(1);
-      break;
-    case '-':
-      adjustVolume(-1);
-      break;
-    case 'ArrowUp':
-      adjustRange(1);
-      break;
-    case 'ArrowDown':
-      adjustRange(-1);
-      break;
-    case 'ArrowLeft':
-      adjustAlertRadius(-1);
-      break;
-    case 'ArrowRight':
-      adjustAlertRadius(1);
-      break;
-    default:
-      return;
-  }
-}
-
-document.addEventListener('keydown', handleKeyDown, { passive: false });
-
 function loop() {
   if (!state.running) return;
   const now = performance.now();
@@ -798,4 +944,5 @@ updateRangeInfo();
 updateAircraftInfo();
 fetchReceiverLocation().catch(() => {});
 pollData();
+requestScreenWakeLock().catch(() => {});
 requestAnimationFrame(loop);
