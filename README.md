@@ -28,6 +28,20 @@ Open `index.html` in a modern browser (Chrome, Edge, Firefox or Safari).
 The browser stores the last-used server and receiver coordinates in
 `localStorage` so reloading the page keeps your settings.
 
+### What you should see after clicking **Apply**
+
+- The status banner at the top of the sidebar will briefly read `Server set to HOST:PORT`
+  and then update to either `Connected – HOST:PORT` or `Waiting for data… – HOST:PORT`.
+- A toast-style message beneath the status will announce which dump1090 path succeeded,
+  for example `Connected via /dump1090-fa`.
+- If the app cannot reach the server, the message area turns red and displays
+  `Failed to fetch aircraft data. Check server settings.`. The app keeps trying
+  every five seconds and resets the status to `Waiting for data…` while it retries.
+- Additional troubleshooting details (such as network errors or invalid URLs)
+  are logged to the browser developer console. Open it with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd>
+  (or <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd> on macOS) and check the **Console** and **Network** tabs
+  to verify that `receiver.json` and `aircraft.json` requests are succeeding.
+
 ## Building on Linux
 
 Ensure development packages for SDL2, SDL2_ttf, SDL2_mixer, libcurl, and jansson are installed.
