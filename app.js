@@ -3,13 +3,15 @@ const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.1.0';
+const APP_VERSION = 'v1.2.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
 const FREQ_MID = 1200;
 const FREQ_HIGH = 1800;
 const EARTH_RADIUS_KM = 6371;
+const AUDIO_STREAM_URL = 'http://192.168.50.4:8000/airbands';
+const AUDIO_VOLUME_STORAGE_KEY = 'airbandVolume';
 
 const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
@@ -34,6 +36,7 @@ const alertDecreaseBtn = document.getElementById('alert-decrease');
 const alertIncreaseBtn = document.getElementById('alert-increase');
 const wakeLockStatusEl = document.getElementById('wake-lock-status');
 const wakeLockToggleBtn = document.getElementById('wake-lock-toggle');
+const audioStreamEl = document.getElementById('airband-stream');
 
 const planeIcon = new Image();
 const planeIconState = {
@@ -359,6 +362,29 @@ portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
 if (versionEl) {
   versionEl.textContent = APP_VERSION;
   versionEl.setAttribute('title', `Build ${APP_VERSION}`);
+}
+
+if (audioStreamEl) {
+  audioStreamEl.src = AUDIO_STREAM_URL;
+  const savedVolume = Number(localStorage.getItem(AUDIO_VOLUME_STORAGE_KEY));
+  if (!Number.isNaN(savedVolume) && savedVolume >= 0 && savedVolume <= 1) {
+    audioStreamEl.volume = savedVolume;
+  }
+
+  audioStreamEl.addEventListener('volumechange', () => {
+    try {
+      localStorage.setItem(AUDIO_VOLUME_STORAGE_KEY, String(audioStreamEl.volume));
+    } catch (error) {
+      console.warn('Unable to persist audio volume', error);
+    }
+  });
+
+  audioStreamEl.addEventListener('error', () => {
+    showMessage('Audio stream unavailable. Check the receiver.', {
+      alert: true,
+      duration: DISPLAY_TIMEOUT_MS * 2,
+    });
+  });
 }
 
 applyBtn.addEventListener('click', () => {
