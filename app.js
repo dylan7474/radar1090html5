@@ -558,6 +558,11 @@ function drawRadar(deltaTime) {
   const previousAngle = state.sweepAngle;
   state.sweepAngle = (state.sweepAngle + sweepAdvance) % 360;
   const sweepWrapped = state.sweepAngle < previousAngle;
+  if (sweepWrapped) {
+    // Reset painted aircraft when the sweep completes a rotation so each
+    // target is redrawn exactly as the beam passes over it.
+    state.paintedThisTurn.clear();
+  }
 
   // sweep arc
   const sweepStart = deg2rad(state.sweepAngle - 2);
