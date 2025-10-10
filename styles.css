@@ -16,20 +16,22 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at 70% 50%, rgba(53, 255, 153, 0.2), transparent 55%), var(--bg);
+  background: radial-gradient(circle at 50% 45%, rgba(53, 255, 153, 0.18), transparent 60%), var(--bg);
   color: var(--text);
   min-height: 100vh;
   display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: clamp(1rem, 3vw, 3rem);
 }
 
 main.app {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) 1fr;
-  width: 100%;
-  max-width: 1280px;
-  margin: auto;
-  gap: 1.5rem;
-  padding: 1.5rem;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  width: min(100%, 1600px);
+  gap: clamp(1.5rem, 3vw, 3rem);
+  padding: clamp(1.25rem, 3vw, 3rem);
+  margin: 0 auto;
 }
 
 .sidebar {
@@ -80,22 +82,101 @@ main.app {
   color: var(--alert);
 }
 
-.controls ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 0.35rem;
-  font-size: 0.9rem;
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.controls kbd {
-  display: inline-block;
-  padding: 0.1rem 0.35rem;
-  border-radius: 4px;
-  border: 1px solid var(--panel-border);
-  background: rgba(255, 255, 255, 0.05);
-  margin-right: 0.35rem;
+.control-panel {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.control-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  flex-wrap: wrap;
+}
+
+.control-info {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 180px;
+}
+
+.control-name {
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.control-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.control-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.control-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.control-button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(53, 255, 153, 0.15);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.55rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-height: 44px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.control-button.primary {
+  background: var(--accent);
+  color: #020609;
+  border-color: transparent;
+}
+
+.control-button.control-button--square {
+  width: 48px;
+  padding: 0.55rem;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.control-button:hover,
+.control-button:focus-visible {
+  border-color: var(--accent);
+  background: rgba(53, 255, 153, 0.25);
+  outline: none;
+}
+
+.control-button.primary:hover,
+.control-button.primary:focus-visible {
+  background: #53ffad;
+}
+
+.control-button:active {
+  transform: translateY(1px);
 }
 
 .settings label {
@@ -136,13 +217,15 @@ main.app {
 
 .radar-container {
   background: rgba(0, 0, 0, 0.25);
-  border-radius: 18px;
-  padding: 1rem;
+  border-radius: 20px;
+  padding: clamp(1rem, 2.25vw, 2.5rem);
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(255, 255, 255, 0.05);
   position: relative;
+  min-height: min(80vh, 900px);
+  width: 100%;
 }
 
 .version-chip {
@@ -162,8 +245,11 @@ main.app {
 
 canvas#radar {
   width: 100%;
+  max-width: 1300px;
+  max-height: min(78vh, 820px);
+  aspect-ratio: 3 / 2;
   height: auto;
-  border-radius: 12px;
+  border-radius: 14px;
   background: transparent;
 }
 
@@ -178,5 +264,28 @@ canvas#radar {
 
   .radar-container {
     order: 1;
+  }
+}
+
+@media (max-width: 900px) {
+  body {
+    align-items: flex-start;
+  }
+
+  .control-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .control-buttons {
+    justify-content: space-between;
+  }
+
+  .control-button {
+    width: 100%;
+  }
+
+  .control-button.control-button--square {
+    width: calc(50% - 0.25rem);
   }
 }

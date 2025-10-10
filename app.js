@@ -2,7 +2,7 @@ const REFRESH_INTERVAL_MS = 5000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
-const SWEEP_SPEED_STEPS = [90, 180, 270, 360];
+const SWEEP_SPEED_DEG_PER_SEC = 90;
 const APP_VERSION = 'v1.1.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
@@ -21,6 +21,17 @@ const versionEl = document.getElementById('version');
 const hostInput = document.getElementById('server-host');
 const portInput = document.getElementById('server-port');
 const applyBtn = document.getElementById('apply-server');
+const volumeLabelEl = document.getElementById('volume-label');
+const volumeDescriptionEl = document.getElementById('volume-description');
+const volumeValueEl = document.getElementById('volume-value');
+const volumeDecreaseBtn = document.getElementById('volume-decrease');
+const volumeIncreaseBtn = document.getElementById('volume-increase');
+const rangeValueEl = document.getElementById('range-value');
+const rangeDecreaseBtn = document.getElementById('range-decrease');
+const rangeIncreaseBtn = document.getElementById('range-increase');
+const alertValueEl = document.getElementById('alert-value');
+const alertDecreaseBtn = document.getElementById('alert-decrease');
+const alertIncreaseBtn = document.getElementById('alert-increase');
 
 const planeIcon = new Image();
 const planeIconState = {
@@ -64,9 +75,7 @@ const state = {
   lastPingedAircraft: null,
   inboundAlertDistanceKm: INBOUND_ALERT_DISTANCE_KM,
   rangeStepIndex: 3,
-  sweepSpeedIndex: 1,
   beepVolume: 10,
-  controlMode: 'VOLUME',
   sweepAngle: 0,
   lastFrameTime: performance.now(),
   rotationPeriodMs: 0,
@@ -76,7 +85,7 @@ const state = {
   messageUntil: 0,
 };
 
-state.rotationPeriodMs = 360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex] * 1000;
+state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
@@ -142,6 +151,13 @@ applyBtn.addEventListener('click', () => {
       showMessage(`Unable to reach server: ${error.message}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 4 });
     });
 });
+
+volumeDecreaseBtn?.addEventListener('click', () => adjustVolume(-1));
+volumeIncreaseBtn?.addEventListener('click', () => adjustVolume(1));
+rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
+rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
+alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
+alertIncreaseBtn?.addEventListener('click', () => adjustAlertRadius(1));
 
 function deg2rad(deg) {
   return (deg * Math.PI) / 180;
@@ -231,20 +247,53 @@ function updateMessage() {
 }
 
 function updateRangeInfo() {
-  const mode = state.controlMode === 'VOLUME' ? 'Volume' : 'Sweep';
-  const value = state.controlMode === 'VOLUME'
-    ? `${state.beepVolume}`
-    : `${SWEEP_SPEED_STEPS[state.sweepSpeedIndex]}°/s`;
+  if (volumeLabelEl) volumeLabelEl.textContent = 'Volume';
+  if (volumeDescriptionEl) volumeDescriptionEl.textContent = 'Adjust the audio cue loudness.';
+  if (volumeValueEl) volumeValueEl.textContent = `${state.beepVolume}`;
+  if (rangeValueEl) rangeValueEl.textContent = `${RANGE_STEPS[state.rangeStepIndex]} km`;
+  if (alertValueEl) alertValueEl.textContent = `${state.inboundAlertDistanceKm.toFixed(1)} km`;
 
   const rangeLines = [
     { label: 'Range', value: `${RANGE_STEPS[state.rangeStepIndex]} km` },
     { label: 'Alert', value: `${state.inboundAlertDistanceKm.toFixed(1)} km` },
-    { label: `Mode (${mode})`, value },
+    { label: 'Volume', value: `${state.beepVolume}` },
+    { label: 'Sweep', value: `${SWEEP_SPEED_DEG_PER_SEC}°/s` },
   ];
 
   rangeInfoEl.innerHTML = rangeLines
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
     .join('');
+}
+
+function adjustVolume(delta) {
+  const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
+  if (nextVolume !== state.beepVolume) {
+    state.beepVolume = nextVolume;
+    showMessage(`Volume: ${state.beepVolume}`);
+    updateRangeInfo();
+  }
+}
+
+function adjustRange(delta) {
+  const nextIndex = Math.min(
+    RANGE_STEPS.length - 1,
+    Math.max(0, state.rangeStepIndex + delta)
+  );
+  if (nextIndex !== state.rangeStepIndex) {
+    state.rangeStepIndex = nextIndex;
+    state.paintedRotation.clear();
+    showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
+    updateRangeInfo();
+  }
+}
+
+function adjustAlertRadius(delta) {
+  const nextValue = Math.min(20, Math.max(1, state.inboundAlertDistanceKm + delta));
+  if (nextValue !== state.inboundAlertDistanceKm) {
+    state.inboundAlertDistanceKm = nextValue;
+    showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
+    updateRangeInfo();
+  }
 }
 
 function updateAircraftInfo() {
@@ -590,7 +639,7 @@ function drawRadar(deltaTime) {
   ctx.restore();
 
   // sweep update
-  const sweepSpeed = SWEEP_SPEED_STEPS[state.sweepSpeedIndex];
+  const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;
   const sweepAdvance = sweepSpeed * deltaTime;
   const previousAngle = state.sweepAngle;
   state.sweepAngle = (state.sweepAngle + sweepAdvance) % 360;
@@ -709,55 +758,28 @@ function handleKeyDown(event) {
   }
 
   switch (event.key) {
-    case 'm':
-    case 'M':
-      state.controlMode = state.controlMode === 'VOLUME' ? 'SPEED' : 'VOLUME';
-      showMessage(`Mode: ${state.controlMode === 'VOLUME' ? 'Volume' : 'Sweep Speed'}`);
-      break;
     case '+':
     case '=':
-      if (state.controlMode === 'VOLUME') {
-        state.beepVolume = Math.min(20, state.beepVolume + 1);
-        showMessage(`Volume: ${state.beepVolume}`);
-      } else {
-        state.sweepSpeedIndex = Math.min(SWEEP_SPEED_STEPS.length - 1, state.sweepSpeedIndex + 1);
-        state.rotationPeriodMs = 360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex] * 1000;
-        showMessage(`Sweep: ${SWEEP_SPEED_STEPS[state.sweepSpeedIndex]}°/s`);
-      }
+      adjustVolume(1);
       break;
     case '-':
-      if (state.controlMode === 'VOLUME') {
-        state.beepVolume = Math.max(0, state.beepVolume - 1);
-        showMessage(`Volume: ${state.beepVolume}`);
-      } else {
-        state.sweepSpeedIndex = Math.max(0, state.sweepSpeedIndex - 1);
-        state.rotationPeriodMs = 360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex] * 1000;
-        showMessage(`Sweep: ${SWEEP_SPEED_STEPS[state.sweepSpeedIndex]}°/s`);
-      }
+      adjustVolume(-1);
       break;
     case 'ArrowUp':
-      state.rangeStepIndex = Math.min(RANGE_STEPS.length - 1, state.rangeStepIndex + 1);
-      showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
-      state.paintedRotation.clear();
+      adjustRange(1);
       break;
     case 'ArrowDown':
-      state.rangeStepIndex = Math.max(0, state.rangeStepIndex - 1);
-      showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
-      state.paintedRotation.clear();
+      adjustRange(-1);
       break;
     case 'ArrowLeft':
-      state.inboundAlertDistanceKm = Math.max(1, state.inboundAlertDistanceKm - 1);
-      showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
+      adjustAlertRadius(-1);
       break;
     case 'ArrowRight':
-      state.inboundAlertDistanceKm = Math.min(20, state.inboundAlertDistanceKm + 1);
-      showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
+      adjustAlertRadius(1);
       break;
     default:
       return;
   }
-
-  updateRangeInfo();
 }
 
 document.addEventListener('keydown', handleKeyDown, { passive: false });
