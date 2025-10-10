@@ -19,12 +19,58 @@
       <div class="message" id="message"></div>
       <section class="controls">
         <h2>Controls</h2>
-        <ul>
-          <li><kbd>M</kbd> toggle volume / sweep speed</li>
-          <li><kbd>+</kbd> / <kbd>-</kbd> adjust active control</li>
-          <li><kbd>↑</kbd> / <kbd>↓</kbd> change radar range</li>
-          <li><kbd>←</kbd> / <kbd>→</kbd> change inbound alert distance</li>
-        </ul>
+        <div class="control-panel">
+          <div class="control-row">
+            <div class="control-info">
+              <span class="control-name">Mode</span>
+              <span class="control-value" id="mode-label">Volume</span>
+              <span class="control-meta" id="mode-description">Adjust the audio cue loudness.</span>
+            </div>
+            <button type="button" class="control-button primary" id="mode-toggle">Switch to Sweep Speed</button>
+          </div>
+          <div class="control-row">
+            <div class="control-info">
+              <span class="control-name" id="mode-control-label">Volume Level</span>
+              <span class="control-value" id="mode-value">10</span>
+            </div>
+            <div class="control-buttons">
+              <button type="button" class="control-button control-button--square" id="mode-decrease" aria-label="Decrease">
+                &minus;
+              </button>
+              <button type="button" class="control-button control-button--square" id="mode-increase" aria-label="Increase">
+                +
+              </button>
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-info">
+              <span class="control-name">Radar Range</span>
+              <span class="control-value" id="range-value">50 km</span>
+            </div>
+            <div class="control-buttons">
+              <button type="button" class="control-button control-button--square" id="range-decrease" aria-label="Decrease range">
+                &minus;
+              </button>
+              <button type="button" class="control-button control-button--square" id="range-increase" aria-label="Increase range">
+                +
+              </button>
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-info">
+              <span class="control-name">Alert Radius</span>
+              <span class="control-value" id="alert-value">5.0 km</span>
+            </div>
+            <div class="control-buttons">
+              <button type="button" class="control-button control-button--square" id="alert-decrease" aria-label="Decrease alert radius">
+                &minus;
+              </button>
+              <button type="button" class="control-button control-button--square" id="alert-increase" aria-label="Increase alert radius">
+                +
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
       <section class="settings">
         <h2>Server</h2>
