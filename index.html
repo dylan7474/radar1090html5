@@ -92,8 +92,14 @@
       </section>
       <section class="audio">
         <h2>Live Audio</h2>
-        <p class="hint">Play the local airband stream while you monitor traffic.</p>
-        <audio id="airband-stream" class="audio-player" controls preload="none">
+        <p class="hint">The local airband feed plays automatically—use mute if you need quiet.</p>
+        <div class="audio-actions">
+          <button type="button" class="control-button" id="audio-mute-toggle" aria-pressed="false" aria-label="Toggle audio mute">
+            Mute
+          </button>
+          <span class="audio-status" id="audio-status">Connecting…</span>
+        </div>
+        <audio id="airband-stream" preload="none" autoplay>
           Your browser does not support the audio element.
         </audio>
       </section>

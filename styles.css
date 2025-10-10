@@ -220,12 +220,24 @@ main.app {
   gap: 0.75rem;
 }
 
-.audio-player {
-  width: 100%;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 0.4rem;
+.audio-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.audio-status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.audio-status.alert {
+  color: var(--alert);
+}
+
+#airband-stream {
+  display: none;
 }
 
 .radar-container {
