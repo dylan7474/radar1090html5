@@ -2,7 +2,7 @@ const REFRESH_INTERVAL_MS = 5000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
-const SWEEP_SPEED_STEPS = [90, 180, 270, 360];
+const SWEEP_SPEED_DEG_PER_SEC = 90;
 const APP_VERSION = 'v1.1.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
@@ -21,13 +21,11 @@ const versionEl = document.getElementById('version');
 const hostInput = document.getElementById('server-host');
 const portInput = document.getElementById('server-port');
 const applyBtn = document.getElementById('apply-server');
-const modeToggleBtn = document.getElementById('mode-toggle');
-const modeLabelEl = document.getElementById('mode-label');
-const modeDescriptionEl = document.getElementById('mode-description');
-const modeControlLabelEl = document.getElementById('mode-control-label');
-const modeValueEl = document.getElementById('mode-value');
-const modeDecreaseBtn = document.getElementById('mode-decrease');
-const modeIncreaseBtn = document.getElementById('mode-increase');
+const volumeLabelEl = document.getElementById('volume-label');
+const volumeDescriptionEl = document.getElementById('volume-description');
+const volumeValueEl = document.getElementById('volume-value');
+const volumeDecreaseBtn = document.getElementById('volume-decrease');
+const volumeIncreaseBtn = document.getElementById('volume-increase');
 const rangeValueEl = document.getElementById('range-value');
 const rangeDecreaseBtn = document.getElementById('range-decrease');
 const rangeIncreaseBtn = document.getElementById('range-increase');
@@ -77,9 +75,7 @@ const state = {
   lastPingedAircraft: null,
   inboundAlertDistanceKm: INBOUND_ALERT_DISTANCE_KM,
   rangeStepIndex: 3,
-  sweepSpeedIndex: 1,
   beepVolume: 10,
-  controlMode: 'VOLUME',
   sweepAngle: 0,
   lastFrameTime: performance.now(),
   rotationPeriodMs: 0,
@@ -89,7 +85,7 @@ const state = {
   messageUntil: 0,
 };
 
-state.rotationPeriodMs = 360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex] * 1000;
+state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
@@ -156,9 +152,8 @@ applyBtn.addEventListener('click', () => {
     });
 });
 
-modeToggleBtn?.addEventListener('click', toggleControlMode);
-modeDecreaseBtn?.addEventListener('click', () => adjustActiveControl(-1));
-modeIncreaseBtn?.addEventListener('click', () => adjustActiveControl(1));
+volumeDecreaseBtn?.addEventListener('click', () => adjustVolume(-1));
+volumeIncreaseBtn?.addEventListener('click', () => adjustVolume(1));
 rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
 rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
 alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
@@ -252,26 +247,17 @@ function updateMessage() {
 }
 
 function updateRangeInfo() {
-  const mode = state.controlMode === 'VOLUME' ? 'Volume' : 'Sweep Speed';
-  const value = state.controlMode === 'VOLUME'
-    ? `${state.beepVolume}`
-    : `${SWEEP_SPEED_STEPS[state.sweepSpeedIndex]}°/s`;
-  const modeDescription = state.controlMode === 'VOLUME'
-    ? 'Adjust the audio cue loudness.'
-    : 'Adjust the radar sweep rotation speed.';
-
-  if (modeLabelEl) modeLabelEl.textContent = mode;
-  if (modeDescriptionEl) modeDescriptionEl.textContent = modeDescription;
-  if (modeControlLabelEl) modeControlLabelEl.textContent = mode === 'Volume' ? 'Volume Level' : 'Sweep Speed';
-  if (modeValueEl) modeValueEl.textContent = value;
-  if (modeToggleBtn) modeToggleBtn.textContent = mode === 'Volume' ? 'Switch to Sweep Speed' : 'Switch to Volume';
+  if (volumeLabelEl) volumeLabelEl.textContent = 'Volume';
+  if (volumeDescriptionEl) volumeDescriptionEl.textContent = 'Adjust the audio cue loudness.';
+  if (volumeValueEl) volumeValueEl.textContent = `${state.beepVolume}`;
   if (rangeValueEl) rangeValueEl.textContent = `${RANGE_STEPS[state.rangeStepIndex]} km`;
   if (alertValueEl) alertValueEl.textContent = `${state.inboundAlertDistanceKm.toFixed(1)} km`;
 
   const rangeLines = [
     { label: 'Range', value: `${RANGE_STEPS[state.rangeStepIndex]} km` },
     { label: 'Alert', value: `${state.inboundAlertDistanceKm.toFixed(1)} km` },
-    { label: `Mode (${mode})`, value },
+    { label: 'Volume', value: `${state.beepVolume}` },
+    { label: 'Sweep', value: `${SWEEP_SPEED_DEG_PER_SEC}°/s` },
   ];
 
   rangeInfoEl.innerHTML = rangeLines
@@ -279,32 +265,11 @@ function updateRangeInfo() {
     .join('');
 }
 
-function toggleControlMode() {
-  state.controlMode = state.controlMode === 'VOLUME' ? 'SPEED' : 'VOLUME';
-  const label = state.controlMode === 'VOLUME' ? 'Volume' : 'Sweep Speed';
-  showMessage(`Mode: ${label}`);
-  updateRangeInfo();
-}
-
-function adjustActiveControl(delta) {
-  if (state.controlMode === 'VOLUME') {
-    const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
-    if (nextVolume !== state.beepVolume) {
-      state.beepVolume = nextVolume;
-      showMessage(`Volume: ${state.beepVolume}`);
-      updateRangeInfo();
-    }
-    return;
-  }
-
-  const nextIndex = Math.min(
-    SWEEP_SPEED_STEPS.length - 1,
-    Math.max(0, state.sweepSpeedIndex + delta)
-  );
-  if (nextIndex !== state.sweepSpeedIndex) {
-    state.sweepSpeedIndex = nextIndex;
-    state.rotationPeriodMs = (360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex]) * 1000;
-    showMessage(`Sweep: ${SWEEP_SPEED_STEPS[state.sweepSpeedIndex]}°/s`);
+function adjustVolume(delta) {
+  const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
+  if (nextVolume !== state.beepVolume) {
+    state.beepVolume = nextVolume;
+    showMessage(`Volume: ${state.beepVolume}`);
     updateRangeInfo();
   }
 }
@@ -674,7 +639,7 @@ function drawRadar(deltaTime) {
   ctx.restore();
 
   // sweep update
-  const sweepSpeed = SWEEP_SPEED_STEPS[state.sweepSpeedIndex];
+  const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;
   const sweepAdvance = sweepSpeed * deltaTime;
   const previousAngle = state.sweepAngle;
   state.sweepAngle = (state.sweepAngle + sweepAdvance) % 360;
@@ -793,16 +758,12 @@ function handleKeyDown(event) {
   }
 
   switch (event.key) {
-    case 'm':
-    case 'M':
-      toggleControlMode();
-      break;
     case '+':
     case '=':
-      adjustActiveControl(1);
+      adjustVolume(1);
       break;
     case '-':
-      adjustActiveControl(-1);
+      adjustVolume(-1);
       break;
     case 'ArrowUp':
       adjustRange(1);
