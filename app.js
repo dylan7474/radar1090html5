@@ -3,13 +3,15 @@ const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.1.0';
+const APP_VERSION = 'v1.2.1';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
 const FREQ_MID = 1200;
 const FREQ_HIGH = 1800;
 const EARTH_RADIUS_KM = 6371;
+const AUDIO_STREAM_URL = 'http://192.168.50.4:8000/airbands';
+const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
 
 const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
@@ -34,6 +36,9 @@ const alertDecreaseBtn = document.getElementById('alert-decrease');
 const alertIncreaseBtn = document.getElementById('alert-increase');
 const wakeLockStatusEl = document.getElementById('wake-lock-status');
 const wakeLockToggleBtn = document.getElementById('wake-lock-toggle');
+const audioStreamEl = document.getElementById('airband-stream');
+const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
+const audioStatusEl = document.getElementById('audio-status');
 
 const planeIcon = new Image();
 const planeIconState = {
@@ -96,6 +101,9 @@ let wakeLockFallbackPrepared = false;
 let wakeLockFallbackEnabled = false;
 let wakeLockFallbackNeedsGesture = false;
 let wakeLockAudioContext = null;
+let audioStreamError = false;
+let audioAutoplayBlocked = false;
+let audioUnlockListenerAttached = false;
 
 function isWakeLockActive() {
   if (wakeLockSentinel) {
@@ -130,6 +138,95 @@ function updateWakeLockUi() {
     state.wakeLockEnabled ? 'Disable screen wake lock' : 'Enable screen wake lock'
   );
   wakeLockToggleBtn.classList.toggle('primary', state.wakeLockEnabled);
+}
+
+function updateAudioStatus(text, options = {}) {
+  if (!audioStatusEl) {
+    return;
+  }
+
+  const { alert = false } = options;
+  audioStatusEl.textContent = text;
+  audioStatusEl.classList.toggle('alert', alert);
+}
+
+function refreshAudioStreamControls() {
+  if (!audioStreamEl) {
+    return;
+  }
+
+  const isMuted = audioStreamEl.muted;
+  if (audioMuteToggleBtn) {
+    audioMuteToggleBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+    audioMuteToggleBtn.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
+    audioMuteToggleBtn.classList.toggle('primary', !isMuted && !audioStreamError && !audioAutoplayBlocked);
+  }
+
+  if (audioStreamError) {
+    updateAudioStatus('Stream unavailable', { alert: true });
+    return;
+  }
+
+  if (audioAutoplayBlocked && !isMuted) {
+    updateAudioStatus('Tap to enable audio');
+    return;
+  }
+
+  if (isMuted) {
+    updateAudioStatus('Muted');
+    return;
+  }
+
+  if (audioStreamEl.paused) {
+    updateAudioStatus('Connecting…');
+    return;
+  }
+
+  updateAudioStatus('Live');
+}
+
+function ensureAudioUnlockListener() {
+  if (audioUnlockListenerAttached) {
+    return;
+  }
+
+  const handleFirstInteraction = () => {
+    audioUnlockListenerAttached = false;
+    if (audioStreamEl && !audioStreamEl.muted) {
+      attemptAudioPlayback();
+    }
+  };
+
+  audioUnlockListenerAttached = true;
+  document.addEventListener('pointerdown', handleFirstInteraction, { once: true });
+}
+
+function attemptAudioPlayback() {
+  if (!audioStreamEl) {
+    return Promise.resolve();
+  }
+
+  return audioStreamEl
+    .play()
+    .then(() => {
+      audioAutoplayBlocked = false;
+      audioStreamError = false;
+      refreshAudioStreamControls();
+    })
+    .catch((error) => {
+      if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
+        audioAutoplayBlocked = true;
+        ensureAudioUnlockListener();
+      } else {
+        audioStreamError = true;
+        showMessage('Audio stream unavailable. Check the receiver.', {
+          alert: true,
+          duration: DISPLAY_TIMEOUT_MS * 2,
+        });
+        console.warn('Unable to start audio stream', error);
+      }
+      refreshAudioStreamControls();
+    });
 }
 
 function setWakeLockEnabled(enabled) {
@@ -361,6 +458,52 @@ if (versionEl) {
   versionEl.setAttribute('title', `Build ${APP_VERSION}`);
 }
 
+if (audioStreamEl) {
+  audioStreamEl.src = AUDIO_STREAM_URL;
+  const savedMuted = localStorage.getItem(AUDIO_MUTED_STORAGE_KEY);
+  audioStreamEl.muted = savedMuted === 'true';
+
+  refreshAudioStreamControls();
+
+  audioStreamEl.addEventListener('playing', () => {
+    audioStreamError = false;
+    audioAutoplayBlocked = false;
+    refreshAudioStreamControls();
+  });
+
+  audioStreamEl.addEventListener('pause', () => {
+    if (!audioStreamEl.muted) {
+      refreshAudioStreamControls();
+    }
+  });
+
+  audioStreamEl.addEventListener('waiting', () => {
+    audioStreamError = false;
+    refreshAudioStreamControls();
+  });
+
+  audioStreamEl.addEventListener('stalled', () => {
+    audioStreamError = false;
+    refreshAudioStreamControls();
+  });
+
+  audioStreamEl.addEventListener('ended', () => {
+    attemptAudioPlayback();
+  });
+
+  audioStreamEl.addEventListener('error', (event) => {
+    audioStreamError = true;
+    refreshAudioStreamControls();
+    showMessage('Audio stream unavailable. Check the receiver.', {
+      alert: true,
+      duration: DISPLAY_TIMEOUT_MS * 2,
+    });
+    console.warn('Audio stream error', event);
+  });
+
+  attemptAudioPlayback();
+}
+
 applyBtn.addEventListener('click', () => {
   const rawHost = hostInput.value.trim();
   if (!rawHost) {
@@ -416,6 +559,30 @@ applyBtn.addEventListener('click', () => {
     .catch((error) => {
       showMessage(`Unable to reach server: ${error.message}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 4 });
     });
+});
+
+audioMuteToggleBtn?.addEventListener('click', () => {
+  if (!audioStreamEl) {
+    return;
+  }
+
+  const shouldMute = !audioStreamEl.muted;
+  audioStreamEl.muted = shouldMute;
+
+  try {
+    localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, shouldMute ? 'true' : 'false');
+  } catch (error) {
+    console.warn('Unable to persist audio mute preference', error);
+  }
+
+  if (shouldMute) {
+    refreshAudioStreamControls();
+    return;
+  }
+
+  audioStreamError = false;
+  refreshAudioStreamControls();
+  attemptAudioPlayback();
 });
 
 volumeDecreaseBtn?.addEventListener('click', () => adjustVolume(-1));
