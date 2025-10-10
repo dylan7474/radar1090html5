@@ -56,7 +56,8 @@ const state = {
   running: true,
   trackedAircraft: [],
   previousPositions: new Map(),
-  paintedThisTurn: new Set(),
+  paintedRotation: new Map(),
+  currentSweepId: 0,
   activeBlips: [],
   lastPingedAircraft: null,
   inboundAlertDistanceKm: INBOUND_ALERT_DISTANCE_KM,
@@ -168,6 +169,14 @@ function calculateHeading(prev, curr) {
   if (!prev) return curr.bearing;
   const delta = calculateBearing(prev.lat, prev.lon, curr.lat, curr.lon);
   return Number.isFinite(delta) ? delta : curr.bearing;
+}
+
+function getCraftKey(craft) {
+  if (craft.hex) return craft.hex;
+  if (craft.flight) return craft.flight;
+  const lat = Number.isFinite(craft.lat) ? craft.lat.toFixed(3) : 'na';
+  const lon = Number.isFinite(craft.lon) ? craft.lon.toFixed(3) : 'na';
+  return `${lat},${lon}`;
 }
 
 function getBeepFrequencyForAltitude(altitude) {
@@ -351,7 +360,7 @@ async function pollData() {
       state.dataConnectionOk = false;
       state.trackedAircraft = [];
       state.previousPositions.clear();
-      state.paintedThisTurn.clear();
+      state.paintedRotation.clear();
       state.activeBlips = [];
       state.server.basePath = null;
       showMessage('Failed to fetch aircraft data. Check server settings.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
@@ -431,6 +440,8 @@ function processAircraftData(data) {
       inbound: false,
     };
 
+    craft.key = getCraftKey(craft);
+
     const inboundResult = evaluateInbound(craft);
     craft.inbound = inboundResult.inbound;
     if (inboundResult.inbound) {
@@ -446,7 +457,15 @@ function processAircraftData(data) {
 
   state.trackedAircraft = aircraft;
   state.previousPositions = nextPositions;
-  state.paintedThisTurn = new Set();
+
+  if (state.paintedRotation.size > 0) {
+    const activeKeys = new Set(aircraft.map((craft) => craft.key));
+    for (const key of state.paintedRotation.keys()) {
+      if (!activeKeys.has(key)) {
+        state.paintedRotation.delete(key);
+      }
+    }
+  }
 
   if (inboundNames.length > 0) {
     const unique = [...new Set(inboundNames)];
@@ -558,6 +577,15 @@ function drawRadar(deltaTime) {
   const previousAngle = state.sweepAngle;
   state.sweepAngle = (state.sweepAngle + sweepAdvance) % 360;
   const sweepWrapped = state.sweepAngle < previousAngle;
+  if (sweepWrapped) {
+    // Increment the sweep identifier when a rotation completes so we can
+    // track which aircraft have been painted for the current pass.
+    state.currentSweepId += 1;
+    if (state.currentSweepId > Number.MAX_SAFE_INTEGER - 1) {
+      state.currentSweepId = 0;
+      state.paintedRotation.clear();
+    }
+  }
 
   // sweep arc
   const sweepStart = deg2rad(state.sweepAngle - 2);
@@ -583,7 +611,8 @@ function drawRadar(deltaTime) {
   const newBlips = [];
 
   for (const craft of state.trackedAircraft) {
-    if (!state.paintedThisTurn.has(craft.hex || craft.flight)) {
+    const key = craft.key || getCraftKey(craft);
+    if (state.paintedRotation.get(key) !== state.currentSweepId) {
       const target = craft.bearing;
       const crossed =
         (!sweepWrapped && previousAngle <= target && state.sweepAngle >= target) ||
@@ -603,7 +632,7 @@ function drawRadar(deltaTime) {
           minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
           hex: craft.hex || craft.flight,
         });
-        state.paintedThisTurn.add(craft.hex || craft.flight);
+        state.paintedRotation.set(key, state.currentSweepId);
         state.lastPingedAircraft = craft;
         playBeep(getBeepFrequencyForAltitude(craft.altitude), 50);
       }
@@ -688,12 +717,12 @@ function handleKeyDown(event) {
     case 'ArrowUp':
       state.rangeStepIndex = Math.min(RANGE_STEPS.length - 1, state.rangeStepIndex + 1);
       showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
-      state.paintedThisTurn.clear();
+      state.paintedRotation.clear();
       break;
     case 'ArrowDown':
       state.rangeStepIndex = Math.max(0, state.rangeStepIndex - 1);
       showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
-      state.paintedThisTurn.clear();
+      state.paintedRotation.clear();
       break;
     case 'ArrowLeft':
       state.inboundAlertDistanceKm = Math.max(1, state.inboundAlertDistanceKm - 1);
