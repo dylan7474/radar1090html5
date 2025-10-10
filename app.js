@@ -182,6 +182,13 @@ function forwardAngleDelta(from, to) {
   return (to - from + 360) % 360;
 }
 
+function canvasAngleFromNorth(angleDeg) {
+  // Canvas angles start at the positive X axis (east) whereas our sweep logic is
+  // based on 0° being north. Adjust by 90° so the rendered beam lines up with
+  // the computed sweep angle.
+  return deg2rad(angleDeg - 90);
+}
+
 function getCraftKey(craft) {
   if (craft.hex) return craft.hex;
   if (craft.flight) return craft.flight;
@@ -601,8 +608,10 @@ function drawRadar(deltaTime) {
   }
 
   // sweep arc
-  const sweepStart = deg2rad(state.sweepAngle - 2);
-  const sweepEnd = deg2rad(state.sweepAngle + 2);
+  const sweepCenter = canvasAngleFromNorth(state.sweepAngle);
+  const sweepHalfWidth = deg2rad(2);
+  const sweepStart = sweepCenter - sweepHalfWidth;
+  const sweepEnd = sweepCenter + sweepHalfWidth;
   const sweepGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radarRadius);
   sweepGradient.addColorStop(0, 'rgba(53,255,153,0.6)');
   sweepGradient.addColorStop(1, 'rgba(53,255,153,0)');
