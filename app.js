@@ -87,6 +87,50 @@ const state = {
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 
+let wakeLockSentinel = null;
+
+async function requestScreenWakeLock() {
+  if (!('wakeLock' in navigator)) {
+    return;
+  }
+
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    wakeLockSentinel.addEventListener('release', () => {
+      wakeLockSentinel = null;
+      if (document.visibilityState === 'visible') {
+        requestScreenWakeLock().catch(() => {});
+      }
+    });
+  } catch (error) {
+    wakeLockSentinel = null;
+    console.warn('Unable to acquire screen wake lock', error);
+  }
+}
+
+function releaseScreenWakeLock() {
+  if (!wakeLockSentinel) {
+    return;
+  }
+
+  wakeLockSentinel
+    .release()
+    .catch((error) => {
+      console.warn('Error releasing wake lock', error);
+    })
+    .finally(() => {
+      wakeLockSentinel = null;
+    });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    requestScreenWakeLock().catch(() => {});
+  } else {
+    releaseScreenWakeLock();
+  }
+});
+
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
 
@@ -772,41 +816,6 @@ function drawRadar(deltaTime) {
   updateAircraftInfo();
 }
 
-function handleKeyDown(event) {
-  if (event.target instanceof HTMLInputElement) return;
-  const key = event.key.toLowerCase();
-  const prevent = ['arrowup', 'arrowdown', 'arrowleft', 'arrowright', '+', '-', '='];
-  if (prevent.includes(key) || event.key === '+' || event.key === '-') {
-    event.preventDefault();
-  }
-
-  switch (event.key) {
-    case '+':
-    case '=':
-      adjustVolume(1);
-      break;
-    case '-':
-      adjustVolume(-1);
-      break;
-    case 'ArrowUp':
-      adjustRange(1);
-      break;
-    case 'ArrowDown':
-      adjustRange(-1);
-      break;
-    case 'ArrowLeft':
-      adjustAlertRadius(-1);
-      break;
-    case 'ArrowRight':
-      adjustAlertRadius(1);
-      break;
-    default:
-      return;
-  }
-}
-
-document.addEventListener('keydown', handleKeyDown, { passive: false });
-
 function loop() {
   if (!state.running) return;
   const now = performance.now();
@@ -821,4 +830,5 @@ updateRangeInfo();
 updateAircraftInfo();
 fetchReceiverLocation().catch(() => {});
 pollData();
+requestScreenWakeLock().catch(() => {});
 requestAnimationFrame(loop);
