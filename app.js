@@ -88,9 +88,17 @@ const state = {
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 
 let wakeLockSentinel = null;
+let wakeLockFallbackPrepared = false;
+let wakeLockFallbackEnabled = false;
+let wakeLockAudioContext = null;
 
 async function requestScreenWakeLock() {
+  if (document.visibilityState !== 'visible') {
+    return;
+  }
+
   if (!('wakeLock' in navigator)) {
+    enableWakeLockFallback();
     return;
   }
 
@@ -105,6 +113,7 @@ async function requestScreenWakeLock() {
   } catch (error) {
     wakeLockSentinel = null;
     console.warn('Unable to acquire screen wake lock', error);
+    enableWakeLockFallback();
   }
 }
 
@@ -123,13 +132,110 @@ function releaseScreenWakeLock() {
     });
 }
 
+function prepareWakeLockFallback() {
+  if (wakeLockFallbackPrepared) {
+    return;
+  }
+
+  wakeLockFallbackPrepared = true;
+  const triggerEvents = ['pointerdown', 'touchstart', 'click'];
+  const handleInteraction = () => {
+    if (!wakeLockFallbackEnabled) {
+      return;
+    }
+    resumeWakeLockFallback().catch(() => {});
+  };
+
+  triggerEvents.forEach((eventName) => {
+    document.addEventListener(eventName, handleInteraction, { passive: true });
+  });
+}
+
+function enableWakeLockFallback() {
+  prepareWakeLockFallback();
+  wakeLockFallbackEnabled = true;
+  resumeWakeLockFallback().catch(() => {});
+}
+
+async function resumeWakeLockFallback() {
+  if (!wakeLockFallbackEnabled) {
+    return;
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+
+  if (!wakeLockAudioContext) {
+    try {
+      const audioContext = new AudioContextCtor();
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 0.001;
+      const oscillator = audioContext.createOscillator();
+      oscillator.frequency.value = 1;
+      oscillator.type = 'square';
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start();
+      wakeLockAudioContext = audioContext;
+    } catch (error) {
+      console.warn('Unable to activate wake lock audio fallback', error);
+      wakeLockFallbackEnabled = false;
+    }
+    return;
+  }
+
+  if (wakeLockAudioContext.state === 'suspended') {
+    try {
+      await wakeLockAudioContext.resume();
+    } catch (error) {
+      console.warn('Unable to resume wake lock audio fallback', error);
+    }
+  }
+}
+
+function suspendWakeLockFallback() {
+  if (!wakeLockFallbackEnabled || !wakeLockAudioContext) {
+    return;
+  }
+
+  if (wakeLockAudioContext.state === 'running') {
+    wakeLockAudioContext.suspend().catch((error) => {
+      console.warn('Unable to suspend wake lock audio fallback', error);
+    });
+  }
+}
+
+function shutdownWakeLockFallback() {
+  wakeLockFallbackEnabled = false;
+  if (!wakeLockAudioContext) {
+    return;
+  }
+
+  const context = wakeLockAudioContext;
+  wakeLockAudioContext = null;
+  context.close().catch((error) => {
+    console.warn('Unable to close wake lock audio fallback', error);
+  });
+}
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     requestScreenWakeLock().catch(() => {});
+    resumeWakeLockFallback().catch(() => {});
   } else {
     releaseScreenWakeLock();
+    suspendWakeLockFallback();
   }
 });
+
+window.addEventListener('beforeunload', () => {
+  releaseScreenWakeLock();
+  shutdownWakeLockFallback();
+});
+
+prepareWakeLockFallback();
 
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
