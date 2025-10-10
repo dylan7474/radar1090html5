@@ -136,6 +136,7 @@ let wakeLockAudioContext = null;
 let audioStreamError = false;
 let audioAutoplayBlocked = false;
 let audioUnlockListenerAttached = false;
+let audioAutoUnmutePending = false;
 
 function isWakeLockActive() {
   if (wakeLockSentinel) {
@@ -182,12 +183,19 @@ function updateAudioStatus(text, options = {}) {
   audioStatusEl.classList.toggle('alert', alert);
 }
 
+function isAudioEffectivelyMuted() {
+  if (!audioStreamEl) {
+    return true;
+  }
+  return audioStreamEl.muted && !audioAutoUnmutePending;
+}
+
 function refreshAudioStreamControls() {
   if (!audioStreamEl) {
     return;
   }
 
-  const isMuted = audioStreamEl.muted;
+  const isMuted = isAudioEffectivelyMuted();
   if (audioMuteToggleBtn) {
     audioMuteToggleBtn.textContent = isMuted ? 'Unmute' : 'Mute';
     audioMuteToggleBtn.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
@@ -210,7 +218,7 @@ function refreshAudioStreamControls() {
   }
 
   if (audioStreamEl.paused) {
-    updateAudioStatus('Connecting…');
+    updateAudioStatus(audioAutoUnmutePending ? 'Starting audio…' : 'Connecting…');
     return;
   }
 
@@ -224,7 +232,7 @@ function ensureAudioUnlockListener() {
 
   const handleFirstInteraction = () => {
     audioUnlockListenerAttached = false;
-    if (audioStreamEl && !audioStreamEl.muted) {
+    if (audioStreamEl && !isAudioEffectivelyMuted()) {
       attemptAudioPlayback();
     }
   };
@@ -489,8 +497,30 @@ if (versionEl) {
 
 if (audioStreamEl) {
   audioStreamEl.src = AUDIO_STREAM_URL;
+  audioStreamEl.autoplay = true;
+  audioStreamEl.playsInline = true;
   const savedMuted = localStorage.getItem(AUDIO_MUTED_STORAGE_KEY);
-  audioStreamEl.muted = savedMuted === 'true';
+  const shouldStartMuted = savedMuted === 'true';
+  audioAutoUnmutePending = !shouldStartMuted;
+  audioStreamEl.muted = true;
+
+  const finalizeAutoUnmute = () => {
+    if (!audioAutoUnmutePending || audioStreamEl.paused) {
+      return;
+    }
+    audioStreamEl.muted = false;
+    audioAutoUnmutePending = false;
+    try {
+      localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, 'false');
+    } catch (error) {
+      console.warn('Unable to persist audio mute preference', error);
+    }
+    refreshAudioStreamControls();
+  };
+
+  if (shouldStartMuted) {
+    audioAutoUnmutePending = false;
+  }
 
   refreshAudioStreamControls();
 
@@ -498,6 +528,7 @@ if (audioStreamEl) {
     audioStreamError = false;
     audioAutoplayBlocked = false;
     refreshAudioStreamControls();
+    finalizeAutoUnmute();
   });
 
   audioStreamEl.addEventListener('pause', () => {
@@ -530,7 +561,17 @@ if (audioStreamEl) {
     console.warn('Audio stream error', event);
   });
 
-  attemptAudioPlayback();
+  audioStreamEl.addEventListener('canplay', finalizeAutoUnmute);
+  audioStreamEl.addEventListener('loadeddata', finalizeAutoUnmute);
+
+  attemptAudioPlayback().then(finalizeAutoUnmute);
+  if (shouldStartMuted) {
+    try {
+      localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, 'true');
+    } catch (error) {
+      console.warn('Unable to persist audio mute preference', error);
+    }
+  }
 }
 
 audioMuteToggleBtn?.addEventListener('click', () => {
@@ -538,7 +579,9 @@ audioMuteToggleBtn?.addEventListener('click', () => {
     return;
   }
 
-  const shouldMute = !audioStreamEl.muted;
+  const currentlyMuted = isAudioEffectivelyMuted();
+  const shouldMute = !currentlyMuted;
+  audioAutoUnmutePending = false;
   audioStreamEl.muted = shouldMute;
 
   try {
