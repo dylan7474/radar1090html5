@@ -3,6 +3,7 @@ const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const SWEEP_SPEED_STEPS = [90, 180, 270, 360];
+const APP_VERSION = 'v1.1.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -16,6 +17,7 @@ const statusEl = document.getElementById('status');
 const aircraftInfoEl = document.getElementById('aircraft-info');
 const rangeInfoEl = document.getElementById('range-info');
 const messageEl = document.getElementById('message');
+const versionEl = document.getElementById('version');
 const hostInput = document.getElementById('server-host');
 const portInput = document.getElementById('server-port');
 const applyBtn = document.getElementById('apply-server');
@@ -78,6 +80,11 @@ state.rotationPeriodMs = 360 / SWEEP_SPEED_STEPS[state.sweepSpeedIndex] * 1000;
 
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
+
+if (versionEl) {
+  versionEl.textContent = APP_VERSION;
+  versionEl.setAttribute('title', `Build ${APP_VERSION}`);
+}
 
 applyBtn.addEventListener('click', () => {
   const rawHost = hostInput.value.trim();
@@ -169,6 +176,10 @@ function calculateHeading(prev, curr) {
   if (!prev) return curr.bearing;
   const delta = calculateBearing(prev.lat, prev.lon, curr.lat, curr.lon);
   return Number.isFinite(delta) ? delta : curr.bearing;
+}
+
+function forwardAngleDelta(from, to) {
+  return (to - from + 360) % 360;
 }
 
 function getCraftKey(craft) {
@@ -577,6 +588,8 @@ function drawRadar(deltaTime) {
   const previousAngle = state.sweepAngle;
   state.sweepAngle = (state.sweepAngle + sweepAdvance) % 360;
   const sweepWrapped = state.sweepAngle < previousAngle;
+  const sweepDelta = forwardAngleDelta(previousAngle, state.sweepAngle);
+  const sweepTolerance = Math.min(2.5, Math.max(0.75, sweepAdvance * 0.6));
   if (sweepWrapped) {
     // Increment the sweep identifier when a rotation completes so we can
     // track which aircraft have been painted for the current pass.
@@ -614,9 +627,8 @@ function drawRadar(deltaTime) {
     const key = craft.key || getCraftKey(craft);
     if (state.paintedRotation.get(key) !== state.currentSweepId) {
       const target = craft.bearing;
-      const crossed =
-        (!sweepWrapped && previousAngle <= target && state.sweepAngle >= target) ||
-        (sweepWrapped && (target >= previousAngle || target <= state.sweepAngle));
+      const distanceFromPrevious = forwardAngleDelta(previousAngle, target);
+      const crossed = distanceFromPrevious <= sweepDelta + sweepTolerance;
       if (crossed) {
         const angleRad = deg2rad(target);
         const screenRadius = Math.min(1, craft.distanceKm / radarRangeKm) * radarRadius;
