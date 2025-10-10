@@ -28,8 +28,8 @@ body {
 main.app {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  width: min(100%, 1600px);
-  gap: clamp(1.5rem, 3vw, 3rem);
+  width: min(100%, 1920px);
+  gap: clamp(1.25rem, 3vw, 3rem);
   padding: clamp(1.25rem, 3vw, 3rem);
   margin: 0 auto;
 }
@@ -218,13 +218,13 @@ main.app {
 .radar-container {
   background: rgba(0, 0, 0, 0.25);
   border-radius: 20px;
-  padding: clamp(1rem, 2.25vw, 2.5rem);
+  padding: clamp(0.75rem, 2vw, 2.5rem);
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(255, 255, 255, 0.05);
   position: relative;
-  min-height: min(80vh, 900px);
+  min-height: min(82vh, 1000px);
   width: 100%;
 }
 
@@ -245,12 +245,13 @@ main.app {
 
 canvas#radar {
   width: 100%;
-  max-width: 1300px;
-  max-height: min(78vh, 820px);
-  aspect-ratio: 3 / 2;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: 1 / 1;
   height: auto;
   border-radius: 14px;
   background: transparent;
+  display: block;
 }
 
 @media (max-width: 900px) {
