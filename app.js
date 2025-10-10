@@ -20,6 +20,24 @@ const hostInput = document.getElementById('server-host');
 const portInput = document.getElementById('server-port');
 const applyBtn = document.getElementById('apply-server');
 
+const planeIcon = new Image();
+const planeIconState = {
+  ready: false,
+  aspect: 1,
+};
+planeIcon.decoding = 'async';
+planeIcon.addEventListener('load', () => {
+  planeIconState.ready = true;
+  planeIconState.aspect = planeIcon.naturalWidth > 0
+    ? planeIcon.naturalHeight / planeIcon.naturalWidth
+    : 1;
+});
+planeIcon.addEventListener('error', (error) => {
+  planeIconState.ready = false;
+  console.warn('Failed to load plane icon', error);
+});
+planeIcon.src = 'plane.png';
+
 const DEFAULT_BASE_PATH = 'dump1090-fa/data';
 const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
 
@@ -459,6 +477,39 @@ function evaluateInbound(craft) {
   return { inbound, name, minutesToBase };
 }
 
+function drawBlipMarker(blip, radarRadius, alpha) {
+  if (planeIconState.ready) {
+    const baseSize = radarRadius * 0.14;
+    const width = baseSize;
+    const height = baseSize * planeIconState.aspect;
+    const headingRad = deg2rad(blip.heading);
+    ctx.save();
+    ctx.translate(blip.x, blip.y);
+    if (blip.inbound) {
+      const pulseAlpha = Math.max(0.3, alpha);
+      const highlightRadius = Math.max(width, height) * 0.55;
+      ctx.globalAlpha = pulseAlpha;
+      ctx.fillStyle = 'rgba(255,103,103,0.35)';
+      ctx.beginPath();
+      ctx.arc(0, 0, highlightRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.rotate(headingRad);
+    ctx.globalAlpha = blip.inbound ? Math.max(0.6, alpha) : alpha;
+    ctx.drawImage(planeIcon, -width / 2, -height / 2, width, height);
+    ctx.restore();
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = blip.inbound ? Math.max(0.2, alpha) : alpha * 0.9;
+  ctx.fillStyle = blip.inbound ? 'rgba(255,103,103,1)' : 'rgba(53,255,153,1)';
+  ctx.beginPath();
+  ctx.arc(blip.x, blip.y, radarRadius * 0.02, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawRadar(deltaTime) {
   resizeCanvas();
   const { width, height } = canvas;
@@ -570,29 +621,29 @@ function drawRadar(deltaTime) {
   for (const blip of state.activeBlips) {
     const age = (now - blip.spawn) / rotationPeriod;
     const alpha = Math.max(0, 1 - age);
-    ctx.save();
-    ctx.globalAlpha = blip.inbound ? Math.max(0.2, alpha) : alpha * 0.9;
-    ctx.fillStyle = blip.inbound ? 'rgba(255,103,103,1)' : 'rgba(53,255,153,1)';
-    ctx.beginPath();
-    ctx.arc(blip.x, blip.y, radarRadius * 0.02, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = blip.inbound ? 'rgba(255,103,103,0.8)' : 'rgba(53,255,153,0.6)';
-    ctx.lineWidth = radarRadius * 0.0025;
     const headingRad = deg2rad(blip.heading);
+
+    ctx.save();
+    ctx.globalAlpha = blip.inbound ? Math.max(0.25, alpha) : alpha * 0.8;
+    ctx.strokeStyle = blip.inbound ? 'rgba(255,103,103,0.8)' : 'rgba(53,255,153,0.7)';
+    ctx.lineWidth = radarRadius * 0.0025;
     ctx.beginPath();
     ctx.moveTo(blip.x, blip.y);
     ctx.lineTo(blip.x + Math.sin(headingRad) * radarRadius * 0.05, blip.y - Math.cos(headingRad) * radarRadius * 0.05);
     ctx.stroke();
+    ctx.restore();
+
+    drawBlipMarker(blip, radarRadius, alpha);
 
     if (blip.minutesToBase != null && blip.inbound) {
+      ctx.save();
       ctx.globalAlpha = 1;
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.font = `${Math.round(radarRadius * 0.06)}px "Share Tech Mono", monospace`;
       ctx.textAlign = 'center';
       ctx.fillText(`${blip.minutesToBase}m`, blip.x, blip.y - radarRadius * 0.04);
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   updateMessage();
