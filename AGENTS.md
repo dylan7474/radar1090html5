@@ -22,4 +22,8 @@
 
 ## Documentation
 - Update `README.md` when adding new user-visible capabilities or configuration requirements.
+- Keep prose concise but actionable—favor bullet lists over dense paragraphs when outlining
+  steps or requirements.
 - Note any new development or build prerequisites introduced by your changes.
+- When documenting commands, prefer fenced code blocks with explicit shells (e.g.
+  `bash`) so syntax highlighting works across viewers.
