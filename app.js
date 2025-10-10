@@ -95,6 +95,39 @@ const state = {
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 
+function joinUrlPath(...segments) {
+  return segments
+    .filter(Boolean)
+    .map((segment) => segment.replace(/^\/+|\/+$/g, ''))
+    .join('/');
+}
+
+function getDump1090Origin() {
+  const { protocol, host, port } = state.server;
+  if (!protocol || !host) {
+    return null;
+  }
+
+  try {
+    const origin = new URL(`${protocol}://${host}`);
+    if (port) {
+      origin.port = String(port);
+    }
+    return origin;
+  } catch (error) {
+    console.warn('Invalid dump1090 server configuration', error);
+    return null;
+  }
+}
+
+function formatServerAddress() {
+  const { host, port } = state.server;
+  if (!host) {
+    return 'unconfigured';
+  }
+  return port ? `${host}:${port}` : host;
+}
+
 let wakeLockSentinel = null;
 let wakeLockFallbackPrepared = false;
 let wakeLockFallbackEnabled = false;
@@ -692,7 +725,7 @@ function updateAircraftInfo() {
 
 function updateStatus() {
   const status = state.dataConnectionOk ? 'Connected' : 'Waiting for data…';
-  statusEl.textContent = `${status} – ${state.server.host}:${state.server.port}`;
+  statusEl.textContent = `${status} – ${formatServerAddress()}`;
 }
 
 function resizeCanvas() {
@@ -739,10 +772,14 @@ function playBeep(freq, durationMs) {
 }
 
 function buildUrl(path) {
-  const { protocol, host, port, basePath } = state.server;
-  const safeBase = (basePath || DEFAULT_BASE_PATH).replace(/^\/+|\/+$/g, '');
-  const portPart = port ? `:${port}` : '';
-  return `${protocol}://${host}${portPart}/${safeBase}/${path}`;
+  const origin = getDump1090Origin();
+  if (!origin) {
+    throw new Error('Dump1090 server is not configured');
+  }
+
+  const basePath = state.server.basePath || DEFAULT_BASE_PATH;
+  const resourcePath = joinUrlPath(basePath, path);
+  return new URL(resourcePath, `${origin.origin}/`).toString();
 }
 
 async function fetchJson(url, { timeout = 4000 } = {}) {
@@ -813,8 +850,9 @@ async function pollData() {
 }
 
 async function determineServerBasePath() {
-  const { host, port, protocol, basePath } = state.server;
-  if (!host) return null;
+  const { basePath } = state.server;
+  const origin = getDump1090Origin();
+  if (!origin) return null;
 
   const candidates = basePath
     ? [basePath, ...SERVER_PATH_OPTIONS.filter((option) => option !== basePath)]
@@ -823,8 +861,7 @@ async function determineServerBasePath() {
   let lastError = null;
   for (const candidate of candidates) {
     const safeCandidate = candidate.replace(/^\/+|\/+$/g, '');
-    const portPart = port ? `:${port}` : '';
-    const url = `${protocol}://${host}${portPart}/${safeCandidate}/receiver.json`;
+    const url = new URL(joinUrlPath(safeCandidate, 'receiver.json'), `${origin.origin}/`).toString();
     try {
       await fetchJson(url, { timeout: 2500 });
       state.server.basePath = safeCandidate;

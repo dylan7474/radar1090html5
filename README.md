@@ -20,7 +20,7 @@ needed to run the web dashboard from any modern browser.
 
 ## Features
 
-- Retro-styled radar display that connects to a preconfigured `dump1090-fa` server at `192.168.50.100`.
+- Retro-styled radar display that connects to a preconfigured `dump1090-fa` server at `192.168.50.100:8080`.
 - Keyboard controls that mirror the original desktop client for muscle-memory parity.
 - Optional screen wake-lock support with an audio-based fallback for browsers that lack
   the Wake Lock API.
@@ -54,8 +54,9 @@ All user-facing preferences persist automatically. To clear them, remove the
 `radar1090` entry from `localStorage` via your browser's developer tools.
 
 For environments with non-standard JSON paths or alternate hosts, update the
-`DUMP1090_SERVER` configuration near the top of `app.js`. The relevant fetch logic
-continues to live in `loadAircraftData` and `loadReceiverData`.
+`DUMP1090_SERVER` configuration near the top of `app.js`. The polling helpers use
+that origin when constructing URLs, so changing the host or port there is all
+that is required.
 
 ## Keyboard Controls
 
