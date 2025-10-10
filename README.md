@@ -1,45 +1,92 @@
 # radar1090 HTML5
 
-Closest Plane Radar is now a standalone HTML5 experience. The native SDL build and
-its supporting assets have been removed so the repository contains only the files
-needed to run the web dashboard.
+Closest Plane Radar now ships as a standalone HTML5 experience. The native SDL build
+and its supporting assets have been removed so the repository contains only the files
+needed to run the web dashboard from any modern browser.
+
+---
+
+## Table of Contents
+
+1. [Features](#features)
+2. [Requirements](#requirements)
+3. [Quick Start](#quick-start)
+4. [Configuration](#configuration)
+5. [Keyboard Controls](#keyboard-controls)
+6. [Troubleshooting](#troubleshooting)
+7. [Development](#development)
+
+---
 
 ## Features
 
-- Retro-styled radar display that connects to a dump1090-fa server.
-- Keyboard controls that mirror the original desktop client.
-- Optional screen wake lock support with an audio-based fallback.
+- Retro-styled radar display that connects to a `dump1090-fa` server.
+- Keyboard controls that mirror the original desktop client for muscle-memory parity.
+- Optional screen wake-lock support with an audio-based fallback for browsers that lack
+  the Wake Lock API.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
+- Persistent configuration via `localStorage`, including server settings, receiver
+  coordinates, wake-lock preference, and audio mute state.
 
-## Getting Started
+## Requirements
 
-Open `index.html` in a modern browser (Chrome, Edge, Firefox, or Safari).
+- A running instance of `dump1090-fa` with the JSON endpoints exposed (e.g.
+  `http://HOST:PORT/dump1090-fa/data`).
+- A modern Chromium-, WebKit-, or Gecko-based browser (recent versions of Chrome, Edge,
+  Firefox, or Safari).
+- Optional: access to the companion airband audio stream if you want synced radio audio.
 
-1. Enter the host and port of your dump1090-fa server in the sidebar.
-   The server must expose the JSON endpoints (e.g. `http://HOST:PORT/dump1090-fa/data`).
-2. Click **Apply** to begin polling `receiver.json` and `aircraft.json` every five seconds.
-3. The **Live Audio** section starts the airband feed automatically—tap the mute toggle
-   if you need to silence it temporarily.
+## Quick Start
 
-The browser stores your server settings, receiver coordinates, wake-lock preference,
-and audio mute preference in `localStorage` so your setup is preserved between visits.
+1. Clone or download this repository.
+2. Open `index.html` directly in your browser or serve the repo through a static file
+   host (e.g. `python3 -m http.server`).
+3. Enter the host and port of your `dump1090-fa` server in the sidebar form.
+4. Click **Apply** to begin polling `receiver.json` and `aircraft.json` every five
+   seconds.
+5. Adjust the wake-lock and audio controls as needed. The **Live Audio** section starts
+   the airband feed automatically—tap the mute toggle if you need to silence it
+   temporarily.
 
-### Keyboard Controls
+## Configuration
 
-- `m` toggle between volume and sweep speed adjustment for `+`/`-`
-- `+`/`-` increase or decrease volume or sweep speed
-- `Up`/`Down` change radar range
-- `Left`/`Right` adjust inbound alert distance
+All user-facing preferences persist automatically. To clear them, remove the
+`radar1090` entry from `localStorage` via your browser's developer tools.
 
-### Troubleshooting
+For environments with non-standard JSON paths, update the endpoint URLs in `app.js`.
+The relevant fetch logic lives in `loadAircraftData` and `loadReceiverData`.
 
-- The status banner in the sidebar shows whether the app is connected or waiting for data.
+## Keyboard Controls
+
+- `m` toggles whether `+`/`-` adjust volume or sweep speed.
+- `+` / `-` increase or decrease volume or sweep speed (depending on mode).
+- `↑` / `↓` change radar range.
+- `←` / `→` adjust inbound alert distance.
+
+## Troubleshooting
+
+- The status banner in the sidebar shows whether the app is connected or waiting for
+  data.
 - Connection issues surface in the message area and in the browser developer console
-  (open it with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> or <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd> on macOS).
+  (open it with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> or
+  <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd> on macOS).
 - If the audio stream cannot be reached, the app displays an alert in the message area.
+- When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
+  or audio endpoints are plain HTTP.
 
-## Development Notes
+## Development
 
 All assets are static. Update `index.html`, `styles.css`, and `app.js` to adjust the
 interface or behavior.
+
+During development you can use any static file server. A quick option is:
+
+```bash
+python3 -m http.server 8080
+```
+
+Then visit `http://localhost:8080` in your browser.
+
+If you contribute code, please follow the conventions in [`AGENTS.md`](AGENTS.md) for
+styling, documentation, and testing expectations.
