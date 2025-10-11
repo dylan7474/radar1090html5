@@ -1,6 +1,6 @@
 # radar1090 HTML5
 
-Closest Plane Radar now ships as a standalone HTML5 experience. The native SDL build
+radar1090 now ships as a standalone HTML5 experience. The native SDL build
 and its supporting assets have been removed so the repository contains only the files
 needed to run the web dashboard from any modern browser.
 
@@ -22,12 +22,10 @@ needed to run the web dashboard from any modern browser.
 
 - Retro-styled radar display that connects to a `dump1090-fa` server.
 - Keyboard controls that mirror the original desktop client for muscle-memory parity.
-- Optional screen wake-lock support with an audio-based fallback for browsers that lack
-  the Wake Lock API.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Persistent configuration via `localStorage`, including server settings, receiver
-  coordinates, wake-lock preference, and audio mute state.
+  coordinates, and audio mute state.
 
 ## Requirements
 
@@ -45,9 +43,8 @@ needed to run the web dashboard from any modern browser.
 3. Enter the host and port of your `dump1090-fa` server in the sidebar form.
 4. Click **Apply** to begin polling `receiver.json` and `aircraft.json` every five
    seconds.
-5. Adjust the wake-lock and audio controls as needed. The **Live Audio** section starts
-   the airband feed automatically—tap the mute toggle if you need to silence it
-   temporarily.
+5. Adjust the audio controls as needed. The **Live Audio** section starts the airband
+   feed automatically—tap the mute toggle if you need to silence it temporarily.
 
 ## Configuration
 

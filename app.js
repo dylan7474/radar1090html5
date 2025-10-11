@@ -34,11 +34,10 @@ const rangeIncreaseBtn = document.getElementById('range-increase');
 const alertValueEl = document.getElementById('alert-value');
 const alertDecreaseBtn = document.getElementById('alert-decrease');
 const alertIncreaseBtn = document.getElementById('alert-increase');
-const wakeLockStatusEl = document.getElementById('wake-lock-status');
-const wakeLockToggleBtn = document.getElementById('wake-lock-toggle');
 const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
+const audioResumeBtn = document.getElementById('audio-resume');
 
 const planeIcon = new Image();
 const planeIconState = {
@@ -60,8 +59,6 @@ planeIcon.src = 'plane.png';
 
 const DEFAULT_BASE_PATH = 'dump1090-fa/data';
 const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
-const WAKE_LOCK_STORAGE_KEY = 'keepScreenAwake';
-
 const state = {
   server: {
     protocol: localStorage.getItem('dump1090Protocol') || 'http',
@@ -91,54 +88,13 @@ const state = {
   message: '',
   messageAlert: false,
   messageUntil: 0,
-  wakeLockEnabled: localStorage.getItem(WAKE_LOCK_STORAGE_KEY) !== 'false',
 };
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 
-let wakeLockSentinel = null;
-let wakeLockFallbackPrepared = false;
-let wakeLockFallbackEnabled = false;
-let wakeLockFallbackNeedsGesture = false;
-let wakeLockAudioContext = null;
 let audioStreamError = false;
 let audioAutoplayBlocked = false;
 let audioUnlockListenerAttached = false;
-
-function isWakeLockActive() {
-  if (wakeLockSentinel) {
-    return true;
-  }
-  if (!wakeLockFallbackEnabled || !wakeLockAudioContext) {
-    return false;
-  }
-  return wakeLockAudioContext.state === 'running';
-}
-
-function updateWakeLockUi() {
-  if (!wakeLockStatusEl || !wakeLockToggleBtn) {
-    return;
-  }
-
-  const active = isWakeLockActive();
-  let statusText;
-  if (active) {
-    statusText = 'Active';
-  } else if (state.wakeLockEnabled) {
-    statusText = wakeLockFallbackNeedsGesture ? 'Tap to activate' : 'Pending';
-  } else {
-    statusText = 'Off';
-  }
-
-  wakeLockStatusEl.textContent = statusText;
-  wakeLockToggleBtn.textContent = state.wakeLockEnabled ? 'Disable' : 'Enable';
-  wakeLockToggleBtn.setAttribute('aria-pressed', state.wakeLockEnabled ? 'true' : 'false');
-  wakeLockToggleBtn.setAttribute(
-    'aria-label',
-    state.wakeLockEnabled ? 'Disable screen wake lock' : 'Enable screen wake lock'
-  );
-  wakeLockToggleBtn.classList.toggle('primary', state.wakeLockEnabled);
-}
 
 function updateAudioStatus(text, options = {}) {
   if (!audioStatusEl) {
@@ -162,13 +118,23 @@ function refreshAudioStreamControls() {
     audioMuteToggleBtn.classList.toggle('primary', !isMuted && !audioStreamError && !audioAutoplayBlocked);
   }
 
+  if (audioResumeBtn) {
+    audioResumeBtn.hidden = true;
+    audioResumeBtn.disabled = false;
+    audioResumeBtn.classList.remove('primary');
+  }
+
   if (audioStreamError) {
     updateAudioStatus('Stream unavailable', { alert: true });
     return;
   }
 
   if (audioAutoplayBlocked && !isMuted) {
-    updateAudioStatus('Tap to enable audio');
+    updateAudioStatus('Audio paused—use the button below.');
+    if (audioResumeBtn) {
+      audioResumeBtn.hidden = false;
+      audioResumeBtn.classList.add('primary');
+    }
     return;
   }
 
@@ -229,227 +195,6 @@ function attemptAudioPlayback() {
     });
 }
 
-function setWakeLockEnabled(enabled) {
-  if (state.wakeLockEnabled === enabled) {
-    if (enabled) {
-      requestScreenWakeLock().catch(() => {});
-      resumeWakeLockFallback().catch(() => {});
-    } else {
-      releaseScreenWakeLock();
-      shutdownWakeLockFallback();
-    }
-    updateWakeLockUi();
-    return;
-  }
-
-  state.wakeLockEnabled = enabled;
-  localStorage.setItem(WAKE_LOCK_STORAGE_KEY, enabled ? 'true' : 'false');
-
-  if (enabled) {
-    requestScreenWakeLock().catch(() => {});
-    resumeWakeLockFallback().catch(() => {});
-    showMessage('Screen wake lock enabled');
-  } else {
-    releaseScreenWakeLock();
-    shutdownWakeLockFallback();
-    showMessage('Screen wake lock disabled');
-  }
-
-  updateWakeLockUi();
-}
-
-async function requestScreenWakeLock() {
-  if (!state.wakeLockEnabled) {
-    updateWakeLockUi();
-    return;
-  }
-
-  if (document.visibilityState !== 'visible') {
-    return;
-  }
-
-  if (!('wakeLock' in navigator)) {
-    enableWakeLockFallback();
-    updateWakeLockUi();
-    return;
-  }
-
-  try {
-    wakeLockSentinel = await navigator.wakeLock.request('screen');
-    wakeLockSentinel.addEventListener('release', () => {
-      wakeLockSentinel = null;
-      if (document.visibilityState === 'visible') {
-        requestScreenWakeLock().catch(() => {});
-      }
-      updateWakeLockUi();
-    });
-    updateWakeLockUi();
-  } catch (error) {
-    wakeLockSentinel = null;
-    console.warn('Unable to acquire screen wake lock', error);
-    enableWakeLockFallback();
-    updateWakeLockUi();
-  }
-}
-
-function releaseScreenWakeLock() {
-  if (!wakeLockSentinel) {
-    return;
-  }
-
-  wakeLockSentinel
-    .release()
-    .catch((error) => {
-      console.warn('Error releasing wake lock', error);
-    })
-    .finally(() => {
-      wakeLockSentinel = null;
-      updateWakeLockUi();
-    });
-}
-
-function prepareWakeLockFallback() {
-  if (wakeLockFallbackPrepared) {
-    return;
-  }
-
-  wakeLockFallbackPrepared = true;
-  const triggerEvents = ['pointerdown', 'touchstart', 'click'];
-  const handleInteraction = () => {
-    if (!wakeLockFallbackEnabled) {
-      return;
-    }
-    requestScreenWakeLock().catch(() => {});
-    resumeWakeLockFallback({ viaUserInteraction: true }).catch(() => {});
-  };
-
-  triggerEvents.forEach((eventName) => {
-    document.addEventListener(eventName, handleInteraction, { passive: true });
-  });
-}
-
-function enableWakeLockFallback() {
-  if (!state.wakeLockEnabled) {
-    return;
-  }
-  prepareWakeLockFallback();
-  wakeLockFallbackEnabled = true;
-  resumeWakeLockFallback().catch(() => {});
-  updateWakeLockUi();
-}
-
-async function resumeWakeLockFallback(options = {}) {
-  const { viaUserInteraction = false } = options;
-  if (!state.wakeLockEnabled) {
-    return;
-  }
-  if (!wakeLockFallbackEnabled) {
-    updateWakeLockUi();
-    return;
-  }
-
-  if (wakeLockFallbackNeedsGesture && !viaUserInteraction) {
-    updateWakeLockUi();
-    return;
-  }
-
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextCtor) {
-    updateWakeLockUi();
-    return;
-  }
-
-  if (!wakeLockAudioContext) {
-    try {
-      const audioContext = new AudioContextCtor();
-      const gainNode = audioContext.createGain();
-      gainNode.gain.value = 0.001;
-      const oscillator = audioContext.createOscillator();
-      oscillator.frequency.value = 1;
-      oscillator.type = 'square';
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.start();
-      wakeLockAudioContext = audioContext;
-      wakeLockFallbackNeedsGesture = false;
-    } catch (error) {
-      console.warn('Unable to activate wake lock audio fallback', error);
-      if (error && error.name === 'NotAllowedError') {
-        wakeLockFallbackNeedsGesture = true;
-      } else {
-        shutdownWakeLockFallback();
-      }
-    }
-    updateWakeLockUi();
-    return;
-  }
-
-  if (wakeLockAudioContext.state === 'suspended') {
-    try {
-      await wakeLockAudioContext.resume();
-      wakeLockFallbackNeedsGesture = false;
-    } catch (error) {
-      console.warn('Unable to resume wake lock audio fallback', error);
-      if (error && error.name === 'NotAllowedError') {
-        wakeLockFallbackNeedsGesture = true;
-      } else {
-        shutdownWakeLockFallback();
-      }
-    }
-  }
-  updateWakeLockUi();
-}
-
-function suspendWakeLockFallback() {
-  if (!wakeLockFallbackEnabled || !wakeLockAudioContext) {
-    return;
-  }
-
-  if (wakeLockAudioContext.state === 'running') {
-    wakeLockAudioContext.suspend().catch((error) => {
-      console.warn('Unable to suspend wake lock audio fallback', error);
-    });
-  }
-  updateWakeLockUi();
-}
-
-function shutdownWakeLockFallback() {
-  wakeLockFallbackEnabled = false;
-  wakeLockFallbackNeedsGesture = false;
-  if (!wakeLockAudioContext) {
-    updateWakeLockUi();
-    return;
-  }
-
-  const context = wakeLockAudioContext;
-  wakeLockAudioContext = null;
-  context.close().catch((error) => {
-    console.warn('Unable to close wake lock audio fallback', error);
-  });
-  updateWakeLockUi();
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    if (state.wakeLockEnabled) {
-      requestScreenWakeLock().catch(() => {});
-      resumeWakeLockFallback().catch(() => {});
-    }
-  } else {
-    releaseScreenWakeLock();
-    suspendWakeLockFallback();
-  }
-  updateWakeLockUi();
-});
-
-window.addEventListener('beforeunload', () => {
-  releaseScreenWakeLock();
-  shutdownWakeLockFallback();
-});
-
-prepareWakeLockFallback();
-updateWakeLockUi();
-
 hostInput.value = state.server.host;
 portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
 
@@ -502,6 +247,15 @@ if (audioStreamEl) {
   });
 
   attemptAudioPlayback();
+}
+
+if (audioResumeBtn) {
+  audioResumeBtn.addEventListener('click', () => {
+    audioResumeBtn.disabled = true;
+    attemptAudioPlayback().finally(() => {
+      refreshAudioStreamControls();
+    });
+  });
 }
 
 applyBtn.addEventListener('click', () => {
@@ -591,9 +345,6 @@ rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
 rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
 alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
 alertIncreaseBtn?.addEventListener('click', () => adjustAlertRadius(1));
-wakeLockToggleBtn?.addEventListener('click', () => {
-  setWakeLockEnabled(!state.wakeLockEnabled);
-});
 
 function deg2rad(deg) {
   return (deg * Math.PI) / 180;
@@ -1211,9 +962,4 @@ updateRangeInfo();
 updateAircraftInfo();
 fetchReceiverLocation().catch(() => {});
 pollData();
-if (state.wakeLockEnabled) {
-  requestScreenWakeLock().catch(() => {});
-} else {
-  shutdownWakeLockFallback();
-}
 requestAnimationFrame(loop);
