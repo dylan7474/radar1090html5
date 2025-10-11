@@ -27,6 +27,7 @@ needed to run the web dashboard from any modern browser.
 - Persistent configuration via `localStorage`, covering receiver coordinates and audio mute state.
 - Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
+- Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 
 ## Requirements
 

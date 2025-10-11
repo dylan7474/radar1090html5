@@ -67,6 +67,77 @@ const planeIconState = {
   canvas: null,
 };
 
+const ICON_SCALE_DEFAULT = 1;
+const ICON_SCALE_MIN = 0.65;
+const ICON_SCALE_MAX = 1.4;
+
+const WAKE_TURBULENCE_SCALES = {
+  L: 0.8,
+  S: 0.85,
+  M: 1,
+  H: 1.25,
+  J: 1.35,
+};
+
+const EMITTER_CATEGORY_LEVEL_SCALES = {
+  0: 1,
+  1: 0.8,
+  2: 0.95,
+  3: 1.1,
+  4: 1.18,
+  5: 1.28,
+  6: 1,
+  7: 0.85,
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+function getWakeTurbulenceScale(entry) {
+  const raw = typeof entry.wtc === 'string' ? entry.wtc.trim().toUpperCase() : '';
+  if (!raw) return null;
+  const key = raw.charAt(0);
+  const scale = WAKE_TURBULENCE_SCALES[key];
+  return typeof scale === 'number' ? scale : null;
+}
+
+function getEmitterCategoryScale(entry) {
+  const category = typeof entry.category === 'string' ? entry.category.trim().toUpperCase() : '';
+  if (!category || category.length < 2) return null;
+  const levelDigit = category.charAt(1);
+  const level = Number.parseInt(levelDigit, 10);
+  if (!Number.isFinite(level)) return null;
+  const scale = EMITTER_CATEGORY_LEVEL_SCALES[level];
+  return typeof scale === 'number' ? scale : null;
+}
+
+// Determine a display scale for the aircraft icon using available ADS-B metadata.
+function resolveAircraftIconScale(entry) {
+  const wakeScale = getWakeTurbulenceScale(entry);
+  if (typeof wakeScale === 'number') {
+    return clamp(wakeScale, ICON_SCALE_MIN, ICON_SCALE_MAX);
+  }
+
+  const categoryScale = getEmitterCategoryScale(entry);
+  if (typeof categoryScale === 'number') {
+    return clamp(categoryScale, ICON_SCALE_MIN, ICON_SCALE_MAX);
+  }
+
+  return ICON_SCALE_DEFAULT;
+}
+
+function getBlipIconScale(blip) {
+  return Number.isFinite(blip?.iconScale) ? blip.iconScale : ICON_SCALE_DEFAULT;
+}
+
+// The label offsets depend on the rendered marker height so inbound callouts clear the icon.
+function getBlipMarkerHeight(blip, radarRadius) {
+  const scale = getBlipIconScale(blip);
+  if (planeIconState.ready) {
+    return radarRadius * 0.14 * scale * planeIconState.aspect;
+  }
+  return radarRadius * 0.04 * scale;
+}
+
 function createTransparentPlaneCanvas(image) {
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
@@ -784,6 +855,7 @@ function processAircraftData(data) {
     };
 
     craft.key = getCraftKey(craft);
+    craft.iconScale = resolveAircraftIconScale(entry);
 
     const inboundResult = evaluateInbound(craft);
     craft.inbound = inboundResult.inbound;
@@ -841,7 +913,8 @@ function evaluateInbound(craft) {
 
 function drawBlipMarker(blip, radarRadius, alpha) {
   if (planeIconState.ready) {
-    const baseSize = radarRadius * 0.14;
+    const scale = getBlipIconScale(blip);
+    const baseSize = radarRadius * 0.14 * scale;
     const width = baseSize;
     const height = baseSize * planeIconState.aspect;
     const headingRad = deg2rad(blip.heading);
@@ -868,7 +941,8 @@ function drawBlipMarker(blip, radarRadius, alpha) {
   ctx.globalAlpha = blip.inbound ? Math.max(0.2, alpha) : alpha * 0.9;
   ctx.fillStyle = blip.inbound ? 'rgba(255,103,103,1)' : 'rgba(53,255,153,1)';
   ctx.beginPath();
-  ctx.arc(blip.x, blip.y, radarRadius * 0.02, 0, Math.PI * 2);
+  const scale = getBlipIconScale(blip);
+  ctx.arc(blip.x, blip.y, radarRadius * 0.02 * scale, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -1041,6 +1115,7 @@ function drawRadar(deltaTime) {
           spawn: now,
           heading: craft.heading,
           inbound: craft.inbound,
+          iconScale: craft.iconScale,
           minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
           distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
           altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
@@ -1098,9 +1173,7 @@ function drawRadar(deltaTime) {
         ctx.textAlign = 'center';
 
         // Offset the labels so distance stays above the marker and remaining details stay below.
-        const markerHeight = planeIconState.ready
-          ? radarRadius * 0.14 * planeIconState.aspect
-          : radarRadius * 0.04;
+        const markerHeight = getBlipMarkerHeight(blip, radarRadius);
         const labelSpacing = fontSize * 0.45;
 
         if (distanceLabel) {
