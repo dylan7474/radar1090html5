@@ -1248,27 +1248,23 @@ function drawRadar(deltaTime) {
   ctx.closePath();
   ctx.fill();
 
-  // compass labels
-  drawUpright(() => {
-    ctx.save();
-    const compassFont = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
-    ctx.fillStyle = 'rgba(200,230,220,0.75)';
-    ctx.font = compassFont;
+  // compass labels (positions rotate with the radar, characters stay upright)
+  const compassLabels = [
+    { text: 'N', x: centerX, y: centerY - compassOffset, align: 'center' },
+    { text: 'S', x: centerX, y: centerY + compassOffset, align: 'center' },
+    { text: 'E', x: centerX + compassOffset, y: centerY, align: 'left' },
+    { text: 'W', x: centerX - compassOffset, y: centerY, align: 'right' },
+  ];
 
-    const compassLabels = [
-      { text: 'N', x: centerX, y: centerY - compassOffset, align: 'center' },
-      { text: 'S', x: centerX, y: centerY + compassOffset, align: 'center' },
-      { text: 'E', x: centerX + compassOffset, y: centerY, align: 'left' },
-      { text: 'W', x: centerX - compassOffset, y: centerY, align: 'right' },
-    ];
-
-    for (const label of compassLabels) {
+  for (const label of compassLabels) {
+    drawUprightAt(label.x, label.y, () => {
+      ctx.fillStyle = 'rgba(200,230,220,0.75)';
+      ctx.font = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
       ctx.textAlign = label.align;
       ctx.textBaseline = 'middle';
       ctx.fillText(label.text, label.x, label.y);
-    }
-    ctx.restore();
-  });
+    });
+  }
 
   const now = performance.now();
   const newBlips = [];
