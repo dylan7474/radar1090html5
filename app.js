@@ -12,6 +12,9 @@ const FREQ_HIGH = 1800;
 const EARTH_RADIUS_KM = 6371;
 const AUDIO_STREAM_URL = 'http://192.168.50.4:8000/airbands';
 const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
+const DUMP1090_PROTOCOL = 'http';
+const DUMP1090_HOST = '192.168.50.100';
+const DUMP1090_PORT = 8080;
 
 const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
@@ -20,9 +23,6 @@ const aircraftInfoEl = document.getElementById('aircraft-info');
 const rangeInfoEl = document.getElementById('range-info');
 const messageEl = document.getElementById('message');
 const versionEl = document.getElementById('version');
-const hostInput = document.getElementById('server-host');
-const portInput = document.getElementById('server-port');
-const applyBtn = document.getElementById('apply-server');
 const volumeLabelEl = document.getElementById('volume-label');
 const volumeDescriptionEl = document.getElementById('volume-description');
 const volumeValueEl = document.getElementById('volume-value');
@@ -61,9 +61,9 @@ const DEFAULT_BASE_PATH = 'dump1090-fa/data';
 const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
 const state = {
   server: {
-    protocol: localStorage.getItem('dump1090Protocol') || 'http',
-    host: localStorage.getItem('dump1090Host') || '',
-    port: Number(localStorage.getItem('dump1090Port')) || 8080,
+    protocol: DUMP1090_PROTOCOL,
+    host: DUMP1090_HOST,
+    port: DUMP1090_PORT,
     basePath: localStorage.getItem('dump1090BasePath') || DEFAULT_BASE_PATH,
   },
   receiver: {
@@ -195,9 +195,6 @@ function attemptAudioPlayback() {
     });
 }
 
-hostInput.value = state.server.host;
-portInput.value = state.server.port > 0 ? state.server.port.toString() : '';
-
 if (versionEl) {
   versionEl.textContent = APP_VERSION;
   versionEl.setAttribute('title', `Build ${APP_VERSION}`);
@@ -257,63 +254,6 @@ if (audioResumeBtn) {
     });
   });
 }
-
-applyBtn.addEventListener('click', () => {
-  const rawHost = hostInput.value.trim();
-  if (!rawHost) {
-    showMessage('Enter a valid host and port', { alert: true });
-    return;
-  }
-
-  let host = rawHost;
-  let protocol = state.server.protocol || 'http';
-  let port = Number(portInput.value);
-
-  if (/^https?:\/\//i.test(rawHost)) {
-    try {
-      const url = new URL(rawHost);
-      protocol = url.protocol.replace(':', '') || 'http';
-      host = url.hostname;
-      port = url.port ? Number(url.port) : port;
-    } catch (error) {
-      showMessage('Unable to parse server address', { alert: true });
-      console.warn('Invalid server URL', error);
-      return;
-    }
-  }
-
-  if (!/^\[.*\]$/.test(host) && host.includes(':')) {
-    const [hostPart, portPart] = host.split(':');
-    if (hostPart && portPart && Number(portPart) > 0) {
-      host = hostPart;
-      port = Number(portPart);
-    }
-  }
-
-  if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
-    showMessage('Enter a valid host and port', { alert: true });
-    return;
-  }
-
-  state.server.protocol = protocol;
-  state.server.host = host;
-  state.server.port = port;
-  state.server.basePath = null;
-
-  localStorage.setItem('dump1090Protocol', protocol);
-  localStorage.setItem('dump1090Host', host);
-  localStorage.setItem('dump1090Port', String(port));
-  localStorage.removeItem('dump1090BasePath');
-  state.dataConnectionOk = false;
-  showMessage(`Server set to ${host}:${port}`);
-  determineServerBasePath()
-    .then(() => {
-      fetchReceiverLocation().catch(() => {});
-    })
-    .catch((error) => {
-      showMessage(`Unable to reach server: ${error.message}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 4 });
-    });
-});
 
 audioMuteToggleBtn?.addEventListener('click', () => {
   if (!audioStreamEl) {
@@ -504,12 +444,8 @@ function updateAircraftInfo() {
 }
 
 function updateStatus() {
-  if (!state.server.host) {
-    statusEl.textContent = 'Enter a dump1090-fa server to begin.';
-    return;
-  }
   const status = state.dataConnectionOk ? 'Connected' : 'Waiting for data…';
-  statusEl.textContent = `${status} – ${state.server.host}:${state.server.port}`;
+  statusEl.textContent = status;
 }
 
 function resizeCanvas() {
@@ -617,7 +553,7 @@ async function pollData() {
       state.paintedRotation.clear();
       state.activeBlips = [];
       state.server.basePath = null;
-      showMessage('Failed to fetch aircraft data. Check server settings.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
+      showMessage('Failed to fetch aircraft data. Check receiver connection.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
     }
     updateStatus();
     updateRangeInfo();
