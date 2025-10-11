@@ -5,7 +5,7 @@ const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.3.0';
+const APP_VERSION = 'v1.4.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -233,6 +233,7 @@ const state = {
   sweepAngle: 0,
   lastFrameTime: performance.now(),
   rotationPeriodMs: 0,
+  radarRotationQuarterTurns: 0,
   dataConnectionOk: false,
   message: '',
   messageAlert: false,
@@ -434,6 +435,7 @@ rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
 rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
 alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
 alertIncreaseBtn?.addEventListener('click', () => adjustAlertRadius(1));
+canvas?.addEventListener('click', handleRadarTap);
 
 function deg2rad(deg) {
   return (deg * Math.PI) / 180;
@@ -678,6 +680,37 @@ function resizeCanvas() {
     canvas.width = displayWidth;
     canvas.height = displayHeight;
   }
+}
+
+function isPointInsideRadar(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    return false;
+  }
+
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const canvasX = (clientX - rect.left) * scaleX;
+  const canvasY = (clientY - rect.top) * scaleY;
+
+  const { width, height } = canvas;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const squareSize = Math.min(width, height);
+  const labelPadding = squareSize * 0.05;
+  const radarRadius = Math.max(10, squareSize / 2 - labelPadding);
+
+  const dx = canvasX - centerX;
+  const dy = canvasY - centerY;
+  return Math.hypot(dx, dy) <= radarRadius;
+}
+
+function handleRadarTap(event) {
+  if (!isPointInsideRadar(event.clientX, event.clientY)) {
+    return;
+  }
+
+  state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
 }
 
 const audioContext = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)
@@ -1011,6 +1044,12 @@ function drawRadar(deltaTime) {
   const maxCompassOffset = squareSize / 2 - squareSize * 0.02;
   const compassOffset = Math.min(radarRadius + squareSize * 0.03, maxCompassOffset);
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
+  const rotationRad = (state.radarRotationQuarterTurns * Math.PI) / 2;
+
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(rotationRad);
+  ctx.translate(-centerX, -centerY);
 
   // background glow
   const gradient = ctx.createRadialGradient(centerX, centerY, radarRadius * 0.1, centerX, centerY, radarRadius);
@@ -1082,16 +1121,27 @@ function drawRadar(deltaTime) {
 
   // compass labels
   ctx.save();
+  const compassFont = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
   ctx.fillStyle = 'rgba(200,230,220,0.75)';
-  ctx.font = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'center';
-  ctx.fillText('N', centerX, centerY - compassOffset);
-  ctx.fillText('S', centerX, centerY + compassOffset);
-  ctx.textAlign = 'left';
-  ctx.fillText('E', centerX + compassOffset, centerY);
-  ctx.textAlign = 'right';
-  ctx.fillText('W', centerX - compassOffset, centerY);
+  ctx.font = compassFont;
+
+  const compassLabels = [
+    { text: 'N', x: centerX, y: centerY - compassOffset, align: 'center' },
+    { text: 'S', x: centerX, y: centerY + compassOffset, align: 'center' },
+    { text: 'E', x: centerX + compassOffset, y: centerY, align: 'left' },
+    { text: 'W', x: centerX - compassOffset, y: centerY, align: 'right' },
+  ];
+
+  for (const label of compassLabels) {
+    ctx.save();
+    ctx.translate(label.x, label.y);
+    // Counter-rotate so compass lettering stays upright even when the radar spins.
+    ctx.rotate(-rotationRad);
+    ctx.textAlign = label.align;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label.text, 0, 0);
+    ctx.restore();
+  }
   ctx.restore();
 
   const now = performance.now();
@@ -1196,6 +1246,8 @@ function drawRadar(deltaTime) {
       }
     }
   }
+
+  ctx.restore();
 
   updateMessage();
   updateAircraftInfo();
