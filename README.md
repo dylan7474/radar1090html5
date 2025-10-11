@@ -24,7 +24,8 @@ needed to run the web dashboard from any modern browser.
 - Keyboard controls that mirror the original desktop client for muscle-memory parity.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
-- Persistent configuration stored in browser cookies, covering receiver coordinates and audio mute state.
+- Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
+  server path preferences.
 - Optional aircraft label overlay toggled from the sidebar to display callsigns, altitude, and inbound distance/ETA around each blip.
 - Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
@@ -53,8 +54,9 @@ needed to run the web dashboard from any modern browser.
 ## Configuration
 
 All user-facing preferences persist automatically. To clear them, delete the
-`radar1090` cookies (e.g., `receiverLat`, `receiverLon`, `airbandMuted`) via your
-browser's developer tools.
+`radar1090` cookies (e.g., `receiverLat`, `receiverLon`, `airbandMuted`,
+`showAircraftDetails`, `beepVolumeLevel`, `radarRangeIndex`,
+`inboundAlertDistanceKm`, `dump1090BasePath`) via your browser's developer tools.
 
 The dashboard expects the dump1090-fa JSON endpoints to live at
 `http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the

@@ -4,6 +4,8 @@ const REFRESH_INTERVAL_MS = 5000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
+const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
+const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
 const APP_VERSION = 'v1.5.0';
 const ALT_LOW_FEET = 10000;
@@ -15,6 +17,9 @@ const EARTH_RADIUS_KM = 6371;
 const AUDIO_STREAM_URL = 'http://192.168.50.4:8000/airbands';
 const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
 const AIRCRAFT_DETAILS_STORAGE_KEY = 'showAircraftDetails';
+const BEEP_VOLUME_STORAGE_KEY = 'beepVolumeLevel';
+const RANGE_INDEX_STORAGE_KEY = 'radarRangeIndex';
+const ALERT_DISTANCE_STORAGE_KEY = 'inboundAlertDistanceKm';
 const DUMP1090_PROTOCOL = 'http';
 const DUMP1090_HOST = '192.168.50.100';
 const DUMP1090_PORT = 8080;
@@ -36,6 +41,20 @@ const readCookie = (name) => {
 const writeCookie = (name, value, maxAgeDays = COOKIE_MAX_AGE_DAYS) => {
   const maxAgeSeconds = Math.max(1, Math.floor(maxAgeDays * 24 * 60 * 60));
   document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)};path=/;max-age=${maxAgeSeconds};samesite=lax`;
+};
+
+const readIntPreference = (key, fallback, min, max) => {
+  const raw = readCookie(key);
+  if (raw === null) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, parsed));
 };
 
 const readReceiverCoordinate = (storageKey, fallback) => {
@@ -238,6 +257,19 @@ planeIcon.src = 'plane.png';
 const DEFAULT_BASE_PATH = 'dump1090-fa/data';
 const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
 const savedAircraftDetailsSetting = readCookie(AIRCRAFT_DETAILS_STORAGE_KEY);
+const savedBeepVolume = readIntPreference(BEEP_VOLUME_STORAGE_KEY, DEFAULT_BEEP_VOLUME, 0, 20);
+const savedRangeStepIndex = readIntPreference(
+  RANGE_INDEX_STORAGE_KEY,
+  DEFAULT_RANGE_STEP_INDEX,
+  0,
+  Math.max(RANGE_STEPS.length - 1, 0),
+);
+const savedAlertRadius = readIntPreference(
+  ALERT_DISTANCE_STORAGE_KEY,
+  INBOUND_ALERT_DISTANCE_KM,
+  1,
+  20,
+);
 const state = {
   server: {
     protocol: DUMP1090_PROTOCOL,
@@ -258,9 +290,9 @@ const state = {
   activeBlips: [],
   airspacesInRange: [],
   lastPingedAircraft: null,
-  inboundAlertDistanceKm: INBOUND_ALERT_DISTANCE_KM,
-  rangeStepIndex: 3,
-  beepVolume: 10,
+  inboundAlertDistanceKm: savedAlertRadius,
+  rangeStepIndex: savedRangeStepIndex,
+  beepVolume: savedBeepVolume,
   sweepAngle: 0,
   lastFrameTime: performance.now(),
   rotationPeriodMs: 0,
@@ -681,6 +713,7 @@ function adjustVolume(delta) {
   if (nextVolume !== state.beepVolume) {
     state.beepVolume = nextVolume;
     showMessage(`Volume: ${state.beepVolume}`);
+    writeCookie(BEEP_VOLUME_STORAGE_KEY, String(state.beepVolume));
     updateRangeInfo();
   }
 }
@@ -694,6 +727,7 @@ function adjustRange(delta) {
     state.rangeStepIndex = nextIndex;
     state.paintedRotation.clear();
     showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
+    writeCookie(RANGE_INDEX_STORAGE_KEY, String(state.rangeStepIndex));
     updateRangeInfo();
   }
 }
@@ -703,6 +737,7 @@ function adjustAlertRadius(delta) {
   if (nextValue !== state.inboundAlertDistanceKm) {
     state.inboundAlertDistanceKm = nextValue;
     showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
+    writeCookie(ALERT_DISTANCE_STORAGE_KEY, String(state.inboundAlertDistanceKm));
     updateRangeInfo();
   }
 }
