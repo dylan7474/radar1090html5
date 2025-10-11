@@ -1075,7 +1075,7 @@ function drawBlipMarker(blip, radarRadius, alpha) {
   ctx.restore();
 }
 
-function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm) {
+function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm, drawUprightText) {
   if (!airspaces || airspaces.length === 0) {
     return;
   }
@@ -1111,16 +1111,20 @@ function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radar
     ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-    ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
-    ctx.textAlign = 'center';
+    if (typeof drawUprightText === 'function') {
+      drawUprightText(() => {
+        ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+        ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
+        ctx.textAlign = 'center';
 
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(space.name, x, y - displayRadius - labelOffset);
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(space.name, x, y - displayRadius - labelOffset);
 
-    ctx.textBaseline = 'top';
-    const distanceLabel = `${Math.round(space.distanceKm)} km`;
-    ctx.fillText(distanceLabel, x, y + displayRadius + labelOffset);
+        ctx.textBaseline = 'top';
+        const distanceLabel = `${Math.round(space.distanceKm)} km`;
+        ctx.fillText(distanceLabel, x, y + displayRadius + labelOffset);
+      });
+    }
   }
 
   ctx.restore();
@@ -1140,6 +1144,18 @@ function drawRadar(deltaTime) {
   const compassOffset = Math.min(radarRadius + squareSize * 0.03, maxCompassOffset);
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   const rotationRad = (state.radarRotationQuarterTurns * Math.PI) / 2;
+
+  const drawUpright = (renderFn) => {
+    if (typeof renderFn !== 'function') {
+      return;
+    }
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(-rotationRad);
+    ctx.translate(-centerX, -centerY);
+    renderFn();
+    ctx.restore();
+  };
 
   ctx.save();
   ctx.translate(centerX, centerY);
@@ -1179,7 +1195,7 @@ function drawRadar(deltaTime) {
   }
   ctx.restore();
 
-  drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm);
+  drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUpright);
 
   // sweep update
   const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;
@@ -1215,29 +1231,26 @@ function drawRadar(deltaTime) {
   ctx.fill();
 
   // compass labels
-  ctx.save();
-  const compassFont = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
-  ctx.fillStyle = 'rgba(200,230,220,0.75)';
-  ctx.font = compassFont;
-
-  const compassLabels = [
-    { text: 'N', x: centerX, y: centerY - compassOffset, align: 'center' },
-    { text: 'S', x: centerX, y: centerY + compassOffset, align: 'center' },
-    { text: 'E', x: centerX + compassOffset, y: centerY, align: 'left' },
-    { text: 'W', x: centerX - compassOffset, y: centerY, align: 'right' },
-  ];
-
-  for (const label of compassLabels) {
+  drawUpright(() => {
     ctx.save();
-    ctx.translate(label.x, label.y);
-    // Counter-rotate so compass lettering stays upright even when the radar spins.
-    ctx.rotate(-rotationRad);
-    ctx.textAlign = label.align;
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label.text, 0, 0);
+    const compassFont = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
+    ctx.fillStyle = 'rgba(200,230,220,0.75)';
+    ctx.font = compassFont;
+
+    const compassLabels = [
+      { text: 'N', x: centerX, y: centerY - compassOffset, align: 'center' },
+      { text: 'S', x: centerX, y: centerY + compassOffset, align: 'center' },
+      { text: 'E', x: centerX + compassOffset, y: centerY, align: 'left' },
+      { text: 'W', x: centerX - compassOffset, y: centerY, align: 'right' },
+    ];
+
+    for (const label of compassLabels) {
+      ctx.textAlign = label.align;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label.text, label.x, label.y);
+    }
     ctx.restore();
-  }
-  ctx.restore();
+  });
 
   const now = performance.now();
   const newBlips = [];
@@ -1319,38 +1332,40 @@ function drawRadar(deltaTime) {
         : null;
       const etaLabel = blip.minutesToBase != null ? `ETA ${blip.minutesToBase}m` : null;
 
-      ctx.save();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-      ctx.textAlign = 'center';
+      drawUpright(() => {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+        ctx.textAlign = 'center';
 
-      if (identifier) {
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(identifier, blip.x, blip.y - markerHeight / 2 - verticalSpacing);
-      }
-
-      if (altitudeLabel) {
-        ctx.textBaseline = 'top';
-        ctx.fillText(altitudeLabel, blip.x, blip.y + markerHeight / 2 + verticalSpacing);
-      }
-
-      if (blip.inbound && (distanceLabel || etaLabel)) {
-        const offsetX = markerWidth / 2 + horizontalSpacing;
-        ctx.textBaseline = 'middle';
-
-        if (distanceLabel) {
-          ctx.textAlign = 'right';
-          ctx.fillText(distanceLabel, blip.x - offsetX, blip.y);
+        if (identifier) {
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(identifier, blip.x, blip.y - markerHeight / 2 - verticalSpacing);
         }
 
-        if (etaLabel) {
-          ctx.textAlign = 'left';
-          ctx.fillText(etaLabel, blip.x + offsetX, blip.y);
+        if (altitudeLabel) {
+          ctx.textBaseline = 'top';
+          ctx.fillText(altitudeLabel, blip.x, blip.y + markerHeight / 2 + verticalSpacing);
         }
-      }
 
-      ctx.restore();
+        if (blip.inbound && (distanceLabel || etaLabel)) {
+          const offsetX = markerWidth / 2 + horizontalSpacing;
+          ctx.textBaseline = 'middle';
+
+          if (distanceLabel) {
+            ctx.textAlign = 'right';
+            ctx.fillText(distanceLabel, blip.x - offsetX, blip.y);
+          }
+
+          if (etaLabel) {
+            ctx.textAlign = 'left';
+            ctx.fillText(etaLabel, blip.x + offsetX, blip.y);
+          }
+        }
+
+        ctx.restore();
+      });
     } else if (blip.inbound) {
       const distanceLabel = Number.isFinite(blip.distanceKm)
         ? (() => {
@@ -1363,33 +1378,35 @@ function drawRadar(deltaTime) {
       const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
 
       if (distanceLabel || etaLabel || altitudeLabel) {
-        ctx.save();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        const fontSize = Math.round(radarRadius * 0.055);
-        ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-        ctx.textAlign = 'center';
+        drawUpright(() => {
+          ctx.save();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          const fontSize = Math.round(radarRadius * 0.055);
+          ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+          ctx.textAlign = 'center';
 
-        const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-        const labelSpacing = fontSize * 0.45;
+          const markerHeight = getBlipMarkerHeight(blip, radarRadius);
+          const labelSpacing = fontSize * 0.45;
 
-        if (distanceLabel) {
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(distanceLabel, blip.x, blip.y - markerHeight / 2 - labelSpacing);
-        }
+          if (distanceLabel) {
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(distanceLabel, blip.x, blip.y - markerHeight / 2 - labelSpacing);
+          }
 
-        const lowerLabels = [etaLabel, altitudeLabel].filter(Boolean);
-        if (lowerLabels.length > 0) {
-          const firstLineY = blip.y + markerHeight / 2 + labelSpacing;
-          const lineHeight = fontSize * 1.05;
-          ctx.textBaseline = 'top';
-          lowerLabels.forEach((label, index) => {
-            const lineY = firstLineY + index * lineHeight;
-            ctx.fillText(label, blip.x, lineY);
-          });
-        }
+          const lowerLabels = [etaLabel, altitudeLabel].filter(Boolean);
+          if (lowerLabels.length > 0) {
+            const firstLineY = blip.y + markerHeight / 2 + labelSpacing;
+            const lineHeight = fontSize * 1.05;
+            ctx.textBaseline = 'top';
+            lowerLabels.forEach((label, index) => {
+              const lineY = firstLineY + index * lineHeight;
+              ctx.fillText(label, blip.x, lineY);
+            });
+          }
 
-        ctx.restore();
+          ctx.restore();
+        });
       }
     }
   }
