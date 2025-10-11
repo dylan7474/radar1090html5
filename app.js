@@ -835,6 +835,7 @@ function drawRadar(deltaTime) {
           heading: craft.heading,
           inbound: craft.inbound,
           minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
+          distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
           hex: craft.hex || craft.flight,
         });
         state.paintedRotation.set(key, state.currentSweepId);
@@ -869,14 +870,34 @@ function drawRadar(deltaTime) {
 
     drawBlipMarker(blip, radarRadius, alpha);
 
-    if (blip.minutesToBase != null && blip.inbound) {
-      ctx.save();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = `${Math.round(radarRadius * 0.06)}px "Share Tech Mono", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(`${blip.minutesToBase}m`, blip.x, blip.y - radarRadius * 0.04);
-      ctx.restore();
+    if (blip.inbound) {
+      const labels = [];
+      if (Number.isFinite(blip.distanceKm)) {
+        const km = blip.distanceKm;
+        const kmValue = km >= 10 ? Math.round(km) : km.toFixed(1);
+        labels.push(`${kmValue}km`);
+      }
+      if (blip.minutesToBase != null) {
+        labels.push(`${blip.minutesToBase}m`);
+      }
+
+      if (labels.length > 0) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        const fontSize = Math.round(radarRadius * 0.055);
+        ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const lineHeight = fontSize * 1.1;
+        const totalHeight = lineHeight * (labels.length - 1);
+        let labelY = blip.y - radarRadius * 0.05 - totalHeight / 2;
+        for (const label of labels) {
+          ctx.fillText(label, blip.x, labelY);
+          labelY += lineHeight;
+        }
+        ctx.restore();
+      }
     }
   }
 
