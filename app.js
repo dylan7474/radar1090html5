@@ -20,6 +20,7 @@ const AIRCRAFT_DETAILS_STORAGE_KEY = 'showAircraftDetails';
 const BEEP_VOLUME_STORAGE_KEY = 'beepVolumeLevel';
 const RANGE_INDEX_STORAGE_KEY = 'radarRangeIndex';
 const ALERT_DISTANCE_STORAGE_KEY = 'inboundAlertDistanceKm';
+const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const DUMP1090_PROTOCOL = 'http';
 const DUMP1090_HOST = '192.168.50.100';
 const DUMP1090_PORT = 8080;
@@ -270,6 +271,12 @@ const savedAlertRadius = readIntPreference(
   1,
   20,
 );
+const savedRadarOrientation = readIntPreference(
+  RADAR_ORIENTATION_STORAGE_KEY,
+  0,
+  0,
+  3,
+);
 const state = {
   server: {
     protocol: DUMP1090_PROTOCOL,
@@ -296,7 +303,7 @@ const state = {
   sweepAngle: 0,
   lastFrameTime: performance.now(),
   rotationPeriodMs: 0,
-  radarRotationQuarterTurns: 0,
+  radarRotationQuarterTurns: savedRadarOrientation,
   dataConnectionOk: false,
   message: '',
   messageAlert: false,
@@ -806,6 +813,7 @@ function handleRadarTap(event) {
   }
 
   state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
+  writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
 }
 
 const audioContext = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)
