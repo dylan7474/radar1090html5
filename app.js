@@ -565,10 +565,38 @@ function calculateBearing(lat1, lon1, lat2, lon2) {
   return (brng + 360) % 360;
 }
 
-function calculateHeading(prev, curr) {
-  if (!prev) return curr.bearing;
+function normalizeHeading(value) {
+  if (!Number.isFinite(value)) return null;
+  const normalized = value % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
+// Dump1090 can provide several heading-like fields. Prefer a server-supplied
+// bearing when available so newly detected aircraft immediately point in the
+// expected direction.
+function resolveInitialHeading(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const candidates = [entry.bearing, entry.track, entry.true_track, entry.heading];
+  for (const candidate of candidates) {
+    const heading = normalizeHeading(candidate);
+    if (heading !== null) {
+      return heading;
+    }
+  }
+  return null;
+}
+
+function calculateHeading(prev, curr, fallbackHeading) {
+  if (!prev) {
+    const normalizedFallback = normalizeHeading(fallbackHeading);
+    return normalizedFallback !== null ? normalizedFallback : curr.bearing;
+  }
   const delta = calculateBearing(prev.lat, prev.lon, curr.lat, curr.lon);
-  return Number.isFinite(delta) ? delta : curr.bearing;
+  if (Number.isFinite(delta)) {
+    return delta;
+  }
+  const normalizedFallback = normalizeHeading(fallbackHeading);
+  return normalizedFallback !== null ? normalizedFallback : curr.bearing;
 }
 
 function forwardAngleDelta(from, to) {
@@ -972,7 +1000,7 @@ function processAircraftData(data) {
     const flight = typeof entry.flight === 'string' ? entry.flight.trim() : '';
 
     const prev = hex ? previousPositions.get(hex) : null;
-    const heading = calculateHeading(prev, { lat, lon, bearing });
+    const heading = calculateHeading(prev, { lat, lon, bearing }, resolveInitialHeading(entry));
 
     const altitude = Number.isInteger(entry.alt_baro) ? entry.alt_baro : -1;
     const groundSpeed = typeof entry.gs === 'number' ? entry.gs : -1;
