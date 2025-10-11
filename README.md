@@ -54,6 +54,9 @@ The dashboard expects the dump1090-fa JSON endpoints to live at
 `http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the
 top of `app.js` if your receiver runs on a different host, port, or protocol.
 
+Default receiver coordinates now live in [`config.js`](config.js). Adjust the
+`DEFAULT_RECEIVER_LOCATION` export there to match your station's latitude and longitude.
+
 ## Keyboard Controls
 
 - `m` toggles whether `+`/`-` adjust volume or sweep speed.

@@ -1,3 +1,5 @@
+import { DEFAULT_RECEIVER_LOCATION } from './config.js';
+
 const REFRESH_INTERVAL_MS = 5000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
@@ -15,6 +17,24 @@ const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
 const DUMP1090_PROTOCOL = 'http';
 const DUMP1090_HOST = '192.168.50.100';
 const DUMP1090_PORT = 8080;
+
+const readReceiverCoordinate = (storageKey, fallback) => {
+  const storedValue = localStorage.getItem(storageKey);
+  if (storedValue === null) {
+    return { value: fallback, hasOverride: false };
+  }
+
+  const parsedValue = Number(storedValue);
+  if (Number.isFinite(parsedValue)) {
+    return { value: parsedValue, hasOverride: true };
+  }
+
+  return { value: fallback, hasOverride: false };
+};
+
+const receiverLatConfig = readReceiverCoordinate('receiverLat', DEFAULT_RECEIVER_LOCATION.lat);
+const receiverLonConfig = readReceiverCoordinate('receiverLon', DEFAULT_RECEIVER_LOCATION.lon);
+const receiverHasOverride = receiverLatConfig.hasOverride || receiverLonConfig.hasOverride;
 
 const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
@@ -67,9 +87,9 @@ const state = {
     basePath: localStorage.getItem('dump1090BasePath') || DEFAULT_BASE_PATH,
   },
   receiver: {
-    lat: Number(localStorage.getItem('receiverLat')) || 54,
-    lon: Number(localStorage.getItem('receiverLon')) || -1,
-    hasOverride: Boolean(localStorage.getItem('receiverLat')),
+    lat: receiverLatConfig.value,
+    lon: receiverLonConfig.value,
+    hasOverride: receiverHasOverride,
   },
   running: true,
   trackedAircraft: [],
