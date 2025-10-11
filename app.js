@@ -64,13 +64,69 @@ const planeIcon = new Image();
 const planeIconState = {
   ready: false,
   aspect: 1,
+  canvas: null,
 };
+
+function createTransparentPlaneCanvas(image) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) {
+    throw new Error('Plane icon has invalid dimensions');
+  }
+
+  const offscreen = document.createElement('canvas');
+  offscreen.width = width;
+  offscreen.height = height;
+
+  const offscreenCtx = offscreen.getContext('2d', { willReadFrequently: true });
+  offscreenCtx.drawImage(image, 0, 0, width, height);
+
+  try {
+    const imageData = offscreenCtx.getImageData(0, 0, width, height);
+    const { data } = imageData;
+    const threshold = 40;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const isBackground = r < threshold && g < threshold && b < threshold;
+      if (isBackground) {
+        data[i + 3] = 0;
+        continue;
+      }
+
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+    }
+
+    offscreenCtx.putImageData(imageData, 0, 0);
+  } catch (error) {
+    console.warn('Unable to process plane icon transparency', error);
+  }
+
+  return {
+    canvas: offscreen,
+    aspect: height / width,
+  };
+}
+
 planeIcon.decoding = 'async';
 planeIcon.addEventListener('load', () => {
-  planeIconState.ready = true;
-  planeIconState.aspect = planeIcon.naturalWidth > 0
-    ? planeIcon.naturalHeight / planeIcon.naturalWidth
-    : 1;
+  try {
+    const processed = createTransparentPlaneCanvas(planeIcon);
+    planeIconState.canvas = processed.canvas;
+    planeIconState.aspect = processed.aspect;
+    planeIconState.ready = true;
+  } catch (error) {
+    planeIconState.ready = planeIcon.naturalWidth > 0;
+    planeIconState.aspect = planeIcon.naturalWidth > 0
+      ? planeIcon.naturalHeight / planeIcon.naturalWidth
+      : 1;
+    console.warn('Plane icon loaded without transparency adjustments', error);
+  }
 });
 planeIcon.addEventListener('error', (error) => {
   planeIconState.ready = false;
@@ -747,6 +803,7 @@ function drawBlipMarker(blip, radarRadius, alpha) {
     const width = baseSize;
     const height = baseSize * planeIconState.aspect;
     const headingRad = deg2rad(blip.heading);
+    const iconSource = planeIconState.canvas || planeIcon;
     ctx.save();
     ctx.translate(blip.x, blip.y);
     if (blip.inbound) {
@@ -760,7 +817,7 @@ function drawBlipMarker(blip, radarRadius, alpha) {
     }
     ctx.rotate(headingRad);
     ctx.globalAlpha = blip.inbound ? Math.max(0.6, alpha) : alpha;
-    ctx.drawImage(planeIcon, -width / 2, -height / 2, width, height);
+    ctx.drawImage(iconSource, -width / 2, -height / 2, width, height);
     ctx.restore();
     return;
   }
