@@ -25,6 +25,7 @@ needed to run the web dashboard from any modern browser.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Persistent configuration via `localStorage`, covering receiver coordinates and audio mute state.
+- Optional aircraft label overlay toggled from the sidebar to display callsigns, altitude, and inbound distance/ETA around each blip.
 - Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.

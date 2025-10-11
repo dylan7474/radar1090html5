@@ -5,7 +5,7 @@ const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.4.0';
+const APP_VERSION = 'v1.5.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -14,6 +14,7 @@ const FREQ_HIGH = 1800;
 const EARTH_RADIUS_KM = 6371;
 const AUDIO_STREAM_URL = 'http://192.168.50.4:8000/airbands';
 const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
+const AIRCRAFT_DETAILS_STORAGE_KEY = 'showAircraftDetails';
 const DUMP1090_PROTOCOL = 'http';
 const DUMP1090_HOST = '192.168.50.100';
 const DUMP1090_PORT = 8080;
@@ -59,6 +60,8 @@ const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
 const audioResumeBtn = document.getElementById('audio-resume');
+const aircraftDetailsToggleBtn = document.getElementById('aircraft-details-toggle');
+const aircraftDetailsStateEl = document.getElementById('aircraft-details-state');
 
 const planeIcon = new Image();
 const planeIconState = {
@@ -138,6 +141,14 @@ function getBlipMarkerHeight(blip, radarRadius) {
   return radarRadius * 0.04 * scale;
 }
 
+function getBlipMarkerWidth(blip, radarRadius) {
+  const scale = getBlipIconScale(blip);
+  if (planeIconState.ready) {
+    return radarRadius * 0.14 * scale;
+  }
+  return radarRadius * 0.04 * scale;
+}
+
 function createTransparentPlaneCanvas(image) {
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
@@ -207,6 +218,7 @@ planeIcon.src = 'plane.png';
 
 const DEFAULT_BASE_PATH = 'dump1090-fa/data';
 const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
+const savedAircraftDetailsSetting = localStorage.getItem(AIRCRAFT_DETAILS_STORAGE_KEY);
 const state = {
   server: {
     protocol: DUMP1090_PROTOCOL,
@@ -238,6 +250,7 @@ const state = {
   message: '',
   messageAlert: false,
   messageUntil: 0,
+  showAircraftDetails: savedAircraftDetailsSetting === 'true',
 };
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
@@ -301,6 +314,21 @@ function refreshAudioStreamControls() {
   updateAudioStatus('Live');
 }
 
+function refreshAircraftDetailsControls() {
+  if (!aircraftDetailsToggleBtn) {
+    return;
+  }
+
+  const enabled = state.showAircraftDetails;
+  aircraftDetailsToggleBtn.textContent = enabled ? 'Hide' : 'Show';
+  aircraftDetailsToggleBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  aircraftDetailsToggleBtn.classList.toggle('primary', enabled);
+
+  if (aircraftDetailsStateEl) {
+    aircraftDetailsStateEl.textContent = enabled ? 'Visible' : 'Hidden';
+  }
+}
+
 function ensureAudioUnlockListener() {
   if (audioUnlockListenerAttached) {
     return;
@@ -348,6 +376,19 @@ function attemptAudioPlayback() {
 if (versionEl) {
   versionEl.textContent = APP_VERSION;
   versionEl.setAttribute('title', `Build ${APP_VERSION}`);
+}
+
+refreshAircraftDetailsControls();
+
+if (aircraftDetailsToggleBtn) {
+  aircraftDetailsToggleBtn.addEventListener('click', () => {
+    state.showAircraftDetails = !state.showAircraftDetails;
+    localStorage.setItem(
+      AIRCRAFT_DETAILS_STORAGE_KEY,
+      state.showAircraftDetails ? 'true' : 'false',
+    );
+    refreshAircraftDetailsControls();
+  });
 }
 
 if (audioStreamEl) {
@@ -1170,6 +1211,7 @@ function drawRadar(deltaTime) {
           distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
           altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
           hex: craft.hex || craft.flight,
+          flight: craft.flight || null,
         });
         state.paintedRotation.set(key, state.currentSweepId);
         state.lastPingedAircraft = craft;
@@ -1203,7 +1245,59 @@ function drawRadar(deltaTime) {
 
     drawBlipMarker(blip, radarRadius, alpha);
 
-    if (blip.inbound) {
+    const showAircraftDetails = state.showAircraftDetails;
+
+    if (showAircraftDetails) {
+      const fontSize = Math.round(radarRadius * 0.055);
+      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
+      const markerWidth = getBlipMarkerWidth(blip, radarRadius);
+      const verticalSpacing = fontSize * 0.45;
+      const horizontalSpacing = fontSize * 0.6;
+      const identifierRaw = blip.flight || blip.hex || 'Unknown';
+      const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
+      const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
+      const distanceLabel = Number.isFinite(blip.distanceKm)
+        ? (() => {
+            const km = blip.distanceKm;
+            const kmValue = km >= 10 ? Math.round(km) : km.toFixed(1);
+            return `${kmValue}km`;
+          })()
+        : null;
+      const etaLabel = blip.minutesToBase != null ? `ETA ${blip.minutesToBase}m` : null;
+
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+      ctx.textAlign = 'center';
+
+      if (identifier) {
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(identifier, blip.x, blip.y - markerHeight / 2 - verticalSpacing);
+      }
+
+      if (altitudeLabel) {
+        ctx.textBaseline = 'top';
+        ctx.fillText(altitudeLabel, blip.x, blip.y + markerHeight / 2 + verticalSpacing);
+      }
+
+      if (blip.inbound && (distanceLabel || etaLabel)) {
+        const offsetX = markerWidth / 2 + horizontalSpacing;
+        ctx.textBaseline = 'middle';
+
+        if (distanceLabel) {
+          ctx.textAlign = 'right';
+          ctx.fillText(distanceLabel, blip.x - offsetX, blip.y);
+        }
+
+        if (etaLabel) {
+          ctx.textAlign = 'left';
+          ctx.fillText(etaLabel, blip.x + offsetX, blip.y);
+        }
+      }
+
+      ctx.restore();
+    } else if (blip.inbound) {
       const distanceLabel = Number.isFinite(blip.distanceKm)
         ? (() => {
             const km = blip.distanceKm;
@@ -1222,7 +1316,6 @@ function drawRadar(deltaTime) {
         ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
         ctx.textAlign = 'center';
 
-        // Offset the labels so distance stays above the marker and remaining details stay below.
         const markerHeight = getBlipMarkerHeight(blip, radarRadius);
         const labelSpacing = fontSize * 0.45;
 
