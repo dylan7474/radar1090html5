@@ -27,3 +27,5 @@
 - Note any new development or build prerequisites introduced by your changes.
 - When documenting commands, prefer fenced code blocks with explicit shells (e.g.
   `bash`) so syntax highlighting works across viewers.
+- Maintain the **Future Improvements** section in `README.md` so it reflects the
+  highest-priority follow-up ideas after each meaningful feature change.
