@@ -26,6 +26,7 @@ needed to run the web dashboard from any modern browser.
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Persistent configuration via `localStorage`, covering receiver coordinates and audio mute state.
 - Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
+- Highlighted controlled airspace rings for nearby airports within the selected radar range.
 
 ## Requirements
 
@@ -58,6 +59,12 @@ top of `app.js` if your receiver runs on a different host, port, or protocol.
 Default receiver coordinates now live in [`config.js`](config.js). Adjust the
 `DEFAULT_RECEIVER_LOCATION` export there to match your station's latitude and longitude.
 The sidebar shows the current coordinates so you can confirm the values in use.
+
+Controlled airspace footprints are also defined in [`config.js`](config.js) via the
+`CONTROLLED_AIRSPACES` array. Each entry needs an ICAO code, human-friendly name,
+latitude/longitude, and radius in kilometers. Tune or expand this list to reflect the
+airports you care about monitoring; the radar will automatically highlight any whose
+controlled region falls inside the active range rings.
 
 ## Keyboard Controls
 
