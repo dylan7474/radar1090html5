@@ -753,6 +753,14 @@ function adjustVolume(delta) {
   }
 }
 
+function clearRadarContacts() {
+  state.trackedAircraft = [];
+  state.previousPositions.clear();
+  state.activeBlips = [];
+  state.paintedRotation.clear();
+  state.lastPingedAircraft = null;
+}
+
 function adjustRange(delta) {
   const nextIndex = Math.min(
     RANGE_STEPS.length - 1,
@@ -760,10 +768,11 @@ function adjustRange(delta) {
   );
   if (nextIndex !== state.rangeStepIndex) {
     state.rangeStepIndex = nextIndex;
-    state.paintedRotation.clear();
+    clearRadarContacts();
     showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
     writeCookie(RANGE_INDEX_STORAGE_KEY, String(state.rangeStepIndex));
     updateRangeInfo();
+    updateAircraftInfo();
   }
 }
 
@@ -936,10 +945,7 @@ async function pollData() {
     } catch (error) {
       console.warn('Failed to fetch aircraft data', error);
       state.dataConnectionOk = false;
-      state.trackedAircraft = [];
-      state.previousPositions.clear();
-      state.paintedRotation.clear();
-      state.activeBlips = [];
+      clearRadarContacts();
       state.server.basePath = null;
       showMessage('Failed to fetch aircraft data. Check receiver connection.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
     }
