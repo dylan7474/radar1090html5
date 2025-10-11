@@ -1,3 +1,5 @@
+import { DEFAULT_RECEIVER_LOCATION } from './config.js';
+
 const REFRESH_INTERVAL_MS = 5000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
@@ -16,11 +18,30 @@ const DUMP1090_PROTOCOL = 'http';
 const DUMP1090_HOST = '192.168.50.100';
 const DUMP1090_PORT = 8080;
 
+const readReceiverCoordinate = (storageKey, fallback) => {
+  const storedValue = localStorage.getItem(storageKey);
+  if (storedValue === null) {
+    return { value: fallback, hasOverride: false };
+  }
+
+  const parsedValue = Number(storedValue);
+  if (Number.isFinite(parsedValue)) {
+    return { value: parsedValue, hasOverride: true };
+  }
+
+  return { value: fallback, hasOverride: false };
+};
+
+const receiverLatConfig = readReceiverCoordinate('receiverLat', DEFAULT_RECEIVER_LOCATION.lat);
+const receiverLonConfig = readReceiverCoordinate('receiverLon', DEFAULT_RECEIVER_LOCATION.lon);
+const receiverHasOverride = receiverLatConfig.hasOverride || receiverLonConfig.hasOverride;
+
 const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const aircraftInfoEl = document.getElementById('aircraft-info');
 const rangeInfoEl = document.getElementById('range-info');
+const receiverInfoEl = document.getElementById('receiver-info');
 const messageEl = document.getElementById('message');
 const versionEl = document.getElementById('version');
 const volumeLabelEl = document.getElementById('volume-label');
@@ -67,9 +88,9 @@ const state = {
     basePath: localStorage.getItem('dump1090BasePath') || DEFAULT_BASE_PATH,
   },
   receiver: {
-    lat: Number(localStorage.getItem('receiverLat')) || 54,
-    lon: Number(localStorage.getItem('receiverLon')) || -1,
-    hasOverride: Boolean(localStorage.getItem('receiverLat')),
+    lat: receiverLatConfig.value,
+    lon: receiverLonConfig.value,
+    hasOverride: receiverHasOverride,
   },
   running: true,
   trackedAircraft: [],
@@ -392,6 +413,38 @@ function updateRangeInfo() {
     .join('');
 }
 
+function formatCoordinate(value, axis) {
+  if (!Number.isFinite(value)) {
+    return 'Unknown';
+  }
+
+  const hemisphere = (() => {
+    if (value > 0) return axis === 'lat' ? 'N' : 'E';
+    if (value < 0) return axis === 'lat' ? 'S' : 'W';
+    return '';
+  })();
+
+  const magnitude = Math.abs(value).toFixed(4);
+  return hemisphere ? `${magnitude}° ${hemisphere}` : `${magnitude}°`;
+}
+
+function updateReceiverInfo() {
+  if (!receiverInfoEl) {
+    return;
+  }
+
+  const { lat, lon, hasOverride } = state.receiver;
+  const lines = [
+    { label: 'Latitude', value: formatCoordinate(lat, 'lat') },
+    { label: 'Longitude', value: formatCoordinate(lon, 'lon') },
+    { label: 'Source', value: hasOverride ? 'Stored override' : 'Default config' },
+  ];
+
+  receiverInfoEl.innerHTML = lines
+    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
+    .join('');
+}
+
 function adjustVolume(delta) {
   const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
   if (nextVolume !== state.beepVolume) {
@@ -517,8 +570,10 @@ async function fetchReceiverLocation() {
     if (typeof data.lat === 'number' && typeof data.lon === 'number') {
       state.receiver.lat = data.lat;
       state.receiver.lon = data.lon;
+      state.receiver.hasOverride = true;
       localStorage.setItem('receiverLat', String(data.lat));
       localStorage.setItem('receiverLon', String(data.lon));
+      updateReceiverInfo();
     }
   } catch (error) {
     console.warn('Failed to fetch receiver location', error);
@@ -932,6 +987,7 @@ function loop() {
 
 updateStatus();
 updateRangeInfo();
+updateReceiverInfo();
 updateAircraftInfo();
 fetchReceiverLocation().catch(() => {});
 pollData();

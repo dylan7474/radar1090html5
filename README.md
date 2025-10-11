@@ -25,6 +25,7 @@ needed to run the web dashboard from any modern browser.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Persistent configuration via `localStorage`, covering receiver coordinates and audio mute state.
+- Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
 
 ## Requirements
 
@@ -53,6 +54,10 @@ All user-facing preferences persist automatically. To clear them, remove the
 The dashboard expects the dump1090-fa JSON endpoints to live at
 `http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the
 top of `app.js` if your receiver runs on a different host, port, or protocol.
+
+Default receiver coordinates now live in [`config.js`](config.js). Adjust the
+`DEFAULT_RECEIVER_LOCATION` export there to match your station's latitude and longitude.
+The sidebar shows the current coordinates so you can confirm the values in use.
 
 ## Keyboard Controls
 
