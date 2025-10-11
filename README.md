@@ -20,12 +20,11 @@ needed to run the web dashboard from any modern browser.
 
 ## Features
 
-- Retro-styled radar display that connects to a `dump1090-fa` server.
+- Retro-styled radar display that connects to a `dump1090-fa` server hosted at `http://192.168.50.100:8080`.
 - Keyboard controls that mirror the original desktop client for muscle-memory parity.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
-- Persistent configuration via `localStorage`, including server settings, receiver
-  coordinates, and audio mute state.
+- Persistent configuration via `localStorage`, covering receiver coordinates and audio mute state.
 
 ## Requirements
 
@@ -40,9 +39,9 @@ needed to run the web dashboard from any modern browser.
 1. Clone or download this repository.
 2. Open `index.html` directly in your browser or serve the repo through a static file
    host (e.g. `python3 -m http.server`).
-3. Enter the host and port of your `dump1090-fa` server in the sidebar form.
-4. Click **Apply** to begin polling `receiver.json` and `aircraft.json` every five
-   seconds.
+3. Ensure your `dump1090-fa` instance is reachable at `http://192.168.50.100:8080`.
+4. The dashboard automatically polls `receiver.json` and `aircraft.json` every five
+   seconds once loaded.
 5. Adjust the audio controls as needed. The **Live Audio** section starts the airband
    feed automatically—tap the mute toggle if you need to silence it temporarily.
 
@@ -51,8 +50,9 @@ needed to run the web dashboard from any modern browser.
 All user-facing preferences persist automatically. To clear them, remove the
 `radar1090` entry from `localStorage` via your browser's developer tools.
 
-For environments with non-standard JSON paths, update the endpoint URLs in `app.js`.
-The relevant fetch logic lives in `loadAircraftData` and `loadReceiverData`.
+The dashboard expects the dump1090-fa JSON endpoints to live at
+`http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the
+top of `app.js` if your receiver runs on a different host, port, or protocol.
 
 ## Keyboard Controls
 
