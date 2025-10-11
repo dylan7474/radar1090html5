@@ -835,6 +835,7 @@ function drawRadar(deltaTime) {
           heading: craft.heading,
           inbound: craft.inbound,
           minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
+          distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
           hex: craft.hex || craft.flight,
         });
         state.paintedRotation.set(key, state.currentSweepId);
@@ -869,14 +870,42 @@ function drawRadar(deltaTime) {
 
     drawBlipMarker(blip, radarRadius, alpha);
 
-    if (blip.minutesToBase != null && blip.inbound) {
-      ctx.save();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = `${Math.round(radarRadius * 0.06)}px "Share Tech Mono", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(`${blip.minutesToBase}m`, blip.x, blip.y - radarRadius * 0.04);
-      ctx.restore();
+    if (blip.inbound) {
+      const distanceLabel = Number.isFinite(blip.distanceKm)
+        ? (() => {
+            const km = blip.distanceKm;
+            const kmValue = km >= 10 ? Math.round(km) : km.toFixed(1);
+            return `${kmValue}km`;
+          })()
+        : null;
+      const etaLabel = blip.minutesToBase != null ? `ETA ${blip.minutesToBase}m` : null;
+
+      if (distanceLabel || etaLabel) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        const fontSize = Math.round(radarRadius * 0.055);
+        ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+        ctx.textAlign = 'center';
+
+        // Offset the labels so distance stays above the marker and ETA remains below.
+        const markerHeight = planeIconState.ready
+          ? radarRadius * 0.14 * planeIconState.aspect
+          : radarRadius * 0.04;
+        const labelSpacing = fontSize * 0.45;
+
+        if (distanceLabel) {
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(distanceLabel, blip.x, blip.y - markerHeight / 2 - labelSpacing);
+        }
+
+        if (etaLabel) {
+          ctx.textBaseline = 'top';
+          ctx.fillText(etaLabel, blip.x, blip.y + markerHeight / 2 + labelSpacing);
+        }
+
+        ctx.restore();
+      }
     }
   }
 
