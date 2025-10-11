@@ -1287,6 +1287,14 @@ function evaluateInbound(craft) {
   return { inbound, name, minutesToBase };
 }
 
+function getBlipLabelAlpha(blip, alpha) {
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
+    return blip.inbound ? Math.max(0.6, alpha) : alpha;
+  }
+  return blip.inbound ? Math.max(0.2, alpha) : alpha * 0.9;
+}
+
 function drawBlipMarker(blip, radarRadius, alpha) {
   const iconState = getIconState(blip);
   if (iconState?.ready) {
@@ -1308,14 +1316,14 @@ function drawBlipMarker(blip, radarRadius, alpha) {
       ctx.fill();
     }
     ctx.rotate(headingRad);
-    ctx.globalAlpha = blip.inbound ? Math.max(0.6, alpha) : alpha;
+    ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
     ctx.drawImage(iconSource, -width / 2, -height / 2, width, height);
     ctx.restore();
     return;
   }
 
   ctx.save();
-  ctx.globalAlpha = blip.inbound ? Math.max(0.2, alpha) : alpha * 0.9;
+  ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
   ctx.fillStyle = blip.inbound ? 'rgba(255,103,103,1)' : 'rgba(53,255,153,1)';
   ctx.beginPath();
   const scale = getBlipIconScale(blip);
@@ -1563,6 +1571,7 @@ function drawRadar(deltaTime) {
     const age = (now - blip.spawn) / rotationPeriod;
     const alpha = Math.max(0, 1 - age);
     const headingRad = deg2rad(blip.heading);
+    const labelAlpha = getBlipLabelAlpha(blip, alpha);
 
     ctx.save();
     ctx.globalAlpha = blip.inbound ? Math.max(0.25, alpha) : alpha * 0.8;
@@ -1603,7 +1612,7 @@ function drawRadar(deltaTime) {
 
         drawUprightAt(anchorX, anchorY, () => {
           ctx.save();
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = labelAlpha;
           ctx.fillStyle = 'rgba(255,255,255,0.85)';
           ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
           ctx.textAlign = align;
@@ -1656,7 +1665,7 @@ function drawRadar(deltaTime) {
 
           drawUprightAt(anchorX, anchorY, () => {
             ctx.save();
-            ctx.globalAlpha = 1;
+            ctx.globalAlpha = labelAlpha;
             ctx.fillStyle = 'rgba(255,255,255,0.85)';
             ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
             ctx.textAlign = 'center';
