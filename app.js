@@ -41,6 +41,7 @@ const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const aircraftInfoEl = document.getElementById('aircraft-info');
 const rangeInfoEl = document.getElementById('range-info');
+const receiverInfoEl = document.getElementById('receiver-info');
 const messageEl = document.getElementById('message');
 const versionEl = document.getElementById('version');
 const volumeLabelEl = document.getElementById('volume-label');
@@ -412,6 +413,38 @@ function updateRangeInfo() {
     .join('');
 }
 
+function formatCoordinate(value, axis) {
+  if (!Number.isFinite(value)) {
+    return 'Unknown';
+  }
+
+  const hemisphere = (() => {
+    if (value > 0) return axis === 'lat' ? 'N' : 'E';
+    if (value < 0) return axis === 'lat' ? 'S' : 'W';
+    return '';
+  })();
+
+  const magnitude = Math.abs(value).toFixed(4);
+  return hemisphere ? `${magnitude}° ${hemisphere}` : `${magnitude}°`;
+}
+
+function updateReceiverInfo() {
+  if (!receiverInfoEl) {
+    return;
+  }
+
+  const { lat, lon, hasOverride } = state.receiver;
+  const lines = [
+    { label: 'Latitude', value: formatCoordinate(lat, 'lat') },
+    { label: 'Longitude', value: formatCoordinate(lon, 'lon') },
+    { label: 'Source', value: hasOverride ? 'Stored override' : 'Default config' },
+  ];
+
+  receiverInfoEl.innerHTML = lines
+    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
+    .join('');
+}
+
 function adjustVolume(delta) {
   const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
   if (nextVolume !== state.beepVolume) {
@@ -537,8 +570,10 @@ async function fetchReceiverLocation() {
     if (typeof data.lat === 'number' && typeof data.lon === 'number') {
       state.receiver.lat = data.lat;
       state.receiver.lon = data.lon;
+      state.receiver.hasOverride = true;
       localStorage.setItem('receiverLat', String(data.lat));
       localStorage.setItem('receiverLon', String(data.lon));
+      updateReceiverInfo();
     }
   } catch (error) {
     console.warn('Failed to fetch receiver location', error);
@@ -952,6 +987,7 @@ function loop() {
 
 updateStatus();
 updateRangeInfo();
+updateReceiverInfo();
 updateAircraftInfo();
 fetchReceiverLocation().catch(() => {});
 pollData();
