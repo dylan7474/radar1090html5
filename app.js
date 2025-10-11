@@ -18,9 +18,28 @@ const AIRCRAFT_DETAILS_STORAGE_KEY = 'showAircraftDetails';
 const DUMP1090_PROTOCOL = 'http';
 const DUMP1090_HOST = '192.168.50.100';
 const DUMP1090_PORT = 8080;
+// Persist user preferences in cookies so they survive reloads and browser restarts.
+const COOKIE_MAX_AGE_DAYS = 365;
+
+const readCookie = (name) => {
+  const cookiePrefix = `${encodeURIComponent(name)}=`;
+  const cookies = document.cookie ? document.cookie.split(';') : [];
+  for (const entry of cookies) {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith(cookiePrefix)) {
+      return decodeURIComponent(trimmed.substring(cookiePrefix.length));
+    }
+  }
+  return null;
+};
+
+const writeCookie = (name, value, maxAgeDays = COOKIE_MAX_AGE_DAYS) => {
+  const maxAgeSeconds = Math.max(1, Math.floor(maxAgeDays * 24 * 60 * 60));
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)};path=/;max-age=${maxAgeSeconds};samesite=lax`;
+};
 
 const readReceiverCoordinate = (storageKey, fallback) => {
-  const storedValue = localStorage.getItem(storageKey);
+  const storedValue = readCookie(storageKey);
   if (storedValue === null) {
     return { value: fallback, hasOverride: false };
   }
@@ -218,13 +237,13 @@ planeIcon.src = 'plane.png';
 
 const DEFAULT_BASE_PATH = 'dump1090-fa/data';
 const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
-const savedAircraftDetailsSetting = localStorage.getItem(AIRCRAFT_DETAILS_STORAGE_KEY);
+const savedAircraftDetailsSetting = readCookie(AIRCRAFT_DETAILS_STORAGE_KEY);
 const state = {
   server: {
     protocol: DUMP1090_PROTOCOL,
     host: DUMP1090_HOST,
     port: DUMP1090_PORT,
-    basePath: localStorage.getItem('dump1090BasePath') || DEFAULT_BASE_PATH,
+    basePath: readCookie('dump1090BasePath') || DEFAULT_BASE_PATH,
   },
   receiver: {
     lat: receiverLatConfig.value,
@@ -383,7 +402,7 @@ refreshAircraftDetailsControls();
 if (aircraftDetailsToggleBtn) {
   aircraftDetailsToggleBtn.addEventListener('click', () => {
     state.showAircraftDetails = !state.showAircraftDetails;
-    localStorage.setItem(
+    writeCookie(
       AIRCRAFT_DETAILS_STORAGE_KEY,
       state.showAircraftDetails ? 'true' : 'false',
     );
@@ -393,7 +412,7 @@ if (aircraftDetailsToggleBtn) {
 
 if (audioStreamEl) {
   audioStreamEl.src = AUDIO_STREAM_URL;
-  const savedMuted = localStorage.getItem(AUDIO_MUTED_STORAGE_KEY);
+  const savedMuted = readCookie(AUDIO_MUTED_STORAGE_KEY);
   audioStreamEl.muted = savedMuted === 'true';
 
   refreshAudioStreamControls();
@@ -455,7 +474,7 @@ audioMuteToggleBtn?.addEventListener('click', () => {
   audioStreamEl.muted = shouldMute;
 
   try {
-    localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, shouldMute ? 'true' : 'false');
+    writeCookie(AUDIO_MUTED_STORAGE_KEY, shouldMute ? 'true' : 'false');
   } catch (error) {
     console.warn('Unable to persist audio mute preference', error);
   }
@@ -814,8 +833,8 @@ async function fetchReceiverLocation() {
       state.receiver.lat = data.lat;
       state.receiver.lon = data.lon;
       state.receiver.hasOverride = true;
-      localStorage.setItem('receiverLat', String(data.lat));
-      localStorage.setItem('receiverLon', String(data.lon));
+      writeCookie('receiverLat', String(data.lat));
+      writeCookie('receiverLon', String(data.lon));
       updateReceiverInfo();
     }
   } catch (error) {
@@ -876,7 +895,7 @@ async function determineServerBasePath() {
     try {
       await fetchJson(url, { timeout: 2500 });
       state.server.basePath = safeCandidate;
-      localStorage.setItem('dump1090BasePath', safeCandidate);
+      writeCookie('dump1090BasePath', safeCandidate);
       showMessage(`Connected via /${safeCandidate}`, { duration: DISPLAY_TIMEOUT_MS });
       return safeCandidate;
     } catch (error) {
