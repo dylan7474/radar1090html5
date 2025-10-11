@@ -237,10 +237,6 @@ main.app {
   color: var(--alert);
 }
 
-.audio-resume-button {
-  white-space: nowrap;
-}
-
 #airband-stream {
   display: none;
 }
