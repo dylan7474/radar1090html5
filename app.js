@@ -102,16 +102,108 @@ const audioStatusEl = document.getElementById('audio-status');
 const aircraftDetailsToggleBtn = document.getElementById('aircraft-details-toggle');
 const aircraftDetailsStateEl = document.getElementById('aircraft-details-state');
 
-const planeIcon = new Image();
-const planeIconState = {
-  ready: false,
-  aspect: 1,
-  canvas: null,
-};
-
 const ICON_SCALE_DEFAULT = 1;
 const ICON_SCALE_MIN = 0.65;
 const ICON_SCALE_MAX = 1.4;
+
+const DEFAULT_ICON_KEY = 'medium';
+// Icon files shipped with the dashboard keyed by the semantic type we want to render.
+const ICON_DEFINITIONS = {
+  light: 'Light.png',
+  medium: 'Medium.png',
+  heavy: 'Heavy.png',
+  rotor: 'Rotar.png',
+  glider: 'Glider.png',
+  lighterThanAir: 'LighterThanAir.png',
+  drone: 'DroneUAV.png',
+};
+
+const iconLibrary = Object.entries(ICON_DEFINITIONS).reduce((acc, [key, src]) => {
+  acc[key] = {
+    image: new Image(),
+    ready: false,
+    aspect: 1,
+    canvas: null,
+    src,
+  };
+  return acc;
+}, {});
+
+// First character of the wake turbulence category -> icon key.
+const WTC_ICON_MAP = {
+  L: 'light',
+  S: 'light',
+  M: 'medium',
+  H: 'heavy',
+  J: 'heavy',
+};
+
+// ADS-B emitter category prefixes that imply a specific aircraft class.
+const CATEGORY_ICON_MAP = {
+  A1: 'light',
+  A2: 'medium',
+  A3: 'heavy',
+  A4: 'heavy',
+  A5: 'medium',
+  A6: 'rotor',
+  A7: 'glider',
+  A8: 'lighterThanAir',
+  A9: 'light',
+  AA: 'glider',
+  AC: 'drone',
+};
+
+const SPECIES_ICON_MAP = {
+  4: 'rotor',
+  5: 'rotor',
+  6: 'rotor',
+};
+
+function resolveIconKeyFromWtc(entry) {
+  const raw = typeof entry.wtc === 'string' ? entry.wtc.trim().toUpperCase() : '';
+  if (!raw) return null;
+  const key = WTC_ICON_MAP[raw.charAt(0)];
+  return key ?? null;
+}
+
+function resolveIconKeyFromCategory(entry) {
+  const category = typeof entry.category === 'string' ? entry.category.trim().toUpperCase() : '';
+  if (!category || category.length < 2) return null;
+  const prefix = category.substring(0, 2);
+  const mapped = CATEGORY_ICON_MAP[prefix];
+  if (mapped) {
+    return mapped;
+  }
+  if (category.charAt(0) === 'A') {
+    const sizeCode = category.charAt(1);
+    if (sizeCode === '1') return 'light';
+    if (sizeCode === '2' || sizeCode === '5') return 'medium';
+    if (sizeCode === '3' || sizeCode === '4') return 'heavy';
+  }
+  return null;
+}
+
+function resolveIconKeyFromSpecies(entry) {
+  const species = Number.isInteger(entry.species) ? entry.species : null;
+  if (species === null) return null;
+  const mapped = SPECIES_ICON_MAP[species];
+  return mapped ?? null;
+}
+
+function resolveAircraftIconKey(entry) {
+  // Prefer the most specific metadata that dump1090 exposes and fall back to
+  // wake turbulence or generic size categories when detailed types are absent.
+  const fromWtc = resolveIconKeyFromWtc(entry);
+  if (fromWtc) return fromWtc;
+
+  const fromCategory = resolveIconKeyFromCategory(entry);
+  if (fromCategory) return fromCategory;
+
+  const fromSpecies = resolveIconKeyFromSpecies(entry);
+  if (fromSpecies) return fromSpecies;
+
+  return DEFAULT_ICON_KEY;
+}
 
 const WAKE_TURBULENCE_SCALES = {
   L: 0.8,
@@ -172,27 +264,37 @@ function getBlipIconScale(blip) {
 }
 
 // The label offsets depend on the rendered marker height so inbound callouts clear the icon.
+function getIconState(blip) {
+  const key = blip?.iconKey;
+  if (key && iconLibrary[key]) {
+    return iconLibrary[key];
+  }
+  return iconLibrary[DEFAULT_ICON_KEY];
+}
+
 function getBlipMarkerHeight(blip, radarRadius) {
   const scale = getBlipIconScale(blip);
-  if (planeIconState.ready) {
-    return radarRadius * 0.14 * scale * planeIconState.aspect;
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
+    return radarRadius * 0.14 * scale * iconState.aspect;
   }
   return radarRadius * 0.04 * scale;
 }
 
 function getBlipMarkerWidth(blip, radarRadius) {
   const scale = getBlipIconScale(blip);
-  if (planeIconState.ready) {
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
     return radarRadius * 0.14 * scale;
   }
   return radarRadius * 0.04 * scale;
 }
 
-function createTransparentPlaneCanvas(image) {
+function createTransparentIconCanvas(image) {
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
   if (!width || !height) {
-    throw new Error('Plane icon has invalid dimensions');
+    throw new Error('Icon has invalid dimensions');
   }
 
   const offscreen = document.createElement('canvas');
@@ -225,7 +327,7 @@ function createTransparentPlaneCanvas(image) {
 
     offscreenCtx.putImageData(imageData, 0, 0);
   } catch (error) {
-    console.warn('Unable to process plane icon transparency', error);
+    console.warn('Unable to process icon transparency', error);
   }
 
   return {
@@ -234,26 +336,29 @@ function createTransparentPlaneCanvas(image) {
   };
 }
 
-planeIcon.decoding = 'async';
-planeIcon.addEventListener('load', () => {
-  try {
-    const processed = createTransparentPlaneCanvas(planeIcon);
-    planeIconState.canvas = processed.canvas;
-    planeIconState.aspect = processed.aspect;
-    planeIconState.ready = true;
-  } catch (error) {
-    planeIconState.ready = planeIcon.naturalWidth > 0;
-    planeIconState.aspect = planeIcon.naturalWidth > 0
-      ? planeIcon.naturalHeight / planeIcon.naturalWidth
-      : 1;
-    console.warn('Plane icon loaded without transparency adjustments', error);
-  }
-});
-planeIcon.addEventListener('error', (error) => {
-  planeIconState.ready = false;
-  console.warn('Failed to load plane icon', error);
-});
-planeIcon.src = 'plane.png';
+for (const state of Object.values(iconLibrary)) {
+  const { image, src } = state;
+  image.decoding = 'async';
+  image.addEventListener('load', () => {
+    try {
+      const processed = createTransparentIconCanvas(image);
+      state.canvas = processed.canvas;
+      state.aspect = processed.aspect;
+      state.ready = true;
+    } catch (error) {
+      state.ready = image.naturalWidth > 0;
+      state.aspect = image.naturalWidth > 0
+        ? image.naturalHeight / image.naturalWidth
+        : 1;
+      console.warn(`Icon ${src} loaded without transparency adjustments`, error);
+    }
+  });
+  image.addEventListener('error', (error) => {
+    state.ready = false;
+    console.warn(`Failed to load icon ${src}`, error);
+  });
+  image.src = src;
+}
 
 const DEFAULT_BASE_PATH = 'dump1090-fa/data';
 const SERVER_PATH_OPTIONS = [DEFAULT_BASE_PATH, 'data'];
@@ -1126,6 +1231,7 @@ function processAircraftData(data) {
 
     craft.key = getCraftKey(craft);
     craft.iconScale = resolveAircraftIconScale(entry);
+    craft.iconKey = resolveAircraftIconKey(entry);
 
     const inboundResult = evaluateInbound(craft);
     craft.inbound = inboundResult.inbound;
@@ -1182,13 +1288,14 @@ function evaluateInbound(craft) {
 }
 
 function drawBlipMarker(blip, radarRadius, alpha) {
-  if (planeIconState.ready) {
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
     const scale = getBlipIconScale(blip);
     const baseSize = radarRadius * 0.14 * scale;
     const width = baseSize;
-    const height = baseSize * planeIconState.aspect;
+    const height = baseSize * iconState.aspect;
     const headingRad = deg2rad(blip.heading);
-    const iconSource = planeIconState.canvas || planeIcon;
+    const iconSource = iconState.canvas || iconState.image;
     ctx.save();
     ctx.translate(blip.x, blip.y);
     if (blip.inbound) {
@@ -1430,6 +1537,7 @@ function drawRadar(deltaTime) {
           heading: craft.heading,
           inbound: craft.inbound,
           iconScale: craft.iconScale,
+          iconKey: craft.iconKey,
           minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
           distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
           altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
