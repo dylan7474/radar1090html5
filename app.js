@@ -37,6 +37,7 @@ const alertIncreaseBtn = document.getElementById('alert-increase');
 const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
+const audioResumeBtn = document.getElementById('audio-resume');
 
 const planeIcon = new Image();
 const planeIconState = {
@@ -117,13 +118,23 @@ function refreshAudioStreamControls() {
     audioMuteToggleBtn.classList.toggle('primary', !isMuted && !audioStreamError && !audioAutoplayBlocked);
   }
 
+  if (audioResumeBtn) {
+    audioResumeBtn.hidden = true;
+    audioResumeBtn.disabled = false;
+    audioResumeBtn.classList.remove('primary');
+  }
+
   if (audioStreamError) {
     updateAudioStatus('Stream unavailable', { alert: true });
     return;
   }
 
   if (audioAutoplayBlocked && !isMuted) {
-    updateAudioStatus('Tap to enable audio');
+    updateAudioStatus('Audio paused—use the button below.');
+    if (audioResumeBtn) {
+      audioResumeBtn.hidden = false;
+      audioResumeBtn.classList.add('primary');
+    }
     return;
   }
 
@@ -236,6 +247,15 @@ if (audioStreamEl) {
   });
 
   attemptAudioPlayback();
+}
+
+if (audioResumeBtn) {
+  audioResumeBtn.addEventListener('click', () => {
+    audioResumeBtn.disabled = true;
+    attemptAudioPlayback().finally(() => {
+      refreshAudioStreamControls();
+    });
+  });
 }
 
 applyBtn.addEventListener('click', () => {
