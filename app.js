@@ -1,11 +1,11 @@
-import { DEFAULT_RECEIVER_LOCATION } from './config.js';
+import { CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
 
 const REFRESH_INTERVAL_MS = 5000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.2.1';
+const APP_VERSION = 'v1.3.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -154,6 +154,7 @@ const state = {
   paintedRotation: new Map(),
   currentSweepId: 0,
   activeBlips: [],
+  airspacesInRange: [],
   lastPingedAircraft: null,
   inboundAlertDistanceKm: INBOUND_ALERT_DISTANCE_KM,
   rangeStepIndex: 3,
@@ -464,6 +465,15 @@ function updateRangeInfo() {
     { label: 'Sweep', value: `${SWEEP_SPEED_DEG_PER_SEC}°/s` },
   ];
 
+  const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
+  const nearbyAirspaces = findAirspacesInRange(radarRangeKm);
+  state.airspacesInRange = nearbyAirspaces;
+
+  const airspaceValue = nearbyAirspaces.length > 0
+    ? `${nearbyAirspaces.length} · ${summariseAirspacesForDisplay(nearbyAirspaces)}`
+    : 'None';
+  rangeLines.push({ label: 'Airspace', value: airspaceValue });
+
   rangeInfoEl.innerHTML = rangeLines
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
     .join('');
@@ -482,6 +492,38 @@ function formatCoordinate(value, axis) {
 
   const magnitude = Math.abs(value).toFixed(4);
   return hemisphere ? `${magnitude}° ${hemisphere}` : `${magnitude}°`;
+}
+
+function findAirspacesInRange(rangeKm) {
+  if (!Array.isArray(CONTROLLED_AIRSPACES) || CONTROLLED_AIRSPACES.length === 0) {
+    return [];
+  }
+
+  const { lat, lon } = state.receiver;
+  return CONTROLLED_AIRSPACES.map((space) => {
+    const distanceKm = haversine(lat, lon, space.lat, space.lon);
+    if (!Number.isFinite(distanceKm)) {
+      return null;
+    }
+
+    return {
+      ...space,
+      distanceKm,
+      bearing: calculateBearing(lat, lon, space.lat, space.lon),
+    };
+  })
+    .filter((space) => space && space.distanceKm <= rangeKm)
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+}
+
+function summariseAirspacesForDisplay(airspaces) {
+  if (!airspaces || airspaces.length === 0) {
+    return 'None';
+  }
+
+  const names = airspaces.slice(0, 2).map((space) => space.name);
+  const suffix = airspaces.length > 2 ? '…' : '';
+  return `${names.join(', ')}${suffix}`;
 }
 
 function updateReceiverInfo() {
@@ -831,6 +873,57 @@ function drawBlipMarker(blip, radarRadius, alpha) {
   ctx.restore();
 }
 
+function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm) {
+  if (!airspaces || airspaces.length === 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.lineWidth = Math.max(1, radarRadius * 0.002);
+  const fontSize = Math.max(12, Math.round(radarRadius * 0.045));
+  const labelOffset = fontSize * 0.35;
+
+  for (const space of airspaces) {
+    if (!Number.isFinite(space.distanceKm) || space.distanceKm > radarRangeKm) {
+      continue;
+    }
+
+    const distanceRatio = Math.min(space.distanceKm / radarRangeKm, 1);
+    const radiusRatio = Math.min(space.radiusKm / radarRangeKm, 1);
+    const displayRadius = Math.max(radarRadius * 0.02, radiusRatio * radarRadius);
+    const angleRad = deg2rad(space.bearing);
+    const centerOffset = distanceRatio * radarRadius;
+    const x = centerX + Math.sin(angleRad) * centerOffset;
+    const y = centerY - Math.cos(angleRad) * centerOffset;
+
+    const gradient = ctx.createRadialGradient(x, y, displayRadius * 0.35, x, y, displayRadius);
+    gradient.addColorStop(0, 'rgba(64, 196, 255, 0.25)');
+    gradient.addColorStop(1, 'rgba(64, 196, 255, 0.05)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(64, 196, 255, 0.55)';
+    ctx.beginPath();
+    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+    ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
+    ctx.textAlign = 'center';
+
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(space.name, x, y - displayRadius - labelOffset);
+
+    ctx.textBaseline = 'top';
+    const distanceLabel = `${Math.round(space.distanceKm)} km`;
+    ctx.fillText(distanceLabel, x, y + displayRadius + labelOffset);
+  }
+
+  ctx.restore();
+}
+
 function drawRadar(deltaTime) {
   resizeCanvas();
   const { width, height } = canvas;
@@ -843,6 +936,7 @@ function drawRadar(deltaTime) {
   const radarRadius = Math.max(10, squareSize / 2 - labelPadding);
   const maxCompassOffset = squareSize / 2 - squareSize * 0.02;
   const compassOffset = Math.min(radarRadius + squareSize * 0.03, maxCompassOffset);
+  const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
 
   // background glow
   const gradient = ctx.createRadialGradient(centerX, centerY, radarRadius * 0.1, centerX, centerY, radarRadius);
@@ -876,6 +970,8 @@ function drawRadar(deltaTime) {
     ctx.stroke();
   }
   ctx.restore();
+
+  drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm);
 
   // sweep update
   const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;
@@ -924,7 +1020,6 @@ function drawRadar(deltaTime) {
   ctx.fillText('W', centerX - compassOffset, centerY);
   ctx.restore();
 
-  const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   const now = performance.now();
   const newBlips = [];
 
