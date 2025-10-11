@@ -423,6 +423,13 @@ function attemptAudioPlayback() {
     return Promise.resolve();
   }
 
+  if (
+    typeof HTMLMediaElement !== 'undefined' &&
+    audioStreamEl.readyState === HTMLMediaElement.HAVE_NOTHING
+  ) {
+    audioStreamEl.load();
+  }
+
   if (desiredAudioMuted) {
     pendingAutoUnmute = false;
     audioStreamEl.muted = true;
@@ -481,11 +488,16 @@ if (aircraftDetailsToggleBtn) {
 }
 
 if (audioStreamEl) {
+  audioStreamEl.defaultMuted = true;
+  audioStreamEl.muted = true;
+  audioStreamEl.autoplay = true;
+  if ('playsInline' in audioStreamEl) {
+    audioStreamEl.playsInline = true;
+  }
   audioStreamEl.src = AUDIO_STREAM_URL;
   const savedMuted = readCookie(AUDIO_MUTED_STORAGE_KEY);
   desiredAudioMuted = savedMuted === 'true';
   pendingAutoUnmute = !desiredAudioMuted;
-  audioStreamEl.muted = true;
 
   refreshAudioStreamControls();
 
