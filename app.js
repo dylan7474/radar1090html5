@@ -316,6 +316,8 @@ state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
 let audioStreamError = false;
 let audioAutoplayBlocked = false;
 let audioUnlockListenerAttached = false;
+let desiredAudioMuted = false;
+let pendingAutoUnmute = false;
 
 function updateAudioStatus(text, options = {}) {
   if (!audioStatusEl) {
@@ -332,11 +334,12 @@ function refreshAudioStreamControls() {
     return;
   }
 
-  const isMuted = audioStreamEl.muted;
+  const isMuted = desiredAudioMuted;
   if (audioMuteToggleBtn) {
     audioMuteToggleBtn.textContent = isMuted ? 'Unmute' : 'Mute';
     audioMuteToggleBtn.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
-    audioMuteToggleBtn.classList.toggle('primary', !isMuted && !audioStreamError && !audioAutoplayBlocked);
+    const highlight = !isMuted && !audioStreamError && !audioAutoplayBlocked && !pendingAutoUnmute;
+    audioMuteToggleBtn.classList.toggle('primary', highlight);
   }
 
   if (audioResumeBtn) {
@@ -356,6 +359,11 @@ function refreshAudioStreamControls() {
       audioResumeBtn.hidden = false;
       audioResumeBtn.classList.add('primary');
     }
+    return;
+  }
+
+  if (pendingAutoUnmute) {
+    updateAudioStatus('Starting audio…');
     return;
   }
 
@@ -393,14 +401,21 @@ function ensureAudioUnlockListener() {
   }
 
   const handleFirstInteraction = () => {
+    if (!audioUnlockListenerAttached) {
+      return;
+    }
+
     audioUnlockListenerAttached = false;
-    if (audioStreamEl && !audioStreamEl.muted) {
+    if (audioStreamEl) {
       attemptAudioPlayback();
     }
   };
 
   audioUnlockListenerAttached = true;
-  document.addEventListener('pointerdown', handleFirstInteraction, { once: true });
+  const options = { once: true };
+  ['pointerdown', 'touchstart', 'keydown'].forEach((eventName) => {
+    document.addEventListener(eventName, handleFirstInteraction, options);
+  });
 }
 
 function attemptAudioPlayback() {
@@ -408,11 +423,27 @@ function attemptAudioPlayback() {
     return Promise.resolve();
   }
 
+  if (desiredAudioMuted) {
+    pendingAutoUnmute = false;
+    audioStreamEl.muted = true;
+  } else {
+    pendingAutoUnmute = true;
+    audioStreamEl.muted = true;
+  }
+
+  refreshAudioStreamControls();
+
   return audioStreamEl
     .play()
     .then(() => {
       audioAutoplayBlocked = false;
       audioStreamError = false;
+      if (!desiredAudioMuted && pendingAutoUnmute) {
+        audioStreamEl.muted = false;
+      } else {
+        audioStreamEl.muted = desiredAudioMuted;
+      }
+      pendingAutoUnmute = false;
       refreshAudioStreamControls();
     })
     .catch((error) => {
@@ -452,7 +483,9 @@ if (aircraftDetailsToggleBtn) {
 if (audioStreamEl) {
   audioStreamEl.src = AUDIO_STREAM_URL;
   const savedMuted = readCookie(AUDIO_MUTED_STORAGE_KEY);
-  audioStreamEl.muted = savedMuted === 'true';
+  desiredAudioMuted = savedMuted === 'true';
+  pendingAutoUnmute = !desiredAudioMuted;
+  audioStreamEl.muted = true;
 
   refreshAudioStreamControls();
 
@@ -509,8 +542,10 @@ audioMuteToggleBtn?.addEventListener('click', () => {
     return;
   }
 
-  const shouldMute = !audioStreamEl.muted;
+  const shouldMute = !desiredAudioMuted;
+  desiredAudioMuted = shouldMute;
   audioStreamEl.muted = shouldMute;
+  pendingAutoUnmute = !shouldMute && audioStreamEl.paused;
 
   try {
     writeCookie(AUDIO_MUTED_STORAGE_KEY, shouldMute ? 'true' : 'false');
@@ -525,7 +560,10 @@ audioMuteToggleBtn?.addEventListener('click', () => {
 
   audioStreamError = false;
   refreshAudioStreamControls();
-  attemptAudioPlayback();
+
+  if (audioStreamEl.paused) {
+    attemptAudioPlayback();
+  }
 });
 
 volumeDecreaseBtn?.addEventListener('click', () => adjustVolume(-1));
