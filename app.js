@@ -836,6 +836,7 @@ function drawRadar(deltaTime) {
           inbound: craft.inbound,
           minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
           distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
+          altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
           hex: craft.hex || craft.flight,
         });
         state.paintedRotation.set(key, state.currentSweepId);
@@ -879,8 +880,9 @@ function drawRadar(deltaTime) {
           })()
         : null;
       const etaLabel = blip.minutesToBase != null ? `ETA ${blip.minutesToBase}m` : null;
+      const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
 
-      if (distanceLabel || etaLabel) {
+      if (distanceLabel || etaLabel || altitudeLabel) {
         ctx.save();
         ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
@@ -888,7 +890,7 @@ function drawRadar(deltaTime) {
         ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
         ctx.textAlign = 'center';
 
-        // Offset the labels so distance stays above the marker and ETA remains below.
+        // Offset the labels so distance stays above the marker and remaining details stay below.
         const markerHeight = planeIconState.ready
           ? radarRadius * 0.14 * planeIconState.aspect
           : radarRadius * 0.04;
@@ -899,9 +901,15 @@ function drawRadar(deltaTime) {
           ctx.fillText(distanceLabel, blip.x, blip.y - markerHeight / 2 - labelSpacing);
         }
 
-        if (etaLabel) {
+        const lowerLabels = [etaLabel, altitudeLabel].filter(Boolean);
+        if (lowerLabels.length > 0) {
+          const firstLineY = blip.y + markerHeight / 2 + labelSpacing;
+          const lineHeight = fontSize * 1.05;
           ctx.textBaseline = 'top';
-          ctx.fillText(etaLabel, blip.x, blip.y + markerHeight / 2 + labelSpacing);
+          lowerLabels.forEach((label, index) => {
+            const lineY = firstLineY + index * lineHeight;
+            ctx.fillText(label, blip.x, lineY);
+          });
         }
 
         ctx.restore();
