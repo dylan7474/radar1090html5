@@ -1,8 +1,7 @@
 # radar1090 HTML5
 
-radar1090 now ships as a standalone HTML5 experience. The native SDL build
-and its supporting assets have been removed so the repository contains only the files
-needed to run the web dashboard from any modern browser.
+radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
+from any modern browser.
 
 ---
 
@@ -12,17 +11,15 @@ needed to run the web dashboard from any modern browser.
 2. [Requirements](#requirements)
 3. [Quick Start](#quick-start)
 4. [Configuration](#configuration)
-5. [Keyboard Controls](#keyboard-controls)
-6. [Troubleshooting](#troubleshooting)
-7. [Development](#development)
-8. [Future Improvements](#future-improvements)
+5. [Troubleshooting](#troubleshooting)
+6. [Development](#development)
+7. [Future Improvements](#future-improvements)
 
 ---
 
 ## Features
 
 - Retro-styled radar display that connects to a `dump1090-fa` server hosted at `http://192.168.50.100:8080`.
-- Keyboard controls that mirror the original desktop client for muscle-memory parity.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
@@ -72,13 +69,6 @@ Controlled airspace footprints are also defined in [`config.js`](config.js) via 
 latitude/longitude, and radius in kilometers. Tune or expand this list to reflect the
 airports you care about monitoring; the radar will automatically highlight any whose
 controlled region falls inside the active range rings.
-
-## Keyboard Controls
-
-- `m` toggles whether `+`/`-` adjust volume or sweep speed.
-- `+` / `-` increase or decrease volume or sweep speed (depending on mode).
-- `↑` / `↓` change radar range.
-- `←` / `→` adjust inbound alert distance.
 
 ## Troubleshooting
 
