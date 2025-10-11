@@ -871,31 +871,39 @@ function drawRadar(deltaTime) {
     drawBlipMarker(blip, radarRadius, alpha);
 
     if (blip.inbound) {
-      const labels = [];
-      if (Number.isFinite(blip.distanceKm)) {
-        const km = blip.distanceKm;
-        const kmValue = km >= 10 ? Math.round(km) : km.toFixed(1);
-        labels.push(`${kmValue}km`);
-      }
-      if (blip.minutesToBase != null) {
-        labels.push(`${blip.minutesToBase}m`);
-      }
+      const distanceLabel = Number.isFinite(blip.distanceKm)
+        ? (() => {
+            const km = blip.distanceKm;
+            const kmValue = km >= 10 ? Math.round(km) : km.toFixed(1);
+            return `${kmValue}km`;
+          })()
+        : null;
+      const etaLabel = blip.minutesToBase != null ? `ETA ${blip.minutesToBase}m` : null;
 
-      if (labels.length > 0) {
+      if (distanceLabel || etaLabel) {
         ctx.save();
         ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
         const fontSize = Math.round(radarRadius * 0.055);
         ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const lineHeight = fontSize * 1.1;
-        const totalHeight = lineHeight * (labels.length - 1);
-        let labelY = blip.y - radarRadius * 0.05 - totalHeight / 2;
-        for (const label of labels) {
-          ctx.fillText(label, blip.x, labelY);
-          labelY += lineHeight;
+
+        // Offset the labels so distance stays above the marker and ETA remains below.
+        const markerHeight = planeIconState.ready
+          ? radarRadius * 0.14 * planeIconState.aspect
+          : radarRadius * 0.04;
+        const labelSpacing = fontSize * 0.45;
+
+        if (distanceLabel) {
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(distanceLabel, blip.x, blip.y - markerHeight / 2 - labelSpacing);
         }
+
+        if (etaLabel) {
+          ctx.textBaseline = 'top';
+          ctx.fillText(etaLabel, blip.x, blip.y + markerHeight / 2 + labelSpacing);
+        }
+
         ctx.restore();
       }
     }
