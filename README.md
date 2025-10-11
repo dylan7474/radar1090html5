@@ -15,6 +15,7 @@ needed to run the web dashboard from any modern browser.
 5. [Keyboard Controls](#keyboard-controls)
 6. [Troubleshooting](#troubleshooting)
 7. [Development](#development)
+8. [Future Improvements](#future-improvements)
 
 ---
 
@@ -105,3 +106,22 @@ Then visit `http://localhost:8080` in your browser.
 
 If you contribute code, please follow the conventions in [`AGENTS.md`](AGENTS.md) for
 styling, documentation, and testing expectations.
+
+## Future Improvements
+
+The current build focuses on replicating the retro radar experience with modern web
+tooling. A few enhancements that would streamline operations for hobbyists and
+deployments alike include:
+
+- **In-app server configuration UI** – allow operators to adjust the dump1090 host,
+  port, and base path from the sidebar instead of editing `app.js` or clearing
+  cookies between sites.
+- **Improved offline handling** – surface cached aircraft history or a dedicated
+  "standby" screen when the JSON endpoints are unreachable for multiple refresh
+  intervals.
+- **Audio device selection** – expose browser audio output/input routing controls so
+  operators with multiple headsets can switch destinations without leaving the app.
+- **Progressive Web App (PWA) packaging** – ship a manifest/service worker to enable
+  installable home screen shortcuts and background caching for mobile or kiosk use.
+- **Expanded accessibility support** – include high-contrast and reduced motion
+  themes alongside additional keyboard shortcuts for the sidebar controls.
