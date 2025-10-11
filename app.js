@@ -1,6 +1,7 @@
 import { CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
 
 const REFRESH_INTERVAL_MS = 5000;
+const AUDIO_RETRY_INTERVAL_MS = 8000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
@@ -318,6 +319,7 @@ let audioAutoplayBlocked = false;
 let audioUnlockListenerAttached = false;
 let desiredAudioMuted = false;
 let pendingAutoUnmute = false;
+let audioRetryTimer = null;
 
 function updateAudioStatus(text, options = {}) {
   if (!audioStatusEl) {
@@ -354,7 +356,7 @@ function refreshAudioStreamControls() {
   }
 
   if (audioAutoplayBlocked && !isMuted) {
-    updateAudioStatus('Audio paused—use the button below.');
+    updateAudioStatus('Autoplay blocked. Tap below to start audio.', { alert: true });
     if (audioResumeBtn) {
       audioResumeBtn.hidden = false;
       audioResumeBtn.classList.add('primary');
@@ -418,6 +420,50 @@ function ensureAudioUnlockListener() {
   });
 }
 
+function clearAudioRetryTimer() {
+  if (audioRetryTimer !== null) {
+    window.clearTimeout(audioRetryTimer);
+    audioRetryTimer = null;
+  }
+}
+
+function scheduleAudioRetry() {
+  clearAudioRetryTimer();
+  audioRetryTimer = window.setTimeout(() => {
+    audioRetryTimer = null;
+    attemptAudioPlayback();
+  }, AUDIO_RETRY_INTERVAL_MS);
+}
+
+function handleAudioPlaybackSuccess() {
+  audioAutoplayBlocked = false;
+  audioStreamError = false;
+  if (!desiredAudioMuted && pendingAutoUnmute) {
+    audioStreamEl.muted = false;
+  } else {
+    audioStreamEl.muted = desiredAudioMuted;
+  }
+  pendingAutoUnmute = false;
+  clearAudioRetryTimer();
+  refreshAudioStreamControls();
+}
+
+function handleAudioPlaybackFailure(error) {
+  if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
+    audioAutoplayBlocked = true;
+    ensureAudioUnlockListener();
+  } else {
+    audioStreamError = true;
+    showMessage('Audio stream unavailable. Check the receiver.', {
+      alert: true,
+      duration: DISPLAY_TIMEOUT_MS * 2,
+    });
+    console.warn('Unable to start audio stream', error);
+    scheduleAudioRetry();
+  }
+  refreshAudioStreamControls();
+}
+
 function attemptAudioPlayback() {
   if (!audioStreamEl) {
     return Promise.resolve();
@@ -440,33 +486,20 @@ function attemptAudioPlayback() {
 
   refreshAudioStreamControls();
 
-  return audioStreamEl
-    .play()
-    .then(() => {
-      audioAutoplayBlocked = false;
-      audioStreamError = false;
-      if (!desiredAudioMuted && pendingAutoUnmute) {
-        audioStreamEl.muted = false;
-      } else {
-        audioStreamEl.muted = desiredAudioMuted;
-      }
-      pendingAutoUnmute = false;
-      refreshAudioStreamControls();
-    })
-    .catch((error) => {
-      if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
-        audioAutoplayBlocked = true;
-        ensureAudioUnlockListener();
-      } else {
-        audioStreamError = true;
-        showMessage('Audio stream unavailable. Check the receiver.', {
-          alert: true,
-          duration: DISPLAY_TIMEOUT_MS * 2,
-        });
-        console.warn('Unable to start audio stream', error);
-      }
-      refreshAudioStreamControls();
-    });
+  try {
+    const playResult = audioStreamEl.play();
+    if (playResult && typeof playResult.then === 'function') {
+      return playResult.then(handleAudioPlaybackSuccess).catch((error) => {
+        handleAudioPlaybackFailure(error);
+      });
+    }
+
+    handleAudioPlaybackSuccess();
+    return Promise.resolve();
+  } catch (error) {
+    handleAudioPlaybackFailure(error);
+    return Promise.resolve();
+  }
 }
 
 if (versionEl) {
@@ -504,6 +537,7 @@ if (audioStreamEl) {
   audioStreamEl.addEventListener('playing', () => {
     audioStreamError = false;
     audioAutoplayBlocked = false;
+    clearAudioRetryTimer();
     refreshAudioStreamControls();
   });
 
@@ -535,6 +569,7 @@ if (audioStreamEl) {
       duration: DISPLAY_TIMEOUT_MS * 2,
     });
     console.warn('Audio stream error', event);
+    scheduleAudioRetry();
   });
 
   attemptAudioPlayback();
