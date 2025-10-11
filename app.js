@@ -1121,16 +1121,27 @@ function drawRadar(deltaTime) {
 
   // compass labels
   ctx.save();
+  const compassFont = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
   ctx.fillStyle = 'rgba(200,230,220,0.75)';
-  ctx.font = `${Math.round(radarRadius * 0.1)}px "Share Tech Mono", monospace`;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'center';
-  ctx.fillText('N', centerX, centerY - compassOffset);
-  ctx.fillText('S', centerX, centerY + compassOffset);
-  ctx.textAlign = 'left';
-  ctx.fillText('E', centerX + compassOffset, centerY);
-  ctx.textAlign = 'right';
-  ctx.fillText('W', centerX - compassOffset, centerY);
+  ctx.font = compassFont;
+
+  const compassLabels = [
+    { text: 'N', x: centerX, y: centerY - compassOffset, align: 'center' },
+    { text: 'S', x: centerX, y: centerY + compassOffset, align: 'center' },
+    { text: 'E', x: centerX + compassOffset, y: centerY, align: 'left' },
+    { text: 'W', x: centerX - compassOffset, y: centerY, align: 'right' },
+  ];
+
+  for (const label of compassLabels) {
+    ctx.save();
+    ctx.translate(label.x, label.y);
+    // Counter-rotate so compass lettering stays upright even when the radar spins.
+    ctx.rotate(-rotationRad);
+    ctx.textAlign = label.align;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label.text, 0, 0);
+    ctx.restore();
+  }
   ctx.restore();
 
   const now = performance.now();
