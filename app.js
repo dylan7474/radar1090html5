@@ -791,17 +791,22 @@ function resolveInitialHeading(entry) {
   return null;
 }
 
-function calculateHeading(prev, curr, fallbackHeading) {
-  if (!prev) {
-    const normalizedFallback = normalizeHeading(fallbackHeading);
-    return normalizedFallback !== null ? normalizedFallback : curr.bearing;
+function calculateHeading(prev, curr, feedHeading) {
+  const normalizedFeedHeading = normalizeHeading(feedHeading);
+  if (normalizedFeedHeading !== null) {
+    return normalizedFeedHeading;
   }
+
+  if (!prev) {
+    return curr.bearing;
+  }
+
   const delta = calculateBearing(prev.lat, prev.lon, curr.lat, curr.lon);
   if (Number.isFinite(delta)) {
     return delta;
   }
-  const normalizedFallback = normalizeHeading(fallbackHeading);
-  return normalizedFallback !== null ? normalizedFallback : curr.bearing;
+
+  return curr.bearing;
 }
 
 function forwardAngleDelta(from, to) {
