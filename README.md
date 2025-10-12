@@ -11,9 +11,10 @@ from any modern browser.
 2. [Requirements](#requirements)
 3. [Quick Start](#quick-start)
 4. [Configuration](#configuration)
-5. [Troubleshooting](#troubleshooting)
-6. [Development](#development)
-7. [Future Improvements](#future-improvements)
+5. [Progressive Web App (PWA) Packaging](#progressive-web-app-pwa-packaging)
+6. [Troubleshooting](#troubleshooting)
+7. [Development](#development)
+8. [Future Improvements](#future-improvements)
 
 ---
 
@@ -70,6 +71,31 @@ latitude/longitude, and radius in kilometers. Tune or expand this list to reflec
 airports you care about monitoring; the radar will automatically highlight any whose
 controlled region falls inside the active range rings.
 
+## Progressive Web App (PWA) Packaging
+
+The dashboard now ships with a web app manifest (`manifest.json`) and a service worker
+(`service-worker.js`) so you can install it like a native application and run it offline in
+kiosks or on mobile devices.
+
+- **Serve the files over HTTPS or `http://localhost`.** Browsers only expose the "Install"
+  or "Add to Home Screen" flows when the app is considered secure content. When testing
+  locally you can continue to run `python3 -m http.server 8080`.
+- **Trigger installation from the browser UI.** On Chromium browsers look for the
+  "Install app" button in the omnibox, on Android tap the overflow menu → *Install app*,
+  and on iOS/Safari use *Share → Add to Home Screen*. The manifest provides the app name,
+  color scheme, and icon assets so the shortcut launches in standalone mode.
+- **Leverage offline caching for kiosks.** The service worker pre-caches all static assets
+  listed in `STATIC_ASSETS` and responds to navigation requests with the cached
+  `index.html` when the network is unavailable. Radar data from `dump1090-fa` still
+  requires connectivity, but the UI, icons, and audio controls continue to load instantly
+  even if the receiver temporarily drops offline.
+- **Ship updates by bumping the cache version.** Increment `CACHE_VERSION` in
+  `service-worker.js` whenever you add new static files or change existing ones. The new
+  value forces older caches to be purged during the next activation.
+- **Customize the install experience.** Update the icon files referenced in
+  `manifest.json` if you want branded artwork, and adjust `orientation` or
+  `display` to lock the app to portrait or full-screen kiosk modes.
+
 ## Troubleshooting
 
 - The status banner in the sidebar shows whether the app is connected or waiting for
@@ -111,7 +137,8 @@ deployments alike include:
   intervals.
 - **Audio device selection** – expose browser audio output/input routing controls so
   operators with multiple headsets can switch destinations without leaving the app.
-- **Progressive Web App (PWA) packaging** – ship a manifest/service worker to enable
-  installable home screen shortcuts and background caching for mobile or kiosk use.
+- **Enhanced PWA capabilities** – cache recent aircraft telemetry, implement background
+  sync when connectivity returns, and expose a manual "refresh data" control for offline
+  operators.
 - **Expanded accessibility support** – include high-contrast and reduced motion
   themes alongside additional keyboard shortcuts for the sidebar controls.

@@ -25,8 +25,35 @@ const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const DUMP1090_PROTOCOL = 'http';
 const DUMP1090_HOST = '192.168.50.100';
 const DUMP1090_PORT = 8080;
+const SERVICE_WORKER_PATH = './service-worker.js';
 // Persist user preferences in cookies so they survive reloads and browser restarts.
 const COOKIE_MAX_AGE_DAYS = 365;
+
+const registerServiceWorker = () => {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+
+  const register = () => {
+    navigator.serviceWorker
+      .register(SERVICE_WORKER_PATH)
+      .then((registration) => {
+        console.info('Service worker registered', registration.scope);
+      })
+      .catch((error) => {
+        console.warn('Service worker registration failed', error);
+      });
+  };
+
+  if (document.readyState === 'complete') {
+    register();
+    return;
+  }
+
+  window.addEventListener('load', register, { once: true });
+};
+
+registerServiceWorker();
 
 const readCookie = (name) => {
   const cookiePrefix = `${encodeURIComponent(name)}=`;

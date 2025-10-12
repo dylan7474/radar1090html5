@@ -1,0 +1,25 @@
+{
+  "name": "radar1090 Dashboard",
+  "short_name": "radar1090",
+  "description": "Retro radar dashboard for dump1090-fa receivers with live airband audio.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0b0e17",
+  "theme_color": "#0b0e17",
+  "icons": [
+    {
+      "src": "Medium.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "Heavy.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
