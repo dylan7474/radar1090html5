@@ -1,3 +1,8 @@
+html {
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
 :root {
   color-scheme: dark;
   --bg: #0b0e17;
@@ -19,10 +24,24 @@ body {
   background: radial-gradient(circle at 50% 45%, rgba(53, 255, 153, 0.18), transparent 60%), var(--bg);
   color: var(--text);
   min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  width: 100%;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   padding: clamp(1rem, 3vw, 3rem);
+}
+
+@supports (-webkit-touch-callout: none) {
+  html {
+    height: -webkit-fill-available;
+  }
+
+  body {
+    min-height: -webkit-fill-available;
+  }
 }
 
 main.app {
@@ -32,6 +51,21 @@ main.app {
   gap: clamp(1.25rem, 3vw, 3rem);
   padding: clamp(1.25rem, 3vw, 3rem);
   margin: 0 auto;
+}
+
+@media (max-width: 1150px) {
+  body {
+    align-items: flex-start;
+  }
+
+  main.app {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    width: min(100%, 1320px);
+  }
+
+  .radar-container {
+    min-height: min(76vh, 900px);
+  }
 }
 
 .sidebar {
