@@ -878,13 +878,7 @@ function updateRangeInfo() {
   rangeLines.push({ label: 'Contacts', value: trackedCount > 0 ? String(trackedCount) : 'None' });
 
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
-  const nearbyAirspaces = findAirspacesInRange(radarRangeKm);
-  state.airspacesInRange = nearbyAirspaces;
-
-  const airspaceValue = nearbyAirspaces.length > 0
-    ? `${nearbyAirspaces.length} · ${summariseAirspacesForDisplay(nearbyAirspaces)}`
-    : 'None';
-  rangeLines.push({ label: 'Airspace', value: airspaceValue });
+  state.airspacesInRange = findAirspacesInRange(radarRangeKm);
 
   rangeInfoEl.innerHTML = rangeLines
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
@@ -926,16 +920,6 @@ function findAirspacesInRange(rangeKm) {
   })
     .filter((space) => space && space.distanceKm <= rangeKm)
     .sort((a, b) => a.distanceKm - b.distanceKm);
-}
-
-function summariseAirspacesForDisplay(airspaces) {
-  if (!airspaces || airspaces.length === 0) {
-    return 'None';
-  }
-
-  const names = airspaces.slice(0, 2).map((space) => space.name);
-  const suffix = airspaces.length > 2 ? '…' : '';
-  return `${names.join(', ')}${suffix}`;
 }
 
 function updateReceiverInfo() {
