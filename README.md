@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.8.0
+**Current Version:** V1.9.0
 
 ---
 
@@ -84,13 +84,18 @@ controlled region falls inside the active range rings.
 
 ### Authentication
 
-- Gate access to the dashboard by editing [`AUTH_CONFIG`](config.js) with your desired
-  `username`, `password`, and optional `sessionMaxAgeDays` cookie lifetime.
-- The defaults ship as `operator` / `radar1090`. Update them before deploying in a
-  shared environment and distribute the new credentials securely.
+- Gate access to the dashboard by editing [`AUTH_CONFIG`](config.js). Define an
+  `accounts` array where each entry includes a `username` and `password`, and set an
+  optional `sessionMaxAgeDays` cookie lifetime.
+- Ship unique credentials for each role (e.g., `operator`, `observer`) so activities
+  can be audited or rotated independently. Remove any unused defaults before
+  deployment and distribute replacements securely.
 - Successful sign-ins set an `authSessionActive` cookie so returning operators avoid
   repeated prompts until the cookie expires. Clearing cookies or waiting for the
   expiry window will require re-authentication.
+- Deployments that still rely on the legacy single `username` / `password` pair are
+  supported for backward compatibility, though migrating to the multi-account format
+  is recommended for clarity.
 
 ## Troubleshooting
 

@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.0';
+const APP_VERSION = 'V1.9.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -30,11 +30,46 @@ const DUMP1090_PORT = 443;
 // Persist user preferences in cookies so they survive reloads and browser restarts.
 const COOKIE_MAX_AGE_DAYS = 365;
 const AUTH_SESSION_COOKIE = 'authSessionActive';
-const expectedAuthUsername =
-  typeof AUTH_CONFIG?.username === 'string' ? AUTH_CONFIG.username.trim() : '';
-const expectedAuthPassword =
-  typeof AUTH_CONFIG?.password === 'string' ? AUTH_CONFIG.password : '';
-const isAuthEnabled = expectedAuthUsername.length > 0 && expectedAuthPassword.length > 0;
+
+const normalizeAuthAccount = (account) => {
+  if (!account || typeof account !== 'object') {
+    return null;
+  }
+
+  const username = typeof account.username === 'string' ? account.username.trim() : '';
+  const password = typeof account.password === 'string' ? account.password : '';
+
+  if (!username || !password) {
+    return null;
+  }
+
+  return { username, password };
+};
+
+const authAccounts = [];
+
+if (Array.isArray(AUTH_CONFIG?.accounts)) {
+  for (const account of AUTH_CONFIG.accounts) {
+    const normalizedAccount = normalizeAuthAccount(account);
+    if (normalizedAccount) {
+      authAccounts.push(normalizedAccount);
+    }
+  }
+}
+
+const legacyAccount = normalizeAuthAccount(AUTH_CONFIG);
+if (legacyAccount) {
+  const hasDuplicate = authAccounts.some(
+    (account) =>
+      account.username === legacyAccount.username &&
+      account.password === legacyAccount.password,
+  );
+  if (!hasDuplicate) {
+    authAccounts.push(legacyAccount);
+  }
+}
+
+const isAuthEnabled = authAccounts.length > 0;
 const AUTH_SESSION_MAX_AGE_DAYS = Number.isFinite(AUTH_CONFIG?.sessionMaxAgeDays)
   ? Math.max(1, AUTH_CONFIG.sessionMaxAgeDays)
   : 1;
@@ -203,7 +238,10 @@ const credentialsMatch = (username, password) => {
 
   const normalizedUsername = typeof username === 'string' ? username.trim() : '';
   const providedPassword = typeof password === 'string' ? password : '';
-  return normalizedUsername === expectedAuthUsername && providedPassword === expectedAuthPassword;
+  return authAccounts.some(
+    (account) =>
+      normalizedUsername === account.username && providedPassword === account.password,
+  );
 };
 
 if (isAuthEnabled && authFormEl && authOverlayEl) {

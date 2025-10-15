@@ -4,9 +4,17 @@ export const DEFAULT_RECEIVER_LOCATION = Object.freeze({
 });
 
 export const AUTH_CONFIG = Object.freeze({
-  username: 'operator',
-  password: 'radar1090',
   sessionMaxAgeDays: 7,
+  accounts: Object.freeze([
+    Object.freeze({
+      username: 'operator',
+      password: 'radar1090',
+    }),
+    Object.freeze({
+      username: 'observer',
+      password: 'radarObserver',
+    }),
+  ]),
 });
 
 export const CONTROLLED_AIRSPACES = Object.freeze([
