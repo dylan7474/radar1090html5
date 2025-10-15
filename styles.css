@@ -46,29 +46,16 @@ body {
 
 main.app {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 340px) minmax(720px, 1fr) minmax(280px, 340px);
+  grid-template-areas: "controls radar data";
   width: min(100%, 1920px);
   gap: clamp(1.25rem, 3vw, 3rem);
   padding: clamp(1.25rem, 3vw, 3rem);
   margin: 0 auto;
+  align-items: start;
 }
 
-@media (max-width: 1150px) {
-  body {
-    align-items: flex-start;
-  }
-
-  main.app {
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-    width: min(100%, 1320px);
-  }
-
-  .radar-container {
-    min-height: min(76vh, 900px);
-  }
-}
-
-.sidebar {
+.panel {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
@@ -79,9 +66,31 @@ main.app {
   box-shadow: 0 30px 60px rgba(0, 0, 0, 0.25);
 }
 
-.sidebar h1 {
+.panel--controls {
+  grid-area: controls;
+}
+
+.panel--data {
+  grid-area: data;
+}
+
+.panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.panel h1 {
   font-size: 1.4rem;
   margin: 0;
+}
+
+.panel-title {
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--muted);
 }
 
 .status {
@@ -130,10 +139,10 @@ main.app {
 .control-row {
   /* Use CSS grid so Safari keeps labels and values aligned while still wrapping gracefully. */
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
-  gap: 0.75rem;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 0.6rem;
   align-items: center;
-  padding: 0.9rem;
+  padding: 0.75rem;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.04);
@@ -166,10 +175,11 @@ main.app {
 
 .control-buttons {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: stretch;
-  justify-content: flex-start;
+  flex-direction: row;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .control-button {
@@ -178,10 +188,10 @@ main.app {
   background: rgba(53, 255, 153, 0.15);
   color: var(--text);
   border-radius: 10px;
-  padding: 0.55rem 1.2rem;
-  font-size: 0.9rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  min-height: 44px;
+  min-height: 40px;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
@@ -193,9 +203,9 @@ main.app {
 }
 
 .control-button.control-button--square {
-  width: 48px;
-  padding: 0.55rem;
-  font-size: 1.25rem;
+  width: 42px;
+  padding: 0.45rem;
+  font-size: 1.1rem;
   line-height: 1;
 }
 
@@ -278,6 +288,7 @@ main.app {
 }
 
 .radar-container {
+  grid-area: radar;
   background: rgba(0, 0, 0, 0.25);
   border-radius: 20px;
   padding: clamp(0.75rem, 2vw, 2.5rem);
@@ -316,17 +327,52 @@ canvas#radar {
   display: block;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1500px) {
   main.app {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(260px, 320px) minmax(640px, 1fr) minmax(260px, 320px);
+  }
+}
+
+@media (max-width: 1320px) {
+  main.app {
+    grid-template-columns: minmax(260px, 320px) minmax(600px, 1fr);
+    grid-template-areas:
+      "controls radar"
+      "data radar";
   }
 
-  .sidebar {
-    order: 2;
+  .panel--data {
+    align-self: stretch;
+  }
+}
+
+@media (max-width: 1050px) {
+  body {
+    align-items: flex-start;
+  }
+
+  main.app {
+    grid-template-columns: minmax(240px, 1fr) minmax(520px, 1.2fr);
   }
 
   .radar-container {
-    order: 1;
+    min-height: min(76vh, 900px);
+  }
+}
+
+@media (max-width: 900px) {
+  main.app {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "radar"
+      "controls"
+      "data";
+  }
+
+  .panel--controls,
+  .panel--data,
+  .radar-container {
+    order: initial;
   }
 }
 
@@ -341,10 +387,10 @@ canvas#radar {
   }
 
   .control-buttons {
-    flex-direction: row-reverse;
+    flex-direction: row;
     justify-content: space-between;
     justify-self: stretch;
-    align-items: center;
+    align-items: stretch;
     flex-wrap: wrap;
   }
 

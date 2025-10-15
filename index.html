@@ -11,9 +11,11 @@
 </head>
 <body>
   <main class="app">
-    <section class="sidebar">
-      <h1>radar1090</h1>
-      <div class="status" id="status"></div>
+    <section class="panel panel--controls">
+      <header class="panel-header">
+        <h1>radar1090</h1>
+        <div class="status" id="status"></div>
+      </header>
       <section class="controls">
         <h2>Controls</h2>
         <div class="control-panel">
@@ -85,10 +87,6 @@
           </div>
         </div>
       </section>
-      <div class="info-block" id="aircraft-info"></div>
-      <div class="info-block" id="range-info"></div>
-      <div class="info-block" id="receiver-info" aria-live="polite"></div>
-      <div class="message" id="message"></div>
       <section class="audio">
         <h2>Live Audio</h2>
         <p class="hint">The local airband feed plays automatically—use mute if you need quiet.</p>
@@ -106,6 +104,13 @@
     <section class="radar-container">
       <div class="version-chip" id="version" aria-label="Application version"></div>
       <canvas id="radar" width="960" height="640" aria-label="Radar display"></canvas>
+    </section>
+    <section class="panel panel--data" aria-label="Radar data readouts">
+      <h2 class="panel-title">Radar Data</h2>
+      <div class="info-block" id="aircraft-info"></div>
+      <div class="info-block" id="range-info"></div>
+      <div class="info-block" id="receiver-info" aria-live="polite"></div>
+      <div class="message" id="message"></div>
     </section>
   </main>
   <script type="module" src="app.js"></script>
