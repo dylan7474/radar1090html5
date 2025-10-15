@@ -31,6 +31,7 @@ from any modern browser.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click an empty patch of the scope to resume automatic cycling.
+- When a contact is locked, the radar ping follows that aircraft so other traffic stays silent while still rendering on-screen.
 
 ## Requirements
 

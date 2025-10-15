@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.6.0';
+const APP_VERSION = 'v1.6.1';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1688,10 +1688,11 @@ function drawRadar(deltaTime) {
           flight: craft.flight || null,
         });
         state.paintedRotation.set(key, state.currentSweepId);
-        if (!state.selectedAircraftKey || state.selectedAircraftKey === craft.key) {
+        const shouldFocusOnCraft = !state.selectedAircraftKey || state.selectedAircraftKey === key;
+        if (shouldFocusOnCraft) {
           state.lastPingedAircraft = craft;
+          playBeep(getBeepFrequencyForAltitude(craft.altitude), 50);
         }
-        playBeep(getBeepFrequencyForAltitude(craft.altitude), 50);
       }
     }
   }
