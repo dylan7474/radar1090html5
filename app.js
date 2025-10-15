@@ -1138,12 +1138,16 @@ function isClickInsideRadar(canvasX, canvasY, geometry) {
   return Math.hypot(dx, dy) <= geometry.radarRadius;
 }
 
-function isClickOnCompassNorth(canvasX, canvasY, geometry) {
-  const northVector = rotateVector(0, -geometry.compassOffset, geometry.rotationRad);
-  const northX = geometry.centerX + northVector.x;
-  const northY = geometry.centerY + northVector.y;
-  const dx = canvasX - northX;
-  const dy = canvasY - northY;
+function isClickOnCompassTop(canvasX, canvasY, geometry) {
+  // The compass lettering rotates with the radar, but whichever cardinal
+  // direction ends up at the top of the scope is always rendered at the same
+  // screen coordinates: directly above the center point. Anchor the hit test
+  // there so clicks continue to line up with the visible label regardless of
+  // orientation.
+  const topX = geometry.centerX;
+  const topY = geometry.centerY - geometry.compassOffset;
+  const dx = canvasX - topX;
+  const dy = canvasY - topY;
   const tolerance = Math.max(18, geometry.radarRadius * 0.1);
   return Math.hypot(dx, dy) <= tolerance;
 }
@@ -1159,7 +1163,7 @@ function handleRadarTap(event) {
     return;
   }
 
-  if (isClickOnCompassNorth(coords.x, coords.y, geometry)) {
+  if (isClickOnCompassTop(coords.x, coords.y, geometry)) {
     state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
     writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
     return;
