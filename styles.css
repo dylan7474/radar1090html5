@@ -341,7 +341,7 @@ canvas#radar {
   }
 
   .control-buttons {
-    flex-direction: row;
+    flex-direction: row-reverse;
     justify-content: space-between;
     justify-self: stretch;
     align-items: center;
