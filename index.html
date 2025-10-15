@@ -11,7 +11,29 @@
 </head>
 <body>
   <main class="app">
-    <section class="sidebar controls-panel">
+    <div class="panel-toggle-bar" role="group" aria-label="Layout controls">
+      <button
+        type="button"
+        class="control-button panel-toggle-button"
+        id="controls-panel-toggle"
+        aria-controls="controls-panel"
+        aria-expanded="true"
+        aria-pressed="true"
+      >
+        Hide Controls
+      </button>
+      <button
+        type="button"
+        class="control-button panel-toggle-button"
+        id="data-panel-toggle"
+        aria-controls="data-panel"
+        aria-expanded="true"
+        aria-pressed="true"
+      >
+        Hide Data
+      </button>
+    </div>
+    <section class="sidebar controls-panel" id="controls-panel">
       <h1>radar1090</h1>
       <div class="status" id="status"></div>
       <section class="controls">
@@ -103,7 +125,7 @@
       <div class="version-chip" id="version" aria-label="Application version"></div>
       <canvas id="radar" width="960" height="640" aria-label="Radar display"></canvas>
     </section>
-    <section class="sidebar data-panel">
+    <section class="sidebar data-panel" id="data-panel">
       <h2>Live Data</h2>
       <div class="info-stack">
         <div class="info-block" id="aircraft-info"></div>
