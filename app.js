@@ -989,30 +989,40 @@ function updateAircraftInfo() {
     return;
   }
 
-  const lines = [
-    { label: 'Flight', value: info.flight || '-----' },
-    { label: 'Hex', value: info.hex || '-----' },
-    { label: 'Distance', value: `${info.distanceKm.toFixed(1)} km` },
-    { label: 'Altitude', value: info.altitude > 0 ? `${info.altitude} ft` : '-----' },
-    { label: 'Speed', value: info.groundSpeed > 0 ? `${info.groundSpeed.toFixed(0)} kt` : '---' },
-  ];
+  const climbLabel = (() => {
+    if (info.onGround) {
+      return 'GROUND';
+    }
 
-  if (info.squawk) {
-    lines.push({ label: 'Squawk', value: info.squawk });
-  }
+    if (Number.isFinite(info.verticalRate)) {
+      const roundedRate = Math.round(info.verticalRate);
+      if (roundedRate === 0) {
+        return 'Level';
+      }
+      const sign = roundedRate > 0 ? '+' : '';
+      return `${sign}${roundedRate} fpm`;
+    }
 
-  if (Number.isFinite(info.verticalRate)) {
-    const roundedRate = Math.round(info.verticalRate);
-    const climbLabel = roundedRate === 0
-      ? 'Level'
-      : `${roundedRate > 0 ? '+' : ''}${roundedRate} fpm`;
-    lines.push({ label: 'Climb', value: climbLabel });
-  }
+    return '---';
+  })();
 
-  if (Number.isFinite(info.signalDb)) {
-    const formattedSignal = `${info.signalDb.toFixed(1)} dBFS`;
-    lines.push({ label: 'Signal', value: formattedSignal });
-  }
+  const lines = [
+    { label: 'Flight', value: info.flight || '-----' },
+    { label: 'Hex', value: info.hex || '-----' },
+    { label: 'Distance', value: `${info.distanceKm.toFixed(1)} km` },
+    { label: 'Altitude', value: info.altitude > 0 ? `${info.altitude} ft` : '-----' },
+    { label: 'Speed', value: info.groundSpeed > 0 ? `${info.groundSpeed.toFixed(0)} kt` : '---' },
+    { label: 'Climb', value: climbLabel },
+  ];
+
+  if (info.squawk) {
+    lines.push({ label: 'Squawk', value: info.squawk });
+  }
+
+  if (Number.isFinite(info.signalDb)) {
+    const formattedSignal = `${info.signalDb.toFixed(1)} dBFS`;
+    lines.push({ label: 'Signal', value: formattedSignal });
+  }
 
   if (Number.isFinite(info.lastMessageAgeSec)) {
     const seconds = info.lastMessageAgeSec;
@@ -1230,30 +1240,32 @@ function processAircraftData(data) {
     const altitude = Number.isInteger(entry.alt_baro) ? entry.alt_baro : -1;
     const groundSpeed = typeof entry.gs === 'number' ? entry.gs : -1;
     const squawk = typeof entry.squawk === 'string' ? entry.squawk.trim() : '';
-    const verticalRate = Number.isFinite(entry.baro_rate)
-      ? entry.baro_rate
-      : Number.isFinite(entry.geom_rate)
-        ? entry.geom_rate
-        : null;
-    const signalDb = typeof entry.rssi === 'number' ? entry.rssi : null;
-    const lastMessageAgeSec = typeof entry.seen === 'number' ? entry.seen : null;
+    const verticalRate = Number.isFinite(entry.baro_rate)
+      ? entry.baro_rate
+      : Number.isFinite(entry.geom_rate)
+        ? entry.geom_rate
+        : null;
+    const signalDb = typeof entry.rssi === 'number' ? entry.rssi : null;
+    const lastMessageAgeSec = typeof entry.seen === 'number' ? entry.seen : null;
+    const onGround = entry.on_ground === true;
 
-    const craft = {
-      flight,
-      hex,
-      lat,
+    const craft = {
+      flight,
+      hex,
+      lat,
       lon,
       distanceKm,
       bearing,
       heading,
       altitude,
       groundSpeed,
-      squawk,
-      verticalRate,
-      signalDb,
-      lastMessageAgeSec,
-      inbound: false,
-    };
+      squawk,
+      verticalRate,
+      signalDb,
+      lastMessageAgeSec,
+      onGround,
+      inbound: false,
+    };
 
     craft.key = getCraftKey(craft);
     craft.iconScale = resolveAircraftIconScale(entry);
