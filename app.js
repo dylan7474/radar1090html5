@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.5.2';
+const APP_VERSION = 'v1.6.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -401,7 +401,8 @@ const state = {
   currentSweepId: 0,
   activeBlips: [],
   airspacesInRange: [],
-  lastPingedAircraft: null,
+  lastPingedAircraft: null,
+  selectedAircraftKey: null,
   inboundAlertDistanceKm: savedAlertRadius,
   rangeStepIndex: savedRangeStepIndex,
   beepVolume: savedBeepVolume,
@@ -1050,36 +1051,131 @@ function resizeCanvas() {
   }
 }
 
-function isPointInsideRadar(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) {
-    return false;
-  }
+function getCanvasCoordinates(event) {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    return null;
+  }
 
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const canvasX = (clientX - rect.left) * scaleX;
-  const canvasY = (clientY - rect.top) * scaleY;
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  };
+}
 
-  const { width, height } = canvas;
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const squareSize = Math.min(width, height);
-  const labelPadding = squareSize * 0.05;
-  const radarRadius = Math.max(10, squareSize / 2 - labelPadding);
+function getRadarGeometry() {
+  const { width, height } = canvas;
+  const squareSize = Math.min(width, height);
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const labelPadding = squareSize * 0.05;
+  const radarRadius = Math.max(10, squareSize / 2 - labelPadding);
+  const maxCompassOffset = squareSize / 2 - squareSize * 0.02;
+  const compassOffset = Math.min(radarRadius + squareSize * 0.03, maxCompassOffset);
+  const rotationRad = (state.radarRotationQuarterTurns * Math.PI) / 2;
+  const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
+  return {
+    centerX,
+    centerY,
+    radarRadius,
+    compassOffset,
+    rotationRad,
+    radarRangeKm,
+  };
+}
 
-  const dx = canvasX - centerX;
-  const dy = canvasY - centerY;
-  return Math.hypot(dx, dy) <= radarRadius;
+function rotateVector(x, y, angleRad) {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  return {
+    x: x * cos - y * sin,
+    y: x * sin + y * cos,
+  };
+}
+
+function projectCraftToScreen(craft, geometry) {
+  const distanceKm = Number.isFinite(craft.distanceKm)
+    ? craft.distanceKm
+    : geometry.radarRangeKm;
+  const bearing = Number.isFinite(craft.bearing) ? craft.bearing : 0;
+  const distanceRatio = Math.min(1, distanceKm / geometry.radarRangeKm);
+  const angleRad = deg2rad(bearing);
+  const relativeX = Math.sin(angleRad) * distanceRatio * geometry.radarRadius;
+  const relativeY = -Math.cos(angleRad) * distanceRatio * geometry.radarRadius;
+  const rotated = rotateVector(relativeX, relativeY, geometry.rotationRad);
+  return {
+    x: geometry.centerX + rotated.x,
+    y: geometry.centerY + rotated.y,
+  };
+}
+
+function findAircraftNearPoint(canvasX, canvasY, geometry) {
+  let closest = null;
+  let closestDistance = Infinity;
+
+  for (const craft of state.trackedAircraft) {
+    const { x, y } = projectCraftToScreen(craft, geometry);
+    const dx = canvasX - x;
+    const dy = canvasY - y;
+    const distance = Math.hypot(dx, dy);
+    const markerWidth = getBlipMarkerWidth(craft, geometry.radarRadius);
+    const markerHeight = getBlipMarkerHeight(craft, geometry.radarRadius);
+    const hitRadius = Math.max(markerWidth, markerHeight) * 0.55;
+    if (distance <= hitRadius && distance < closestDistance) {
+      closest = craft;
+      closestDistance = distance;
+    }
+  }
+
+  return closest;
+}
+
+function isClickInsideRadar(canvasX, canvasY, geometry) {
+  const dx = canvasX - geometry.centerX;
+  const dy = canvasY - geometry.centerY;
+  return Math.hypot(dx, dy) <= geometry.radarRadius;
+}
+
+function isClickOnCompassNorth(canvasX, canvasY, geometry) {
+  const northVector = rotateVector(0, -geometry.compassOffset, geometry.rotationRad);
+  const northX = geometry.centerX + northVector.x;
+  const northY = geometry.centerY + northVector.y;
+  const dx = canvasX - northX;
+  const dy = canvasY - northY;
+  const tolerance = Math.max(18, geometry.radarRadius * 0.1);
+  return Math.hypot(dx, dy) <= tolerance;
 }
 
 function handleRadarTap(event) {
-  if (!isPointInsideRadar(event.clientX, event.clientY)) {
-    return;
-  }
+  const coords = getCanvasCoordinates(event);
+  if (!coords) {
+    return;
+  }
 
-  state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
-  writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
+  const geometry = getRadarGeometry();
+  if (!isClickInsideRadar(coords.x, coords.y, geometry)) {
+    return;
+  }
+
+  if (isClickOnCompassNorth(coords.x, coords.y, geometry)) {
+    state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
+    writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
+    return;
+  }
+
+  const selectedCraft = findAircraftNearPoint(coords.x, coords.y, geometry);
+  if (selectedCraft) {
+    state.selectedAircraftKey = selectedCraft.key;
+    state.lastPingedAircraft = selectedCraft;
+    updateAircraftInfo();
+    return;
+  }
+
+  state.selectedAircraftKey = null;
+  state.lastPingedAircraft = null;
+  updateAircraftInfo();
 }
 
 const audioContext = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)
@@ -1284,19 +1380,29 @@ function processAircraftData(data) {
     }
   }
 
-  state.trackedAircraft = aircraft;
-  state.previousPositions = nextPositions;
+  state.trackedAircraft = aircraft;
+  state.previousPositions = nextPositions;
 
-  if (state.paintedRotation.size > 0) {
-    const activeKeys = new Set(aircraft.map((craft) => craft.key));
+  if (state.paintedRotation.size > 0) {
+    const activeKeys = new Set(aircraft.map((craft) => craft.key));
     for (const key of state.paintedRotation.keys()) {
       if (!activeKeys.has(key)) {
         state.paintedRotation.delete(key);
       }
-    }
-  }
+    }
+  }
 
-  if (inboundNames.length > 0) {
+  if (state.selectedAircraftKey) {
+    const selected = aircraft.find((craft) => craft.key === state.selectedAircraftKey);
+    if (selected) {
+      state.lastPingedAircraft = selected;
+    } else {
+      state.selectedAircraftKey = null;
+      state.lastPingedAircraft = null;
+    }
+  }
+
+  if (inboundNames.length > 0) {
     const unique = [...new Set(inboundNames)];
     const message = unique.length === 1
       ? `Inbound alert: ${unique[0]}`
@@ -1590,8 +1696,10 @@ function drawRadar(deltaTime) {
           hex: craft.hex || craft.flight,
           flight: craft.flight || null,
         });
-        state.paintedRotation.set(key, state.currentSweepId);
-        state.lastPingedAircraft = craft;
+        state.paintedRotation.set(key, state.currentSweepId);
+        if (!state.selectedAircraftKey || state.selectedAircraftKey === craft.key) {
+          state.lastPingedAircraft = craft;
+        }
         playBeep(getBeepFrequencyForAltitude(craft.altitude), 50);
       }
     }
