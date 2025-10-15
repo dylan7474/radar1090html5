@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.6.6';
+const APP_VERSION = 'V1.7.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -22,6 +22,8 @@ const BEEP_VOLUME_STORAGE_KEY = 'beepVolumeLevel';
 const RANGE_INDEX_STORAGE_KEY = 'radarRangeIndex';
 const ALERT_DISTANCE_STORAGE_KEY = 'inboundAlertDistanceKm';
 const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
+const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
+const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
 const DUMP1090_PROTOCOL = 'https';
 const DUMP1090_HOST = 'dump1090.dylanjones.org';
 const DUMP1090_PORT = 443;
@@ -46,17 +48,34 @@ const writeCookie = (name, value, maxAgeDays = COOKIE_MAX_AGE_DAYS) => {
 };
 
 const readIntPreference = (key, fallback, min, max) => {
-  const raw = readCookie(key);
-  if (raw === null) {
-    return fallback;
-  }
+  const raw = readCookie(key);
+  if (raw === null) {
+    return fallback;
+  }
 
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed)) {
     return fallback;
   }
 
-  return Math.min(max, Math.max(min, parsed));
+  return Math.min(max, Math.max(min, parsed));
+};
+
+const readBooleanPreference = (key, fallback) => {
+  const raw = readCookie(key);
+  if (raw === null) {
+    return fallback;
+  }
+
+  if (raw === 'true') {
+    return true;
+  }
+
+  if (raw === 'false') {
+    return false;
+  }
+
+  return fallback;
 };
 
 const readReceiverCoordinate = (storageKey, fallback) => {
@@ -102,6 +121,11 @@ const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
 const aircraftDetailsToggleBtn = document.getElementById('aircraft-details-toggle');
 const aircraftDetailsStateEl = document.getElementById('aircraft-details-state');
+const mainAppEl = document.querySelector('main.app');
+const controlsPanelEl = document.getElementById('controls-panel');
+const dataPanelEl = document.getElementById('data-panel');
+const controlsPanelToggleBtn = document.getElementById('controls-panel-toggle');
+const dataPanelToggleBtn = document.getElementById('data-panel-toggle');
 
 const ICON_SCALE_DEFAULT = 1;
 const ICON_SCALE_MIN = 0.65;
@@ -378,10 +402,18 @@ const savedAlertRadius = readIntPreference(
   20,
 );
 const savedRadarOrientation = readIntPreference(
-  RADAR_ORIENTATION_STORAGE_KEY,
-  0,
-  0,
-  3,
+  RADAR_ORIENTATION_STORAGE_KEY,
+  0,
+  0,
+  3,
+);
+const savedControlsPanelVisible = readBooleanPreference(
+  CONTROLS_PANEL_VISIBLE_STORAGE_KEY,
+  true,
+);
+const savedDataPanelVisible = readBooleanPreference(
+  DATA_PANEL_VISIBLE_STORAGE_KEY,
+  true,
 );
 const state = {
   server: {
@@ -413,10 +445,12 @@ const state = {
   rotationPeriodMs: 0,
   radarRotationQuarterTurns: savedRadarOrientation,
   dataConnectionOk: false,
-  message: '',
-  messageAlert: false,
-  messageUntil: 0,
-  showAircraftDetails: savedAircraftDetailsSetting === 'true',
+  message: '',
+  messageAlert: false,
+  messageUntil: 0,
+  showAircraftDetails: savedAircraftDetailsSetting === 'true',
+  controlsPanelVisible: savedControlsPanelVisible,
+  dataPanelVisible: savedDataPanelVisible,
 };
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
@@ -488,18 +522,60 @@ function refreshAudioStreamControls() {
 }
 
 function refreshAircraftDetailsControls() {
-  if (!aircraftDetailsToggleBtn) {
-    return;
-  }
+  if (!aircraftDetailsToggleBtn) {
+    return;
+  }
 
-  const enabled = state.showAircraftDetails;
-  aircraftDetailsToggleBtn.textContent = enabled ? 'Hide' : 'Show';
-  aircraftDetailsToggleBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-  aircraftDetailsToggleBtn.classList.toggle('primary', enabled);
+  const enabled = state.showAircraftDetails;
+  aircraftDetailsToggleBtn.textContent = enabled ? 'Hide' : 'Show';
+  aircraftDetailsToggleBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  aircraftDetailsToggleBtn.classList.toggle('primary', enabled);
 
-  if (aircraftDetailsStateEl) {
-    aircraftDetailsStateEl.textContent = enabled ? 'Visible' : 'Hidden';
-  }
+  if (aircraftDetailsStateEl) {
+    aircraftDetailsStateEl.textContent = enabled ? 'Visible' : 'Hidden';
+  }
+}
+
+function refreshPanelVisibility() {
+  if (!mainAppEl) {
+    return;
+  }
+
+  const controlsVisible = state.controlsPanelVisible;
+  const dataVisible = state.dataPanelVisible;
+
+  mainAppEl.classList.toggle('controls-hidden', !controlsVisible);
+  mainAppEl.classList.toggle('data-hidden', !dataVisible);
+
+  if (controlsPanelEl) {
+    controlsPanelEl.toggleAttribute('hidden', !controlsVisible);
+    controlsPanelEl.setAttribute('aria-hidden', controlsVisible ? 'false' : 'true');
+  }
+
+  if (dataPanelEl) {
+    dataPanelEl.toggleAttribute('hidden', !dataVisible);
+    dataPanelEl.setAttribute('aria-hidden', dataVisible ? 'false' : 'true');
+  }
+
+  if (controlsPanelToggleBtn) {
+    controlsPanelToggleBtn.textContent = controlsVisible ? 'Hide Controls' : 'Show Controls';
+    controlsPanelToggleBtn.setAttribute('aria-pressed', controlsVisible ? 'true' : 'false');
+    controlsPanelToggleBtn.setAttribute('aria-expanded', controlsVisible ? 'true' : 'false');
+    controlsPanelToggleBtn.classList.toggle('primary', !controlsVisible);
+  }
+
+  if (dataPanelToggleBtn) {
+    dataPanelToggleBtn.textContent = dataVisible ? 'Hide Data' : 'Show Data';
+    dataPanelToggleBtn.setAttribute('aria-pressed', dataVisible ? 'true' : 'false');
+    dataPanelToggleBtn.setAttribute('aria-expanded', dataVisible ? 'true' : 'false');
+    dataPanelToggleBtn.classList.toggle('primary', !dataVisible);
+  }
+
+  if (canvas) {
+    requestAnimationFrame(() => {
+      resizeCanvas();
+    });
+  }
 }
 
 function ensureAudioUnlockListener() {
@@ -624,10 +700,11 @@ if (versionEl) {
 }
 
 refreshAircraftDetailsControls();
+refreshPanelVisibility();
 
 if (aircraftDetailsToggleBtn) {
-  aircraftDetailsToggleBtn.addEventListener('click', () => {
-    state.showAircraftDetails = !state.showAircraftDetails;
+  aircraftDetailsToggleBtn.addEventListener('click', () => {
+    state.showAircraftDetails = !state.showAircraftDetails;
     writeCookie(
       AIRCRAFT_DETAILS_STORAGE_KEY,
       state.showAircraftDetails ? 'true' : 'false',
@@ -744,6 +821,24 @@ alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
 alertIncreaseBtn?.addEventListener('click', () => adjustAlertRadius(1));
 radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
 canvas?.addEventListener('click', handleRadarTap);
+
+controlsPanelToggleBtn?.addEventListener('click', () => {
+  state.controlsPanelVisible = !state.controlsPanelVisible;
+  writeCookie(
+    CONTROLS_PANEL_VISIBLE_STORAGE_KEY,
+    state.controlsPanelVisible ? 'true' : 'false',
+  );
+  refreshPanelVisibility();
+});
+
+dataPanelToggleBtn?.addEventListener('click', () => {
+  state.dataPanelVisible = !state.dataPanelVisible;
+  writeCookie(
+    DATA_PANEL_VISIBLE_STORAGE_KEY,
+    state.dataPanelVisible ? 'true' : 'false',
+  );
+  refreshPanelVisibility();
+});
 
 function deg2rad(deg) {
   return (deg * Math.PI) / 180;

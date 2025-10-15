@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.6.6
+**Current Version:** V1.7.0
 
 ---
 
@@ -27,6 +27,7 @@ from any modern browser.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
 - Optional aircraft label overlay toggled from the sidebar to display callsigns, altitude, and inbound distance/ETA around each blip.
+- Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
 - Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
@@ -63,7 +64,8 @@ from any modern browser.
 All user-facing preferences persist automatically. To clear them, delete the
 `radar1090` cookies (e.g., `receiverLat`, `receiverLon`, `airbandMuted`,
 `showAircraftDetails`, `beepVolumeLevel`, `radarRangeIndex`,
-`inboundAlertDistanceKm`, `dump1090BasePath`) via your browser's developer tools.
+`inboundAlertDistanceKm`, `controlsPanelVisible`, `dataPanelVisible`,
+`dump1090BasePath`) via your browser's developer tools.
 
 The dashboard expects the dump1090-fa JSON endpoints to live at
 `http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the

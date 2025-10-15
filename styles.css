@@ -54,10 +54,58 @@ main.app {
   align-items: start;
 }
 
+.panel-toggle-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.panel-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+main.app.controls-hidden {
+  grid-template-columns: minmax(640px, 1fr) clamp(190px, 18vw, 225px);
+}
+
+main.app.data-hidden {
+  grid-template-columns: clamp(190px, 18vw, 225px) minmax(640px, 1fr);
+}
+
+main.app.controls-hidden.data-hidden {
+  grid-template-columns: minmax(640px, 1fr);
+}
+
+main.app.controls-hidden .controls-panel {
+  display: none;
+}
+
+main.app.data-hidden .data-panel {
+  display: none;
+}
+
 @media (max-width: 1400px) {
   main.app {
     grid-template-columns: clamp(180px, 20vw, 210px) minmax(560px, 1fr) clamp(180px, 20vw, 210px);
     gap: clamp(0.85rem, 2.2vw, 2rem);
+  }
+
+  main.app.controls-hidden {
+    grid-template-columns: minmax(560px, 1fr) clamp(180px, 20vw, 210px);
+  }
+
+  main.app.data-hidden {
+    grid-template-columns: clamp(180px, 20vw, 210px) minmax(560px, 1fr);
+  }
+
+  main.app.controls-hidden.data-hidden {
+    grid-template-columns: minmax(560px, 1fr);
   }
 }
 
@@ -69,6 +117,18 @@ main.app {
   main.app {
     grid-template-columns: clamp(180px, 22vw, 210px) minmax(0, 1fr);
     width: min(100%, 1320px);
+  }
+
+  main.app.controls-hidden {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  main.app.data-hidden {
+    grid-template-columns: clamp(180px, 22vw, 210px) minmax(0, 1fr);
+  }
+
+  main.app.controls-hidden.data-hidden {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .data-panel {
@@ -357,6 +417,16 @@ canvas#radar {
 
 @media (max-width: 900px) {
   main.app {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-toggle-bar {
+    justify-content: center;
+  }
+
+  main.app.controls-hidden,
+  main.app.data-hidden,
+  main.app.controls-hidden.data-hidden {
     grid-template-columns: 1fr;
   }
 
