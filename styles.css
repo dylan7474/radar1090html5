@@ -46,11 +46,19 @@ body {
 
 main.app {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 260px) minmax(620px, 1fr) minmax(220px, 260px);
   width: min(100%, 1920px);
-  gap: clamp(1.25rem, 3vw, 3rem);
-  padding: clamp(1.25rem, 3vw, 3rem);
+  gap: clamp(1.1rem, 2.5vw, 2.75rem);
+  padding: clamp(1.1rem, 3vw, 3rem);
   margin: 0 auto;
+  align-items: start;
+}
+
+@media (max-width: 1400px) {
+  main.app {
+    grid-template-columns: minmax(210px, 240px) minmax(520px, 1fr) minmax(210px, 240px);
+    gap: clamp(1rem, 2.5vw, 2.25rem);
+  }
 }
 
 @media (max-width: 1150px) {
@@ -59,8 +67,13 @@ main.app {
   }
 
   main.app {
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(210px, 240px) minmax(0, 1fr);
     width: min(100%, 1320px);
+  }
+
+  .data-panel {
+    grid-column: 1 / -1;
+    order: 3;
   }
 
   .radar-container {
@@ -72,16 +85,36 @@ main.app {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
-  padding: 1.5rem;
+  padding: clamp(1rem, 2.2vw, 1.6rem);
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
   box-shadow: 0 30px 60px rgba(0, 0, 0, 0.25);
 }
 
 .sidebar h1 {
-  font-size: 1.4rem;
+  font-size: 1.25rem;
   margin: 0;
+}
+
+.sidebar h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.controls-panel {
+  gap: 1.1rem;
+}
+
+.data-panel {
+  gap: 1.25rem;
+}
+
+.info-stack {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .status {
@@ -119,42 +152,42 @@ main.app {
 .controls {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 .control-panel {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.55rem;
 }
 
 .control-row {
   /* Use CSS grid so Safari keeps labels and values aligned while still wrapping gracefully. */
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;
-  gap: 0.75rem;
+  gap: 0.55rem;
   align-items: center;
-  padding: 0.9rem;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.04);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  padding: 0.5rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(8, 12, 20, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015);
 }
 
 .control-info {
   display: grid;
-  gap: 0.2rem;
+  gap: 0.15rem;
   min-width: 0;
 }
 
 .control-name {
-  font-size: 0.75rem;
-  letter-spacing: 0.14em;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
 .control-value {
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -165,23 +198,25 @@ main.app {
 }
 
 .control-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: stretch;
-  justify-content: flex-start;
+  display: inline-flex;
+  flex-direction: row;
+  gap: 0.3rem;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .control-button {
   appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(53, 255, 153, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(18, 25, 38, 0.85);
   color: var(--text);
-  border-radius: 10px;
-  padding: 0.55rem 1.2rem;
-  font-size: 0.9rem;
+  border-radius: 8px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  min-height: 44px;
+  line-height: 1.1;
+  min-height: 32px;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
@@ -193,16 +228,17 @@ main.app {
 }
 
 .control-button.control-button--square {
-  width: 48px;
-  padding: 0.55rem;
-  font-size: 1.25rem;
+  width: 34px;
+  min-width: 34px;
+  padding: 0.35rem;
+  font-size: 1rem;
   line-height: 1;
 }
 
 .control-button:hover,
 .control-button:focus-visible {
   border-color: var(--accent);
-  background: rgba(53, 255, 153, 0.25);
+  background: rgba(53, 255, 153, 0.22);
   outline: none;
 }
 
@@ -253,7 +289,7 @@ main.app {
 
 .audio {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 .audio-actions {
@@ -321,10 +357,6 @@ canvas#radar {
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
-    order: 2;
-  }
-
   .radar-container {
     order: 1;
   }
@@ -341,18 +373,29 @@ canvas#radar {
   }
 
   .control-buttons {
-    flex-direction: row-reverse;
     justify-content: space-between;
     justify-self: stretch;
-    align-items: center;
-    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
   .control-button {
-    width: 100%;
+    flex: 1 1 calc(50% - 0.25rem);
   }
 
   .control-button.control-button--square {
-    width: calc(50% - 0.25rem);
+    flex: 1 1 calc(50% - 0.25rem);
+    max-width: none;
+  }
+
+  .radar-container {
+    order: 1;
+  }
+
+  .controls-panel {
+    order: 2;
+  }
+
+  .data-panel {
+    order: 3;
   }
 }
