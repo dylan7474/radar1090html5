@@ -11,7 +11,7 @@
 </head>
 <body>
   <main class="app">
-    <section class="sidebar">
+    <section class="sidebar controls-panel">
       <h1>radar1090</h1>
       <div class="status" id="status"></div>
       <section class="controls">
@@ -24,11 +24,11 @@
               <span class="control-meta" id="volume-description">Adjust the audio cue loudness.</span>
             </div>
             <div class="control-buttons">
-              <button type="button" class="control-button control-button--square" id="volume-increase" aria-label="Increase volume">
-                +
-              </button>
               <button type="button" class="control-button control-button--square" id="volume-decrease" aria-label="Decrease volume">
                 &minus;
+              </button>
+              <button type="button" class="control-button control-button--square" id="volume-increase" aria-label="Increase volume">
+                +
               </button>
             </div>
           </div>
@@ -38,11 +38,11 @@
               <span class="control-value" id="range-value">50 km</span>
             </div>
             <div class="control-buttons">
-              <button type="button" class="control-button control-button--square" id="range-increase" aria-label="Increase range">
-                +
-              </button>
               <button type="button" class="control-button control-button--square" id="range-decrease" aria-label="Decrease range">
                 &minus;
+              </button>
+              <button type="button" class="control-button control-button--square" id="range-increase" aria-label="Increase range">
+                +
               </button>
             </div>
           </div>
@@ -52,11 +52,11 @@
               <span class="control-value" id="alert-value">5.0 km</span>
             </div>
             <div class="control-buttons">
-              <button type="button" class="control-button control-button--square" id="alert-increase" aria-label="Increase alert radius">
-                +
-              </button>
               <button type="button" class="control-button control-button--square" id="alert-decrease" aria-label="Decrease alert radius">
                 &minus;
+              </button>
+              <button type="button" class="control-button control-button--square" id="alert-increase" aria-label="Increase alert radius">
+                +
               </button>
             </div>
           </div>
@@ -85,10 +85,6 @@
           </div>
         </div>
       </section>
-      <div class="info-block" id="aircraft-info"></div>
-      <div class="info-block" id="range-info"></div>
-      <div class="info-block" id="receiver-info" aria-live="polite"></div>
-      <div class="message" id="message"></div>
       <section class="audio">
         <h2>Live Audio</h2>
         <p class="hint">The local airband feed plays automatically—use mute if you need quiet.</p>
@@ -106,6 +102,15 @@
     <section class="radar-container">
       <div class="version-chip" id="version" aria-label="Application version"></div>
       <canvas id="radar" width="960" height="640" aria-label="Radar display"></canvas>
+    </section>
+    <section class="sidebar data-panel">
+      <h2>Live Data</h2>
+      <div class="info-stack">
+        <div class="info-block" id="aircraft-info"></div>
+        <div class="info-block" id="range-info"></div>
+        <div class="info-block" id="receiver-info" aria-live="polite"></div>
+      </div>
+      <div class="message" id="message"></div>
     </section>
   </main>
   <script type="module" src="app.js"></script>
