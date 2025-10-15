@@ -29,3 +29,7 @@
   `bash`) so syntax highlighting works across viewers.
 - Maintain the **Future Improvements** section in `README.md` so it reflects the
   highest-priority follow-up ideas after each meaningful feature change.
+- Call out meaningful interaction changes (like radar selection behaviors) in the
+  **Features** section so operators immediately understand how to access them.
+- Bump `APP_VERSION` in `app.js` whenever shipping user-facing changes and ensure the
+  README references stay in sync with the current release number.

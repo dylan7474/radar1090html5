@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'v1.6.1';
+const APP_VERSION = 'V1.6.2';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -404,6 +404,7 @@ const state = {
   airspacesInRange: [],
   lastPingedAircraft: null,
   selectedAircraftKey: null,
+  displayOnlySelected: false,
   inboundAlertDistanceKm: savedAlertRadius,
   rangeStepIndex: savedRangeStepIndex,
   beepVolume: savedBeepVolume,
@@ -831,6 +832,22 @@ function getCraftKey(craft) {
   return `${lat},${lon}`;
 }
 
+function shouldDisplayCraft(craft) {
+  if (!state.displayOnlySelected || !state.selectedAircraftKey) {
+   return true;
+  }
+  const key = craft.key || getCraftKey(craft);
+  return key === state.selectedAircraftKey;
+}
+
+function shouldDisplayBlip(blip) {
+  if (!state.displayOnlySelected || !state.selectedAircraftKey) {
+   return true;
+  }
+  const blipKey = blip.key || blip.hex || blip.flight || null;
+  return blipKey === state.selectedAircraftKey;
+}
+
 function getBeepFrequencyForAltitude(altitude) {
   if (altitude == null || altitude < 0) return FREQ_MID;
   if (altitude < ALT_LOW_FEET) return FREQ_LOW;
@@ -877,7 +894,7 @@ function updateRangeInfo() {
     { label: 'Volume', value: `${state.beepVolume}` },
   ];
 
-  const trackedCount = state.trackedAircraft.length;
+  const trackedCount = state.trackedAircraft.filter(shouldDisplayCraft).length;
   rangeLines.push({ label: 'Contacts', value: trackedCount > 0 ? String(trackedCount) : 'None' });
 
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
@@ -958,6 +975,8 @@ function clearRadarContacts() {
   state.activeBlips = [];
   state.paintedRotation.clear();
   state.lastPingedAircraft = null;
+  state.selectedAircraftKey = null;
+  state.displayOnlySelected = false;
 }
 
 function adjustRange(delta) {
@@ -1118,6 +1137,9 @@ function findAircraftNearPoint(canvasX, canvasY, geometry) {
   let closestDistance = Infinity;
 
   for (const craft of state.trackedAircraft) {
+    if (!shouldDisplayCraft(craft)) {
+      continue;
+    }
     const { x, y } = projectCraftToScreen(craft, geometry);
     const dx = canvasX - x;
     const dy = canvasY - y;
@@ -1158,15 +1180,26 @@ function handleRadarTap(event) {
 
   const selectedCraft = findAircraftNearPoint(coords.x, coords.y, geometry);
   if (selectedCraft) {
-    state.selectedAircraftKey = selectedCraft.key;
+    if (state.selectedAircraftKey === selectedCraft.key) {
+      state.displayOnlySelected = !state.displayOnlySelected;
+      if (state.displayOnlySelected && state.selectedAircraftKey) {
+        state.activeBlips = state.activeBlips.filter((blip) => shouldDisplayBlip(blip));
+      }
+    } else {
+      state.selectedAircraftKey = selectedCraft.key;
+      state.displayOnlySelected = false;
+    }
     state.lastPingedAircraft = selectedCraft;
     updateAircraftInfo();
+    updateRangeInfo();
     return;
   }
 
   state.selectedAircraftKey = null;
   state.lastPingedAircraft = null;
+  state.displayOnlySelected = false;
   updateAircraftInfo();
+  updateRangeInfo();
 }
 
 const audioContext = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)
@@ -1390,6 +1423,7 @@ function processAircraftData(data) {
     } else {
       state.selectedAircraftKey = null;
       state.lastPingedAircraft = null;
+      state.displayOnlySelected = false;
     }
   }
 
@@ -1662,6 +1696,9 @@ function drawRadar(deltaTime) {
   const newBlips = [];
 
   for (const craft of state.trackedAircraft) {
+    if (!shouldDisplayCraft(craft)) {
+     continue;
+    }
     const key = craft.key || getCraftKey(craft);
     if (state.paintedRotation.get(key) !== state.currentSweepId) {
       const target = craft.bearing;
@@ -1674,6 +1711,7 @@ function drawRadar(deltaTime) {
         const y = centerY - Math.cos(angleRad) * screenRadius;
         const minutesToBase = craft.minutesToBase;
         newBlips.push({
+          key,
           x,
           y,
           spawn: now,
@@ -1702,7 +1740,7 @@ function drawRadar(deltaTime) {
   }
 
   const rotationPeriod = state.rotationPeriodMs || (360 / sweepSpeed) * 1000;
-  state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod);
+  state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
   // draw blips
   for (const blip of state.activeBlips) {
