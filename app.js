@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.1';
+const APP_VERSION = 'V1.7.2';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1000,19 +1000,12 @@ function updateRangeInfo() {
     .join('');
 }
 
-function formatCoordinate(value, axis) {
-  if (!Number.isFinite(value)) {
-    return 'Unknown';
-  }
+function formatCoordinate(value) {
+  if (!Number.isFinite(value)) {
+    return 'Unknown';
+  }
 
-  const hemisphere = (() => {
-    if (value > 0) return axis === 'lat' ? 'N' : 'E';
-    if (value < 0) return axis === 'lat' ? 'S' : 'W';
-    return '';
-  })();
-
-  const magnitude = Math.abs(value).toFixed(4);
-  return hemisphere ? `${magnitude}° ${hemisphere}` : `${magnitude}°`;
+  return `${value.toFixed(4)}°`;
 }
 
 function findAirspacesInRange(rangeKm) {
@@ -1043,9 +1036,9 @@ function updateReceiverInfo() {
   }
 
   const { lat, lon, hasOverride } = state.receiver;
-  const lines = [
-    { label: 'Latitude', value: formatCoordinate(lat, 'lat') },
-    { label: 'Longitude', value: formatCoordinate(lon, 'lon') },
+  const lines = [
+    { label: 'Latitude', value: formatCoordinate(lat) },
+    { label: 'Longitude', value: formatCoordinate(lon) },
     { label: 'Source', value: hasOverride ? 'Stored override' : 'Default config' },
   ];
 
