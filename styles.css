@@ -51,7 +51,7 @@ main.app {
   gap: clamp(0.9rem, 2vw, 2.3rem);
   padding: clamp(1rem, 2.6vw, 2.6rem);
   margin: 0 auto;
-  align-items: start;
+  align-items: center;
 }
 
 .panel-toggle-bar {
