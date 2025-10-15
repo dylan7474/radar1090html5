@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.0';
+const APP_VERSION = 'V1.7.1';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1141,11 +1141,11 @@ function updateAircraftInfo() {
     lines.push({ label: 'Signal', value: formattedSignal });
   }
 
-  if (Number.isFinite(info.lastMessageAgeSec)) {
-    const seconds = info.lastMessageAgeSec;
-    const seenLabel = seconds < 0.1 ? 'Live' : `${seconds.toFixed(1)} s ago`;
-    lines.push({ label: 'Last seen', value: seenLabel });
-  }
+  if (Number.isFinite(info.lastMessageAgeSec)) {
+    const seconds = info.lastMessageAgeSec;
+    const seenLabel = seconds < 0.1 ? 'Live' : `${seconds.toFixed(1)} s`;
+    lines.push({ label: 'Last seen', value: seenLabel });
+  }
 
   aircraftInfoEl.innerHTML = lines
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
