@@ -10,6 +10,39 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div
+    class="auth-overlay auth-overlay--hidden"
+    id="auth-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="auth-title"
+  >
+    <form class="auth-card" id="auth-form" novalidate>
+      <h2 class="auth-title" id="auth-title">Operator Access</h2>
+      <p class="auth-intro">Enter your credentials to start radar monitoring.</p>
+      <label class="auth-label" for="auth-username">Username</label>
+      <input
+        class="auth-input"
+        id="auth-username"
+        name="username"
+        type="text"
+        inputmode="text"
+        autocomplete="username"
+        required
+      />
+      <label class="auth-label" for="auth-password">Password</label>
+      <input
+        class="auth-input"
+        id="auth-password"
+        name="password"
+        type="password"
+        autocomplete="current-password"
+        required
+      />
+      <p class="auth-error" id="auth-error" role="alert" aria-live="assertive"></p>
+      <button type="submit" class="control-button auth-submit">Sign In</button>
+    </form>
+  </div>
   <main class="app">
     <div class="panel-toggle-bar" role="group" aria-label="Layout controls">
       <button

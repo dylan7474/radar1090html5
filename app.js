@@ -1,4 +1,4 @@
-import { CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
+import { AUTH_CONFIG, CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
 
 const REFRESH_INTERVAL_MS = 5000;
 const AUDIO_RETRY_INTERVAL_MS = 8000;
@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.3';
+const APP_VERSION = 'V1.8.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -29,6 +29,15 @@ const DUMP1090_HOST = 'dump1090.dylanjones.org';
 const DUMP1090_PORT = 443;
 // Persist user preferences in cookies so they survive reloads and browser restarts.
 const COOKIE_MAX_AGE_DAYS = 365;
+const AUTH_SESSION_COOKIE = 'authSessionActive';
+const expectedAuthUsername =
+  typeof AUTH_CONFIG?.username === 'string' ? AUTH_CONFIG.username.trim() : '';
+const expectedAuthPassword =
+  typeof AUTH_CONFIG?.password === 'string' ? AUTH_CONFIG.password : '';
+const isAuthEnabled = expectedAuthUsername.length > 0 && expectedAuthPassword.length > 0;
+const AUTH_SESSION_MAX_AGE_DAYS = Number.isFinite(AUTH_CONFIG?.sessionMaxAgeDays)
+  ? Math.max(1, AUTH_CONFIG.sessionMaxAgeDays)
+  : 1;
 
 const readCookie = (name) => {
   const cookiePrefix = `${encodeURIComponent(name)}=`;
@@ -126,6 +135,105 @@ const controlsPanelEl = document.getElementById('controls-panel');
 const dataPanelEl = document.getElementById('data-panel');
 const controlsPanelToggleBtn = document.getElementById('controls-panel-toggle');
 const dataPanelToggleBtn = document.getElementById('data-panel-toggle');
+const authOverlayEl = document.getElementById('auth-overlay');
+const authFormEl = document.getElementById('auth-form');
+const authUsernameInput = document.getElementById('auth-username');
+const authPasswordInput = document.getElementById('auth-password');
+const authErrorEl = document.getElementById('auth-error');
+
+const setAppLockState = (locked) => {
+  if (!mainAppEl) {
+    return;
+  }
+
+  if (locked) {
+    mainAppEl.classList.add('app--locked');
+    mainAppEl.setAttribute('aria-hidden', 'true');
+    return;
+  }
+
+  mainAppEl.classList.remove('app--locked');
+  mainAppEl.removeAttribute('aria-hidden');
+};
+
+const setAuthError = (message = '') => {
+  if (!authErrorEl) {
+    return;
+  }
+
+  authErrorEl.textContent = message;
+};
+
+const focusAuthUsername = () => {
+  window.setTimeout(() => {
+    if (authUsernameInput) {
+      authUsernameInput.focus();
+    }
+  }, 0);
+};
+
+const showAuthOverlay = () => {
+  if (!authOverlayEl || !isAuthEnabled) {
+    setAppLockState(false);
+    return;
+  }
+
+  authOverlayEl.classList.remove('auth-overlay--hidden');
+  setAppLockState(true);
+  focusAuthUsername();
+};
+
+const hideAuthOverlay = () => {
+  if (authOverlayEl) {
+    authOverlayEl.classList.add('auth-overlay--hidden');
+  }
+
+  if (authFormEl) {
+    authFormEl.reset();
+  }
+
+  setAuthError('');
+  setAppLockState(false);
+};
+
+const credentialsMatch = (username, password) => {
+  if (!isAuthEnabled) {
+    return true;
+  }
+
+  const normalizedUsername = typeof username === 'string' ? username.trim() : '';
+  const providedPassword = typeof password === 'string' ? password : '';
+  return normalizedUsername === expectedAuthUsername && providedPassword === expectedAuthPassword;
+};
+
+if (isAuthEnabled && authFormEl && authOverlayEl) {
+  const hasExistingSession = readCookie(AUTH_SESSION_COOKIE) === 'true';
+  if (hasExistingSession) {
+    hideAuthOverlay();
+  } else {
+    showAuthOverlay();
+  }
+
+  authFormEl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const submittedUsername = authUsernameInput?.value ?? '';
+    const submittedPassword = authPasswordInput?.value ?? '';
+
+    if (credentialsMatch(submittedUsername, submittedPassword)) {
+      writeCookie(AUTH_SESSION_COOKIE, 'true', AUTH_SESSION_MAX_AGE_DAYS);
+      hideAuthOverlay();
+      return;
+    }
+
+    setAuthError('Incorrect username or password. Please try again.');
+    if (authPasswordInput) {
+      authPasswordInput.select();
+      authPasswordInput.focus();
+    }
+  });
+} else {
+  hideAuthOverlay();
+}
 
 const ICON_SCALE_DEFAULT = 1;
 const ICON_SCALE_MIN = 0.65;

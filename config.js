@@ -3,6 +3,12 @@ export const DEFAULT_RECEIVER_LOCATION = Object.freeze({
   lon: -1,
 });
 
+export const AUTH_CONFIG = Object.freeze({
+  username: 'operator',
+  password: 'radar1090',
+  sessionMaxAgeDays: 7,
+});
+
 export const CONTROLLED_AIRSPACES = Object.freeze([
   Object.freeze({
     icao: 'EGNV',

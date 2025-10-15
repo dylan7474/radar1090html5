@@ -34,6 +34,81 @@ body {
   padding: clamp(1rem, 3vw, 3rem);
 }
 
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 14, 0.92);
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  backdrop-filter: blur(4px);
+  z-index: 20;
+}
+
+.auth-overlay--hidden {
+  display: none;
+}
+
+.auth-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+  display: grid;
+  width: min(100%, 360px);
+  gap: 0.85rem;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.35);
+}
+
+.auth-title {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.auth-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.auth-label {
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-input {
+  background: rgba(11, 14, 23, 0.85);
+  border: 1px solid rgba(133, 146, 173, 0.35);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+.auth-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.auth-error {
+  min-height: 1.25rem;
+  margin: 0;
+  color: var(--alert);
+  font-size: 0.85rem;
+}
+
+.auth-submit {
+  justify-content: center;
+}
+
+.app--locked {
+  filter: blur(1.5px);
+  pointer-events: none;
+}
+
 @supports (-webkit-touch-callout: none) {
   html {
     height: -webkit-fill-available;

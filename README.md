@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.7.3
+**Current Version:** V1.8.0
 
 ---
 
@@ -26,6 +26,7 @@ from any modern browser.
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
+- Optional operator authentication gate that prompts for a username and password before unlocking the dashboard.
 - Optional aircraft label overlay toggled from the sidebar to display callsigns, altitude, and inbound distance/ETA around each blip.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
 - Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
@@ -65,7 +66,7 @@ All user-facing preferences persist automatically. To clear them, delete the
 `radar1090` cookies (e.g., `receiverLat`, `receiverLon`, `airbandMuted`,
 `showAircraftDetails`, `beepVolumeLevel`, `radarRangeIndex`,
 `inboundAlertDistanceKm`, `controlsPanelVisible`, `dataPanelVisible`,
-`dump1090BasePath`) via your browser's developer tools.
+`dump1090BasePath`, `authSessionActive`) via your browser's developer tools.
 
 The dashboard expects the dump1090-fa JSON endpoints to live at
 `http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the
@@ -80,6 +81,16 @@ Controlled airspace footprints are also defined in [`config.js`](config.js) via 
 latitude/longitude, and radius in kilometers. Tune or expand this list to reflect the
 airports you care about monitoring; the radar will automatically highlight any whose
 controlled region falls inside the active range rings.
+
+### Authentication
+
+- Gate access to the dashboard by editing [`AUTH_CONFIG`](config.js) with your desired
+  `username`, `password`, and optional `sessionMaxAgeDays` cookie lifetime.
+- The defaults ship as `operator` / `radar1090`. Update them before deploying in a
+  shared environment and distribute the new credentials securely.
+- Successful sign-ins set an `authSessionActive` cookie so returning operators avoid
+  repeated prompts until the cookie expires. Clearing cookies or waiting for the
+  expiry window will require re-authentication.
 
 ## Troubleshooting
 
