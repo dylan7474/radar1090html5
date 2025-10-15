@@ -3,6 +3,8 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
+**Current Version:** V1.6.2
+
 ---
 
 ## Table of Contents
@@ -30,8 +32,12 @@ from any modern browser.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
 - Click any aircraft blip to lock the sidebar readout to that contact.
-  Click an empty patch of the scope to resume automatic cycling.
-- When a contact is locked, the radar ping follows that aircraft so other traffic stays silent while still rendering on-screen.
+  Click the same blip again to spotlight it as the only rendered target while
+  keeping audio focused. Tap an empty patch of the scope—or the aircraft a
+  third time—to resume automatic cycling.
+- When a contact is locked, the radar ping follows that aircraft so other
+  traffic stays silent while still rendering on-screen (unless you have toggled
+  the single-contact spotlight mode).
 
 ## Requirements
 
