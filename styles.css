@@ -166,10 +166,10 @@ main.app {
 
 .control-buttons {
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
 .control-button {
@@ -341,8 +341,11 @@ canvas#radar {
   }
 
   .control-buttons {
+    flex-direction: row;
     justify-content: space-between;
     justify-self: stretch;
+    align-items: center;
+    flex-wrap: wrap;
   }
 
   .control-button {
