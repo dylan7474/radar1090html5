@@ -96,6 +96,7 @@ const rangeIncreaseBtn = document.getElementById('range-increase');
 const alertValueEl = document.getElementById('alert-value');
 const alertDecreaseBtn = document.getElementById('alert-decrease');
 const alertIncreaseBtn = document.getElementById('alert-increase');
+const radarRotateBtn = document.getElementById('radar-rotate');
 const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
@@ -740,10 +741,11 @@ rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
 rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
 alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
 alertIncreaseBtn?.addEventListener('click', () => adjustAlertRadius(1));
+radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
 canvas?.addEventListener('click', handleRadarTap);
 
 function deg2rad(deg) {
-  return (deg * Math.PI) / 180;
+  return (deg * Math.PI) / 180;
 }
 
 function rad2deg(rad) {
@@ -1138,18 +1140,9 @@ function isClickInsideRadar(canvasX, canvasY, geometry) {
   return Math.hypot(dx, dy) <= geometry.radarRadius;
 }
 
-function isClickOnCompassTop(canvasX, canvasY, geometry) {
-  // The compass lettering rotates with the radar, but whichever cardinal
-  // direction ends up at the top of the scope is always rendered at the same
-  // screen coordinates: directly above the center point. Anchor the hit test
-  // there so clicks continue to line up with the visible label regardless of
-  // orientation.
-  const topX = geometry.centerX;
-  const topY = geometry.centerY - geometry.compassOffset;
-  const dx = canvasX - topX;
-  const dy = canvasY - topY;
-  const tolerance = Math.max(18, geometry.radarRadius * 0.1);
-  return Math.hypot(dx, dy) <= tolerance;
+function rotateRadarClockwise() {
+  state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
+  writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
 }
 
 function handleRadarTap(event) {
@@ -1160,12 +1153,6 @@ function handleRadarTap(event) {
 
   const geometry = getRadarGeometry();
   if (!isClickInsideRadar(coords.x, coords.y, geometry)) {
-    return;
-  }
-
-  if (isClickOnCompassTop(coords.x, coords.y, geometry)) {
-    state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
-    writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
     return;
   }
 

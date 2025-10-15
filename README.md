@@ -28,7 +28,7 @@ from any modern browser.
 - Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
-- Tap the compass "N" marker to rotate the entire display by 90° increments, allowing full 360° orientation in four taps.
+- Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click an empty patch of the scope to resume automatic cycling.
 
