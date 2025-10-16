@@ -206,6 +206,42 @@ main.app.data-hidden .data-panel {
   color: var(--accent);
 }
 
+.message-ticker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  min-height: 2.25rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(8, 12, 20, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  color: var(--foreground);
+}
+
+.message-ticker__track {
+  display: inline-block;
+  white-space: nowrap;
+  transform: translateX(100%);
+  will-change: transform;
+}
+
+.message-ticker__track--animate {
+  animation: message-ticker-scroll var(--ticker-duration, 12000ms) linear forwards;
+}
+
+@keyframes message-ticker-scroll {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
 .controls {
   display: flex;
   flex-direction: column;

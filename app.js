@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.7';
+const APP_VERSION = 'V1.7.8';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -101,6 +101,8 @@ const aircraftInfoEl = document.getElementById('aircraft-info');
 const rangeInfoEl = document.getElementById('range-info');
 const receiverInfoEl = document.getElementById('receiver-info');
 const messageEl = document.getElementById('message');
+const messageTickerEl = document.getElementById('message-ticker');
+const messageTickerTrackEl = document.getElementById('message-ticker-track');
 const versionEl = document.getElementById('version');
 const volumeLabelEl = document.getElementById('volume-label');
 const volumeDescriptionEl = document.getElementById('volume-description');
@@ -438,6 +440,12 @@ const state = {
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
+};
+
+const tickerState = {
+  queue: [],
+  active: null,
+  shownKeys: new Set(),
 };
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
@@ -950,6 +958,74 @@ function updateMessage() {
   }
 
   messageEl.textContent = state.message;
+}
+
+function playNextTickerMessage() {
+  if (!messageTickerEl || !messageTickerTrackEl) {
+    tickerState.queue.length = 0;
+    tickerState.active = null;
+    return;
+  }
+
+  if (tickerState.active || tickerState.queue.length === 0) {
+    return;
+  }
+
+  const next = tickerState.queue.shift();
+  tickerState.active = next;
+
+  const safeDuration = Math.max(1000, Number(next.duration) || 0);
+  messageTickerEl.style.setProperty('--ticker-duration', `${safeDuration}ms`);
+  messageTickerTrackEl.textContent = next.text;
+  messageTickerTrackEl.classList.remove('message-ticker__track--animate');
+  // Force reflow so the animation restarts for successive messages.
+  void messageTickerTrackEl.offsetWidth;
+  messageTickerTrackEl.classList.add('message-ticker__track--animate');
+  messageTickerEl.setAttribute('data-active', 'true');
+}
+
+function enqueueTickerMessage(text, options = {}) {
+  if (!messageTickerEl || !messageTickerTrackEl) {
+    return;
+  }
+
+  const { duration = 12000, key = null } = options;
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (!trimmed) {
+    return;
+  }
+
+  if (key && tickerState.shownKeys.has(key)) {
+    return;
+  }
+
+  tickerState.queue.push({ text: trimmed, duration });
+  if (key) {
+    tickerState.shownKeys.add(key);
+  }
+
+  if (!tickerState.active) {
+    playNextTickerMessage();
+  }
+}
+
+if (messageTickerTrackEl) {
+  const handleTickerAnimationFinished = () => {
+    if (!messageTickerEl || !messageTickerTrackEl) {
+      tickerState.queue.length = 0;
+      tickerState.active = null;
+      return;
+    }
+
+    tickerState.active = null;
+    messageTickerEl.removeAttribute('data-active');
+    messageTickerTrackEl.classList.remove('message-ticker__track--animate');
+    messageTickerTrackEl.textContent = '';
+    playNextTickerMessage();
+  };
+
+  messageTickerTrackEl.addEventListener('animationend', handleTickerAnimationFinished);
+  messageTickerTrackEl.addEventListener('animationcancel', handleTickerAnimationFinished);
 }
 
 function updateRangeInfo() {
@@ -1820,6 +1896,7 @@ updateStatus();
 updateRangeInfo();
 updateReceiverInfo();
 updateAircraftInfo();
+enqueueTickerMessage('Welcome To Radar1090', { duration: 16000, key: 'welcome' });
 fetchReceiverLocation().catch(() => {});
 pollData();
 requestAnimationFrame(loop);
