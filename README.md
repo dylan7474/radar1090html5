@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.7.7
+**Current Version:** V1.7.8
 
 ---
 
