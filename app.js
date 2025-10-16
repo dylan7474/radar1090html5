@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.3';
+const APP_VERSION = 'V1.7.4';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -100,7 +100,7 @@ const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const aircraftInfoEl = document.getElementById('aircraft-info');
-const rangeInfoEl = document.getElementById('range-info');
+const summaryInfoEl = document.getElementById('summary-info');
 const receiverInfoEl = document.getElementById('receiver-info');
 const messageEl = document.getElementById('message');
 const versionEl = document.getElementById('version');
@@ -983,21 +983,27 @@ function updateRangeInfo() {
   if (rangeValueEl) rangeValueEl.textContent = `${RANGE_STEPS[state.rangeStepIndex]} km`;
   if (alertValueEl) alertValueEl.textContent = `${state.inboundAlertDistanceKm.toFixed(1)} km`;
 
-  const rangeLines = [
-    { label: 'Range', value: `${RANGE_STEPS[state.rangeStepIndex]} km` },
-    { label: 'Alert', value: `${state.inboundAlertDistanceKm.toFixed(1)} km` },
-    { label: 'Volume', value: `${state.beepVolume}` },
-  ];
+  const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
+  state.airspacesInRange = findAirspacesInRange(radarRangeKm);
 
-  const trackedCount = state.trackedAircraft.filter(shouldDisplayCraft).length;
-  rangeLines.push({ label: 'Contacts', value: trackedCount > 0 ? String(trackedCount) : 'None' });
+  if (!summaryInfoEl) {
+    return;
+  }
 
-  const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
-  state.airspacesInRange = findAirspacesInRange(radarRangeKm);
+  const trackedCount = state.trackedAircraft.filter(shouldDisplayCraft).length;
+  const summaryLines = [
+    { label: 'Contacts', value: trackedCount > 0 ? String(trackedCount) : 'None' },
+  ];
 
-  rangeInfoEl.innerHTML = rangeLines
-    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
-    .join('');
+  const airspaceCount = state.airspacesInRange.length;
+  summaryLines.push({
+    label: 'Airspaces in Range',
+    value: airspaceCount > 0 ? String(airspaceCount) : 'None',
+  });
+
+  summaryInfoEl.innerHTML = summaryLines
+    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
+    .join('');
 }
 
 function formatCoordinate(value) {

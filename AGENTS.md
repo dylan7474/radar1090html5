@@ -11,6 +11,7 @@
 ## HTML & CSS
 - Ensure the UI remains functional on both desktop and tablet breakpoints; test changes at 1024px and 768px widths when modifying layout.
 - When adding new styles, group related rules together and avoid redefining existing colors unless required for accessibility.
+- Keep the **Live Data** sidebar focused on situational readouts; avoid duplicating control values such as range, alert distance, or volume that already live in the controls panel.
 
 ## Data & Configuration
 - Validate user-supplied server details before issuing network requests, and surface clear error messages in the UI.
