@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.19';
+const APP_VERSION = 'V1.7.20';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -995,40 +995,11 @@ function renderMessageTicker(text) {
     return;
   }
 
-  const ticker = document.createElement('span');
-  ticker.className = 'message__ticker';
-  ticker.textContent = text;
-  ticker.style.removeProperty('--scroll-duration');
-  messageEl.appendChild(ticker);
-
-  state.messageTickerFrame = requestAnimationFrame(() => {
-    state.messageTickerFrame = null;
-    const containerWidth = messageEl.clientWidth;
-    const contentWidth = ticker.scrollWidth;
-    const shouldScroll = containerWidth > 0 && contentWidth > containerWidth + 1;
-
-    if (shouldScroll) {
-      const durationSeconds = Math.max(
-        MESSAGE_SCROLL_MIN_DURATION_S,
-        (contentWidth + containerWidth) / MESSAGE_SCROLL_SPEED_PX_PER_SEC,
-      );
-      const scrollDurationMs = durationSeconds * 1000;
-      state.messageScrollDurationMs = scrollDurationMs;
-
-      const targetUntil = performance.now() + scrollDurationMs + MESSAGE_SCROLL_END_PADDING_MS;
-      if (state.messageUntil < targetUntil) {
-        state.messageUntil = targetUntil;
-      }
-
-      ticker.style.setProperty('--scroll-duration', `${durationSeconds.toFixed(2)}s`);
-    } else {
-      state.messageScrollDurationMs = 0;
-      ticker.style.removeProperty('--scroll-duration');
-    }
-
-    messageEl.classList.toggle('message--scroll', shouldScroll);
-    state.renderedMessageScroll = shouldScroll;
-  });
+  // Temporarily disable the marquee so all sources that write to the message banner
+  // render as static text for troubleshooting unexpected updates.
+  messageEl.textContent = text;
+  state.renderedMessageScroll = false;
+  state.messageScrollDurationMs = 0;
 }
 
 function displayMessageNow(text, options = {}) {
