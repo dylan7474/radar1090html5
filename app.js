@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.1';
+const APP_VERSION = 'V1.8.2';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1311,11 +1311,6 @@ function updateRangeInfo() {
   const infoLines = [
     { label: 'Contacts', value: trackedCount > 0 ? String(trackedCount) : 'None' },
   ];
-
-  infoLines.push({
-    label: 'Base alert radius',
-    value: state.baseAlertRangeKm > BASE_ALERT_RANGE_MIN_KM ? `${state.baseAlertRangeKm} km` : 'Off',
-  });
 
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   state.airspacesInRange = findAirspacesInRange(radarRangeKm);
