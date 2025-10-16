@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.4';
+const APP_VERSION = 'V1.7.5';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -101,6 +101,8 @@ const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const aircraftInfoEl = document.getElementById('aircraft-info');
 const summaryInfoEl = document.getElementById('summary-info');
+const legacyRangeInfoEl = summaryInfoEl ? null : document.getElementById('range-info');
+const summaryInfoHostEl = summaryInfoEl ?? legacyRangeInfoEl;
 const receiverInfoEl = document.getElementById('receiver-info');
 const messageEl = document.getElementById('message');
 const versionEl = document.getElementById('version');
@@ -976,19 +978,25 @@ function updateMessage() {
   messageEl.classList.toggle('alert', state.messageAlert);
 }
 
+const renderInfoLines = (targetEl, lines) => {
+  if (!targetEl) {
+    return;
+  }
+
+  targetEl.innerHTML = lines
+    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
+    .join('');
+};
+
 function updateRangeInfo() {
-  if (volumeLabelEl) volumeLabelEl.textContent = 'Volume';
-  if (volumeDescriptionEl) volumeDescriptionEl.textContent = 'Adjust the audio cue loudness.';
-  if (volumeValueEl) volumeValueEl.textContent = `${state.beepVolume}`;
-  if (rangeValueEl) rangeValueEl.textContent = `${RANGE_STEPS[state.rangeStepIndex]} km`;
-  if (alertValueEl) alertValueEl.textContent = `${state.inboundAlertDistanceKm.toFixed(1)} km`;
+  if (volumeLabelEl) volumeLabelEl.textContent = 'Volume';
+  if (volumeDescriptionEl) volumeDescriptionEl.textContent = 'Adjust the audio cue loudness.';
+  if (volumeValueEl) volumeValueEl.textContent = `${state.beepVolume}`;
+  if (rangeValueEl) rangeValueEl.textContent = `${RANGE_STEPS[state.rangeStepIndex]} km`;
+  if (alertValueEl) alertValueEl.textContent = `${state.inboundAlertDistanceKm.toFixed(1)} km`;
 
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   state.airspacesInRange = findAirspacesInRange(radarRangeKm);
-
-  if (!summaryInfoEl) {
-    return;
-  }
 
   const trackedCount = state.trackedAircraft.filter(shouldDisplayCraft).length;
   const summaryLines = [
@@ -1001,9 +1009,7 @@ function updateRangeInfo() {
     value: airspaceCount > 0 ? String(airspaceCount) : 'None',
   });
 
-  summaryInfoEl.innerHTML = summaryLines
-    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
-    .join('');
+  renderInfoLines(summaryInfoHostEl, summaryLines);
 }
 
 function formatCoordinate(value) {
