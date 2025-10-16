@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.0';
+const APP_VERSION = 'V1.8.1';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -35,6 +35,7 @@ const ALERT_HISTORY_MAX_AGE_MS = 10 * 60 * 1000;
 const TICKER_MIN_DURATION_MS = 4500;
 const TICKER_MAX_DURATION_MS = 9000;
 const TICKER_CHAR_DURATION_MS = 65;
+const ALERT_HIGHLIGHT_DURATION_MS = 30 * 1000;
 const DUMP1090_PROTOCOL = 'https';
 const DUMP1090_HOST = 'dump1090.dylanjones.org';
 const DUMP1090_PORT = 443;
@@ -464,6 +465,7 @@ const state = {
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
   alertHistory: new Map(),
+  alertHighlights: new Map(),
 };
 
 const tickerState = {
@@ -1058,8 +1060,38 @@ function pruneAlertHistory(now = Date.now()) {
   }
 }
 
+function registerAlertHighlight(craftKey, durationMs = ALERT_HIGHLIGHT_DURATION_MS) {
+  if (!craftKey) {
+    return;
+  }
+
+  const duration = Math.max(1000, durationMs);
+  const expiresAt = Date.now() + duration;
+  state.alertHighlights.set(craftKey, expiresAt);
+}
+
+function pruneAlertHighlights(activeKeys = [], now = Date.now()) {
+  if (!state.alertHighlights) {
+    state.alertHighlights = new Map();
+    return;
+  }
+
+  const activeSet = Array.isArray(activeKeys) ? new Set(activeKeys.filter(Boolean)) : null;
+
+  for (const [key, expiresAt] of state.alertHighlights) {
+    if ((activeSet && !activeSet.has(key)) || now >= expiresAt) {
+      state.alertHighlights.delete(key);
+    }
+  }
+}
+
 function emitTickerAlert(alertKey, message, options = {}) {
-  const { duration = null, cooldownMs = ALERT_COOLDOWN_MS } = options;
+  const {
+    duration = null,
+    cooldownMs = ALERT_COOLDOWN_MS,
+    highlightCraftKey = null,
+    highlightDurationMs = ALERT_HIGHLIGHT_DURATION_MS,
+  } = options;
   const now = Date.now();
   pruneAlertHistory(now);
 
@@ -1072,6 +1104,10 @@ function emitTickerAlert(alertKey, message, options = {}) {
   }
 
   enqueueTickerMessage(message, { duration });
+
+  if (highlightCraftKey) {
+    registerAlertHighlight(highlightCraftKey, highlightDurationMs);
+  }
 }
 
 function evaluateRapidDescentAlert(craft) {
@@ -1091,7 +1127,10 @@ function evaluateRapidDescentAlert(craft) {
   const message = `Rapid descent: ${identifier} dropping ${descentRate.toLocaleString()} fpm${altitudePortion}.`;
   const alertKey = `rapid-descent-${craft.key || identifier}`;
 
-  emitTickerAlert(alertKey, message, { cooldownMs: 3 * 60 * 1000 });
+  emitTickerAlert(alertKey, message, {
+    cooldownMs: 3 * 60 * 1000,
+    highlightCraftKey: craft.key,
+  });
 }
 
 function evaluateBaseApproachAlert(craft) {
@@ -1137,7 +1176,10 @@ function evaluateBaseApproachAlert(craft) {
     : `Inbound alert: ${identifier} ${distanceLabel} out and projected to enter the ${state.baseAlertRangeKm} km base radius.`;
   const alertKey = `base-approach-${craft.key || identifier}`;
 
-  emitTickerAlert(alertKey, message, { cooldownMs: 5 * 60 * 1000 });
+  emitTickerAlert(alertKey, message, {
+    cooldownMs: 5 * 60 * 1000,
+    highlightCraftKey: craft.key,
+  });
 }
 
 function evaluateAlertTriggers(aircraftList) {
@@ -1318,12 +1360,11 @@ function updateReceiverInfo() {
     return;
   }
 
-  const { lat, lon, hasOverride } = state.receiver;
+  const { lat, lon } = state.receiver;
   const lines = [
     { label: 'Latitude', value: formatCoordinate(lat) },
     { label: 'Longitude', value: formatCoordinate(lon) },
-    { label: 'Source', value: hasOverride ? 'Stored override' : 'Default config' },
-  ];
+  ];
 
   receiverInfoEl.innerHTML = lines
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
@@ -1713,14 +1754,15 @@ async function determineServerBasePath() {
 }
 
 function processAircraftData(data) {
-  if (!data || !Array.isArray(data.aircraft)) {
-    state.trackedAircraft = [];
-    return;
-  }
+  if (!data || !Array.isArray(data.aircraft)) {
+    state.trackedAircraft = [];
+    pruneAlertHighlights([]);
+    return;
+  }
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   const previousPositions = state.previousPositions;
   const nextPositions = new Map();
-  const aircraft = [];
+  const aircraft = [];
   for (const entry of data.aircraft) {
     if (typeof entry.lat !== 'number' || typeof entry.lon !== 'number') continue;
     const lat = entry.lat;
@@ -1777,6 +1819,10 @@ function processAircraftData(data) {
   state.trackedAircraft = aircraft;
   state.previousPositions = nextPositions;
 
+  pruneAlertHighlights(
+    aircraft.map((craft) => craft.key),
+  );
+
   if (state.paintedRotation.size > 0) {
     const activeKeys = new Set(aircraft.map((craft) => craft.key));
     for (const key of state.paintedRotation.keys()) {
@@ -1808,8 +1854,50 @@ function getBlipLabelAlpha(blip, alpha) {
   return alpha * 0.9;
 }
 
+function isCraftHighlighted(key, now = Date.now()) {
+  if (!key || !state.alertHighlights?.size) {
+    return false;
+  }
+
+  const expiresAt = state.alertHighlights.get(key);
+  if (!Number.isFinite(expiresAt)) {
+    return false;
+  }
+
+  if (now >= expiresAt) {
+    state.alertHighlights.delete(key);
+    return false;
+  }
+
+  return true;
+}
+
+function drawBlipHighlight(blip, radarRadius, frameNow) {
+  const markerWidth = getBlipMarkerWidth(blip, radarRadius);
+  const markerHeight = getBlipMarkerHeight(blip, radarRadius);
+  const baseRadius = Math.max(markerWidth, markerHeight) * 0.6;
+  const pulsePeriodMs = 1200;
+  const phase = ((frameNow % pulsePeriodMs) / pulsePeriodMs) * Math.PI * 2;
+  const pulseScale = 1.2 + Math.sin(phase) * 0.15;
+  const outerRadius = baseRadius * pulseScale;
+
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = 'rgba(255, 160, 40, 0.2)';
+  ctx.beginPath();
+  ctx.arc(blip.x, blip.y, outerRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255, 210, 90, 0.85)';
+  ctx.lineWidth = Math.max(2, radarRadius * 0.0035);
+  ctx.beginPath();
+  ctx.arc(blip.x, blip.y, outerRadius * 1.15, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawBlipMarker(blip, radarRadius, alpha) {
-  const iconState = getIconState(blip);
+  const iconState = getIconState(blip);
   if (iconState?.ready) {
     const scale = getBlipIconScale(blip);
     const baseSize = radarRadius * 0.14 * scale;
@@ -2028,7 +2116,8 @@ function drawRadar(deltaTime) {
   }
 
   const now = performance.now();
-  const newBlips = [];
+  const newBlips = [];
+  const highlightCheckTime = Date.now();
 
   for (const craft of state.trackedAircraft) {
     if (!shouldDisplayCraft(craft)) {
@@ -2075,11 +2164,16 @@ function drawRadar(deltaTime) {
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
   // draw blips
-  for (const blip of state.activeBlips) {
-    const age = (now - blip.spawn) / rotationPeriod;
-    const alpha = Math.max(0, 1 - age);
-    const headingRad = deg2rad(blip.heading);
-    const labelAlpha = getBlipLabelAlpha(blip, alpha);
+  for (const blip of state.activeBlips) {
+    const age = (now - blip.spawn) / rotationPeriod;
+    const alpha = Math.max(0, 1 - age);
+    const headingRad = deg2rad(blip.heading);
+    const labelAlpha = getBlipLabelAlpha(blip, alpha);
+    const highlighted = isCraftHighlighted(blip.key, highlightCheckTime);
+
+    if (highlighted) {
+      drawBlipHighlight(blip, radarRadius, now);
+    }
 
     ctx.save();
     ctx.globalAlpha = alpha * 0.8;
