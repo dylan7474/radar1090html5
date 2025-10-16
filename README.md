@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.7.6
+**Current Version:** V1.8.3
 
 ---
 
@@ -28,10 +28,12 @@ from any modern browser.
   server path preferences.
 - Optional aircraft label overlay toggled from the sidebar to display callsigns, altitude, and inbound distance/ETA around each blip.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
-- Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
+- Sidebar readout that surfaces the receiver latitude/longitude for quick verification.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
+- Live data ticker surfaces timely operational notes—now repeating automated rapid-descent and inbound-base alerts until the triggering aircraft clears.
+- Alerted contacts pulse directly on the radar so the subject aircraft stands out the moment a ticker warning fires.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click the same blip again to spotlight it as the only rendered target while
   keeping audio focused. Tap an empty patch of the scope—or the aircraft a
@@ -65,7 +67,7 @@ from any modern browser.
 All user-facing preferences persist automatically. To clear them, delete the
 `radar1090` cookies (e.g., `receiverLat`, `receiverLon`, `airbandMuted`,
 `showAircraftDetails`, `beepVolumeLevel`, `radarRangeIndex`,
-`inboundAlertDistanceKm`, `controlsPanelVisible`, `dataPanelVisible`,
+`baseAlertDistanceKm`, `controlsPanelVisible`, `dataPanelVisible`,
 `dump1090BasePath`) via your browser's developer tools.
 
 The dashboard expects the dump1090-fa JSON endpoints to live at
@@ -89,7 +91,7 @@ controlled region falls inside the active range rings.
 - Connection issues surface in the message area and in the browser developer console
   (open it with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> or
   <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd> on macOS).
-- If the audio stream cannot be reached, the app displays an alert in the message area.
+- If the audio stream cannot be reached, the app displays a warning message in the sidebar.
 - When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
   or audio endpoints are plain HTTP.
 

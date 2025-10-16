@@ -10,7 +10,6 @@ html {
   --panel-border: #1f2436;
   --text: #f2f6ff;
   --accent: #35ff99;
-  --alert: #ff6767;
   --muted: #8592ad;
   font-family: "Share Tech Mono", system-ui, sans-serif;
 }
@@ -201,19 +200,46 @@ main.app.data-hidden .data-panel {
   color: var(--accent);
 }
 
-.info-line--alert span,
-.info-line--alert strong {
-  color: var(--alert);
-}
-
 .message {
   min-height: 3rem;
   font-size: 1rem;
   color: var(--accent);
 }
 
-.message.alert {
-  color: var(--alert);
+.message-ticker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  min-height: 2.25rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(8, 12, 20, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  color: var(--foreground);
+}
+
+.message-ticker__track {
+  display: inline-block;
+  white-space: nowrap;
+  transform: translateX(100%);
+  will-change: transform;
+}
+
+.message-ticker__track--animate {
+  animation: message-ticker-scroll var(--ticker-duration, 9000ms) linear forwards;
+}
+
+@keyframes message-ticker-scroll {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
 }
 
 .controls {
@@ -370,10 +396,6 @@ main.app.data-hidden .data-panel {
   font-size: 0.85rem;
   color: var(--muted);
   flex: 1 1 140px;
-}
-
-.audio-status.alert {
-  color: var(--alert);
 }
 
 #airband-stream {

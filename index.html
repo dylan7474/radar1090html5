@@ -69,14 +69,14 @@
           </div>
           <div class="control-row">
             <div class="control-info">
-              <span class="control-name">Alert Radius</span>
-              <span class="control-value" id="alert-value">5.0 km</span>
+              <span class="control-name">Base Alert Range</span>
+              <span class="control-value" id="alert-range-value">15 km</span>
             </div>
             <div class="control-buttons">
-              <button type="button" class="control-button control-button--square" id="alert-decrease" aria-label="Decrease alert radius">
+              <button type="button" class="control-button control-button--square" id="alert-range-decrease" aria-label="Decrease base alert range">
                 &minus;
               </button>
-              <button type="button" class="control-button control-button--square" id="alert-increase" aria-label="Increase alert radius">
+              <button type="button" class="control-button control-button--square" id="alert-range-increase" aria-label="Increase base alert range">
                 +
               </button>
             </div>
@@ -128,6 +128,9 @@
         <div class="info-block" id="aircraft-info"></div>
         <div class="info-block" id="range-info"></div>
         <div class="info-block" id="receiver-info" aria-live="polite"></div>
+      </div>
+      <div class="message-ticker" id="message-ticker" aria-live="polite">
+        <span class="message-ticker__track" id="message-ticker-track"></span>
       </div>
       <div class="message" id="message"></div>
     </section>
