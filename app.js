@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.5';
+const APP_VERSION = 'V1.7.6';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1163,9 +1163,10 @@ function updateAircraftInfo() {
     { label: 'Climb', value: climbLabel, alert: rapidDescent },
   ];
 
-  if (info.squawk) {
-    lines.push({ label: 'Squawk', value: info.squawk, alert: emergencySquawk });
-  }
+  const hasSquawk = typeof info.squawk === 'string' && info.squawk.trim().length > 0;
+  const squawkDisplay = hasSquawk ? info.squawk : 'NODATA';
+  // Keep the squawk row visible so the data panel layout remains stable even without a code.
+  lines.push({ label: 'Squawk', value: squawkDisplay, alert: hasSquawk && emergencySquawk });
 
   if (Number.isFinite(info.signalDb)) {
     const formattedSignal = `${info.signalDb.toFixed(1)} dBFS`;
