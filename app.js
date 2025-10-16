@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.21';
+const APP_VERSION = 'V1.7.22';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -454,6 +454,7 @@ const state = {
   messageAlert: false,
   messageUntil: 0,
   messageStartTime: 0,
+  messageEndTime: 0,
   renderedMessageText: '',
   renderedMessageAlert: false,
   renderedMessageScroll: false,
@@ -994,6 +995,7 @@ function renderMessageTicker(text) {
   if (!text) {
     state.renderedMessageScroll = false;
     state.messageScrollDurationMs = 0;
+    state.messageEndTime = state.messageUntil;
     return;
   }
 
@@ -1008,12 +1010,14 @@ function renderMessageTicker(text) {
   if (!Number.isFinite(containerWidth) || containerWidth <= 0 || !Number.isFinite(tickerWidth)) {
     state.renderedMessageScroll = false;
     state.messageScrollDurationMs = 0;
+    state.messageEndTime = state.messageUntil;
     return;
   }
 
   if (tickerWidth <= containerWidth) {
     state.renderedMessageScroll = false;
     state.messageScrollDurationMs = 0;
+    state.messageEndTime = state.messageUntil;
     return;
   }
 
@@ -1035,6 +1039,9 @@ function renderMessageTicker(text) {
   if (state.messageUntil < targetUntil) {
     state.messageUntil = targetUntil;
   }
+  if (state.messageEndTime < targetUntil) {
+    state.messageEndTime = targetUntil;
+  }
 }
 
 function displayMessageNow(text, options = {}) {
@@ -1043,7 +1050,9 @@ function displayMessageNow(text, options = {}) {
   state.message = text;
   state.messageAlert = alert;
   state.messageStartTime = now;
-  state.messageUntil = now + duration;
+  const endTime = now + duration;
+  state.messageUntil = endTime;
+  state.messageEndTime = endTime;
   state.renderedMessageText = '';
   state.messageScrollDurationMs = 0;
 
@@ -1072,10 +1081,11 @@ function displayInfoMessage(text, options = {}) {
   };
 
   const now = performance.now();
-  const hasActiveAlert = state.messageAlert && now < state.messageUntil;
+  const activeUntil = state.messageEndTime || state.messageUntil;
+  const hasActiveAlert = state.messageAlert && now < activeUntil;
   const hasQueuedAlerts = Array.isArray(state.alertQueue) && state.alertQueue.length > 0;
 
-  if (!hasActiveAlert && !hasQueuedAlerts && (!state.message || now > state.messageUntil)) {
+  if (!hasActiveAlert && !hasQueuedAlerts && (!state.message || now > activeUntil)) {
     displayMessageNow(text, { alert: false, duration });
     return true;
   }
@@ -1240,11 +1250,12 @@ function maybeDisplayQueuedInfoMessage(now = performance.now()) {
     return false;
   }
 
-  if (state.messageAlert && now < state.messageUntil) {
+  const activeUntil = state.messageEndTime || state.messageUntil;
+  if (state.messageAlert && now < activeUntil) {
     return false;
   }
 
-  if (state.message && now < state.messageUntil) {
+  if (state.message && now < activeUntil) {
     return false;
   }
 
@@ -1281,7 +1292,8 @@ function finalizeAlertCycle() {
     }
 
     const isActive = state.activeAlertSignature === signature;
-    const activelyDisplayed = isActive && state.messageAlert && now < state.messageUntil;
+    const activeUntil = state.messageEndTime || state.messageUntil;
+    const activelyDisplayed = isActive && state.messageAlert && now < activeUntil;
 
     if (activelyDisplayed) {
       entry.expired = true;
@@ -1341,20 +1353,23 @@ function updateMessage() {
         return;
       }
 
-      if (now > state.messageUntil) {
+      const activeUntil = state.messageEndTime || state.messageUntil;
+      if (now >= activeUntil) {
         advanceAlertQueue();
         return;
       }
     }
 
-    if (!state.message || now > state.messageUntil) {
-      if (state.message && now > state.messageUntil) {
+    const messageUntil = state.messageEndTime || state.messageUntil;
+    if (!state.message || now >= messageUntil) {
+      if (state.message && now >= messageUntil) {
         state.message = '';
       }
 
       state.messageAlert = false;
       state.messageUntil = 0;
       state.messageStartTime = 0;
+      state.messageEndTime = 0;
 
       if (state.messageTickerFrame !== null) {
         cancelAnimationFrame(state.messageTickerFrame);
@@ -1367,6 +1382,7 @@ function updateMessage() {
         state.renderedMessageText = '';
         state.renderedMessageScroll = false;
         state.messageScrollDurationMs = 0;
+        state.messageEndTime = state.messageUntil;
       }
 
       if (state.renderedMessageAlert) {
