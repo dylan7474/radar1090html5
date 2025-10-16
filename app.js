@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.4';
+const APP_VERSION = 'V1.8.5';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1570,7 +1570,6 @@ function adjustRange(delta) {
   if (nextIndex !== state.rangeStepIndex) {
     state.rangeStepIndex = nextIndex;
     clearRadarContacts();
-    showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
     writeCookie(RANGE_INDEX_STORAGE_KEY, String(state.rangeStepIndex));
     updateRangeInfo();
     updateAircraftInfo();
@@ -1585,11 +1584,6 @@ function adjustBaseAlertRange(delta) {
 
   if (nextRange !== state.baseAlertRangeKm) {
     state.baseAlertRangeKm = nextRange;
-    const message =
-      nextRange <= BASE_ALERT_RANGE_MIN_KM
-        ? 'Base approach alerts disabled'
-        : `Base approach alerts: ${nextRange} km`;
-    showMessage(message);
     writeCookie(ALERT_RANGE_STORAGE_KEY, String(state.baseAlertRangeKm));
     updateRangeInfo();
   }

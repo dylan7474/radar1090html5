@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.8.4
+**Current Version:** V1.8.5
 
 ---
 
@@ -32,6 +32,7 @@ from any modern browser.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
+- Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
 - Live data ticker surfaces timely operational notes—now repeating automated rapid-descent and inbound-base alerts until the triggering aircraft clears.
 - Alerted contacts pulse directly on the radar so the subject aircraft stands out the moment a ticker warning fires.
 - Click any aircraft blip to lock the sidebar readout to that contact.
