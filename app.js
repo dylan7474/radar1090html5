@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.9';
+const APP_VERSION = 'V1.8.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -859,7 +859,7 @@ function deg2rad(deg) {
 }
 
 function rad2deg(rad) {
-  return (rad * 180) / Math.PI;
+  return (rad * 180) / Math.PI;
 }
 
 function haversine(lat1, lon1, lat2, lon2) {
@@ -875,12 +875,61 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 function calculateBearing(lat1, lon1, lat2, lon2) {
-  const y = Math.sin(deg2rad(lon2 - lon1)) * Math.cos(deg2rad(lat2));
+  const y = Math.sin(deg2rad(lon2 - lon1)) * Math.cos(deg2rad(lat2));
   const x =
     Math.cos(deg2rad(lat1)) * Math.sin(deg2rad(lat2)) -
     Math.sin(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.cos(deg2rad(lon2 - lon1));
   const brng = rad2deg(Math.atan2(y, x));
   return (brng + 360) % 360;
+}
+
+// Convert lat/lon pairs into a planar approximation so we can reason about
+// approach geometry using straight-line math.
+function projectOffsetsKm(originLat, originLon, targetLat, targetLon) {
+  const dLatRad = deg2rad(targetLat - originLat);
+  const dLonRad = deg2rad(targetLon - originLon);
+  const meanLatRad = deg2rad((originLat + targetLat) / 2);
+  const eastKm = EARTH_RADIUS_KM * dLonRad * Math.cos(meanLatRad);
+  const northKm = EARTH_RADIUS_KM * dLatRad;
+  return { eastKm, northKm };
+}
+
+// Estimate how close an aircraft's current trajectory will bring it to the
+// receiver. This lets us flag traffic that is still outside the configured
+// radius but trending inbound.
+function estimateClosestApproachToBaseKm(craft) {
+  if (!craft || !Number.isFinite(craft.heading)) {
+    return null;
+  }
+
+  const heading = normalizeHeading(craft.heading);
+  if (heading === null) {
+    return null;
+  }
+
+  if (!Number.isFinite(craft.lat) || !Number.isFinite(craft.lon)) {
+    return null;
+  }
+
+  const { eastKm, northKm } = projectOffsetsKm(
+    state.receiver.lat,
+    state.receiver.lon,
+    craft.lat,
+    craft.lon,
+  );
+
+  const headingRad = deg2rad(heading);
+  const dirX = Math.sin(headingRad);
+  const dirY = Math.cos(headingRad);
+  const dot = eastKm * dirX + northKm * dirY;
+  const distanceSq = eastKm * eastKm + northKm * northKm;
+
+  if (dot <= 0) {
+    return Math.sqrt(distanceSq);
+  }
+
+  const closestSq = Math.max(0, distanceSq - dot * dot);
+  return Math.sqrt(closestSq);
 }
 
 function normalizeHeading(value) {
@@ -1054,7 +1103,7 @@ function evaluateBaseApproachAlert(craft) {
     return;
   }
 
-  if (!Number.isFinite(craft.distanceKm) || craft.distanceKm > state.baseAlertRangeKm) {
+  if (!Number.isFinite(craft.distanceKm)) {
     return;
   }
 
@@ -1073,9 +1122,19 @@ function evaluateBaseApproachAlert(craft) {
     return;
   }
 
+  const withinRangeNow = craft.distanceKm <= state.baseAlertRangeKm;
+  const closestApproachKm = estimateClosestApproachToBaseKm(craft);
+  if (!withinRangeNow) {
+    if (!Number.isFinite(closestApproachKm) || closestApproachKm > state.baseAlertRangeKm) {
+      return;
+    }
+  }
+
   const identifier = getCraftIdentifier(craft);
   const distanceLabel = `${Math.round(craft.distanceKm)} km`;
-  const message = `Inbound alert: ${identifier} ${distanceLabel} out and tracking to base.`;
+  const message = withinRangeNow
+    ? `Inbound alert: ${identifier} ${distanceLabel} out and tracking to base.`
+    : `Inbound alert: ${identifier} ${distanceLabel} out and projected to enter the ${state.baseAlertRangeKm} km base radius.`;
   const alertKey = `base-approach-${craft.key || identifier}`;
 
   emitTickerAlert(alertKey, message, { cooldownMs: 5 * 60 * 1000 });
