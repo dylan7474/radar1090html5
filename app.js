@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.8';
+const APP_VERSION = 'V1.7.9';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1125,6 +1125,10 @@ function resolveCallsign(info) {
   return 'Unknown';
 }
 
+function formatAlertLine(prefix, detail) {
+  return `${prefix}:\u00A0${detail}`;
+}
+
 function evaluateAircraftAlerts(info) {
   const callsign = resolveCallsign(info);
   const result = {
@@ -1139,12 +1143,12 @@ function evaluateAircraftAlerts(info) {
 
   if (isEmergencySquawk(info.squawk)) {
     result.emergencySquawk = true;
-    result.alerts.push(`Emergency squawk ${info.squawk}: ${callsign}`);
+    result.alerts.push(formatAlertLine(`Emergency squawk ${info.squawk}`, callsign));
   }
 
   if (!info.onGround && Number.isFinite(info.verticalRate) && info.verticalRate <= RAPID_DESCENT_THRESHOLD_FPM) {
     result.rapidDescent = true;
-    result.alerts.push(`Rapid descent: ${callsign}`);
+    result.alerts.push(formatAlertLine('Rapid descent', callsign));
   }
 
   return result;
@@ -1601,7 +1605,7 @@ function processAircraftData(data) {
 
   if (inboundNames.length > 0) {
     const unique = [...new Set(inboundNames)];
-    const formatted = unique.slice(0, 3).map((name) => `Inbound alert: ${name}`);
+    const formatted = unique.slice(0, 3).map((name) => formatAlertLine('Inbound alert', name));
     const messageBody = formatted.join(' • ');
     const suffix = unique.length > 3 ? ' …' : '';
     showMessage(`${messageBody}${suffix}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
