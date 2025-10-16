@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.7.15
+**Current Version:** V1.7.16
 
 ---
 
@@ -39,7 +39,7 @@ from any modern browser.
 - When a contact is locked, the radar ping follows that aircraft so other
   traffic stays silent while still rendering on-screen (unless you have toggled
   the single-contact spotlight mode).
-- Automatic alert detection surfaces rapid descents, critical squawk codes, and inbound traffic with prominent warnings in the data panel, highlights the affected blip on the scope, and names the flight in a single-line scrolling alert banner that queues multiple alerts, scrolls each message completely off-screen, and cycles through them until the underlying condition clears—no more mid-scroll resets.
+- Automatic alert detection surfaces rapid descents, critical squawk codes, and inbound traffic with prominent warnings in the data panel, highlights the affected blip on the scope, and names the flight in a single-line scrolling alert banner that queues multiple alerts, scrolls each message completely off-screen, and cycles through them until the underlying condition clears—no more mid-scroll resets or mid-message interruptions.
 
 ## Requirements
 

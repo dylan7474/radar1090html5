@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.15';
+const APP_VERSION = 'V1.7.16';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -463,8 +463,6 @@ const state = {
   alertRegistry: new Map(),
   alertQueue: [],
   activeAlertSignature: null,
-  alertNeedsAdvance: false,
-  preferredAlertSignature: null,
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
@@ -1059,8 +1057,6 @@ function computeAlertDuration(options = {}) {
 
 function clearActiveAlert() {
   state.activeAlertSignature = null;
-  state.alertNeedsAdvance = false;
-  state.preferredAlertSignature = null;
   if (state.messageAlert) {
     state.messageUntil = performance.now() - 1;
   }
@@ -1068,7 +1064,6 @@ function clearActiveAlert() {
 
 function advanceAlertQueue(preferredSignature = null) {
   // Pick the next alert to display and refresh the ticker.
-  state.alertNeedsAdvance = false;
   const queue = state.alertQueue;
   if (!Array.isArray(queue) || queue.length === 0) {
     clearActiveAlert();
@@ -1111,7 +1106,6 @@ function advanceAlertQueue(preferredSignature = null) {
     return;
   }
 
-  state.preferredAlertSignature = null;
   state.activeAlertSignature = nextSignature;
   const duration = computeAlertDuration(entry.options);
   showMessage(entry.text, { alert: true, duration });
@@ -1151,9 +1145,6 @@ function displayAlertMessage(messageText, signature, options = {}) {
       const duration = computeAlertDuration(entryOptions);
       showMessage(messageText, { alert: true, duration });
     }
-  } else {
-    state.alertNeedsAdvance = true;
-    state.preferredAlertSignature = normalizedSignature;
   }
 
   return true;
@@ -1221,10 +1212,8 @@ function updateMessage() {
       return;
     }
 
-    if (state.alertNeedsAdvance || now > state.messageUntil) {
-      const preferred = state.preferredAlertSignature;
-      state.preferredAlertSignature = null;
-      advanceAlertQueue(preferred);
+    if (now > state.messageUntil) {
+      advanceAlertQueue();
       return;
     }
   } else if (state.messageAlert && now <= state.messageUntil) {
