@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.3';
+const APP_VERSION = 'V1.8.6';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -23,13 +23,25 @@ const ALERT_RANGE_STORAGE_KEY = 'baseAlertDistanceKm';
 const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
+const EMERGENCY_SQUAWK_CODES = Object.freeze({
+  '7500': 'Possible hijacking',
+  '7600': 'Lost communications',
+  '7700': 'General emergency',
+});
 const BASE_ALERT_RANGE_MIN_KM = 0;
 const BASE_ALERT_RANGE_MAX_KM = 30;
 const BASE_ALERT_RANGE_STEP_KM = 1;
 const DEFAULT_BASE_ALERT_RANGE_KM = 15;
 const RAPID_DESCENT_THRESHOLD_FPM = -2500;
+const ALTITUDE_CORROBORATION_MIN_DELTA_FT = 100;
+const ALTITUDE_CORROBORATION_WINDOW_MS = REFRESH_INTERVAL_MS * 3;
 const BASE_APPROACH_HEADING_TOLERANCE_DEG = 35;
 const BASE_APPROACH_MIN_GROUNDSPEED_KTS = 60;
+const COLLISION_ALERT_DISTANCE_KM = 3.5;
+const COLLISION_ALTITUDE_DELTA_MAX_FT = 1000;
+const COLLISION_HEADING_ALIGNMENT_DEG = 25;
+const COLLISION_MIN_GROUNDSPEED_KTS = 80;
+const COLLISION_MAX_LAST_SEEN_SEC = 20;
 const ALERT_COOLDOWN_MS = 2 * 60 * 1000;
 const ALERT_HISTORY_MAX_AGE_MS = 10 * 60 * 1000;
 const LIVE_ALERT_GRACE_MS = REFRESH_INTERVAL_MS * 2;
@@ -431,10 +443,10 @@ const savedDataPanelVisible = readBooleanPreference(
   true,
 );
 const state = {
-  server: {
-    protocol: DUMP1090_PROTOCOL,
-    host: DUMP1090_HOST,
-    port: DUMP1090_PORT,
+  server: {
+    protocol: DUMP1090_PROTOCOL,
+    host: DUMP1090_HOST,
+    port: DUMP1090_PORT,
     basePath: readCookie('dump1090BasePath') || DEFAULT_BASE_PATH,
   },
   receiver: {
@@ -443,9 +455,10 @@ const state = {
     hasOverride: receiverHasOverride,
   },
   running: true,
-  trackedAircraft: [],
-  previousPositions: new Map(),
-  paintedRotation: new Map(),
+  trackedAircraft: [],
+  previousPositions: new Map(),
+  previousAltitudeSamples: new Map(),
+  paintedRotation: new Map(),
   currentSweepId: 0,
   activeBlips: [],
   airspacesInRange: [],
@@ -988,11 +1001,27 @@ function canvasAngleFromNorth(angleDeg) {
 }
 
 function getCraftKey(craft) {
-  if (craft.hex) return craft.hex;
-  if (craft.flight) return craft.flight;
-  const lat = Number.isFinite(craft.lat) ? craft.lat.toFixed(3) : 'na';
-  const lon = Number.isFinite(craft.lon) ? craft.lon.toFixed(3) : 'na';
-  return `${lat},${lon}`;
+  if (craft.hex) return craft.hex;
+  if (craft.flight) return craft.flight;
+  const lat = Number.isFinite(craft.lat) ? craft.lat.toFixed(3) : 'na';
+  const lon = Number.isFinite(craft.lon) ? craft.lon.toFixed(3) : 'na';
+  return `${lat},${lon}`;
+}
+
+function getCollisionAlertKey(craftA, craftB) {
+  if (!craftA || !craftB) {
+    return null;
+  }
+
+  const keyA = craftA.key || getCraftKey(craftA);
+  const keyB = craftB.key || getCraftKey(craftB);
+  if (!keyA || !keyB || keyA === keyB) {
+    return null;
+  }
+
+  return keyA < keyB
+    ? `collision-${keyA}-${keyB}`
+    : `collision-${keyB}-${keyA}`;
 }
 
 function shouldDisplayCraft(craft) {
@@ -1244,6 +1273,31 @@ function emitTickerAlert(alertKey, message, options = {}) {
   }
 }
 
+function evaluateSquawkAlert(craft) {
+  if (!craft) {
+    return;
+  }
+
+  const squawk = typeof craft.squawk === 'string' ? craft.squawk.trim() : '';
+  const normalized = /^[0-7]{4}$/.test(squawk) ? squawk : '';
+  const description = normalized ? EMERGENCY_SQUAWK_CODES[normalized] : null;
+  const alertKey = `squawk-${craft.key || getCraftKey(craft)}`;
+
+  if (!description) {
+    resolveTickerAlert(alertKey);
+    return;
+  }
+
+  const identifier = getCraftIdentifier(craft);
+  const message = `Squawk alert: ${identifier} transmitting emergency code ${normalized} (${description}).`;
+
+  emitTickerAlert(alertKey, message, {
+    cooldownMs: 5 * 60 * 1000,
+    highlightCraftKey: craft.key,
+    repeatWhileActive: true,
+  });
+}
+
 function evaluateRapidDescentAlert(craft) {
   if (!craft) {
     return;
@@ -1252,7 +1306,12 @@ function evaluateRapidDescentAlert(craft) {
   const identifier = getCraftIdentifier(craft);
   const alertKey = `rapid-descent-${craft.key || identifier}`;
 
-  if (craft.onGround || !Number.isFinite(craft.verticalRate) || craft.verticalRate >= RAPID_DESCENT_THRESHOLD_FPM) {
+  if (
+    craft.onGround
+    || !Number.isFinite(craft.verticalRate)
+    || craft.verticalRate >= RAPID_DESCENT_THRESHOLD_FPM
+    || craft.altitudeDescentConfirmed !== true
+  ) {
     resolveTickerAlert(alertKey);
     return;
   }
@@ -1327,14 +1386,116 @@ function evaluateBaseApproachAlert(craft) {
   });
 }
 
+function evaluateCollisionCourseAlerts(aircraftList) {
+  const activePairs = new Set();
+
+  if (Array.isArray(aircraftList) && aircraftList.length >= 2) {
+    for (let i = 0; i < aircraftList.length - 1; i += 1) {
+      const craftA = aircraftList[i];
+      if (!craftA || craftA.onGround) continue;
+      if (!Number.isFinite(craftA.lat) || !Number.isFinite(craftA.lon)) continue;
+      if (!Number.isFinite(craftA.altitude) || craftA.altitude < 0) continue;
+      if (!Number.isFinite(craftA.heading)) continue;
+      if (!Number.isFinite(craftA.groundSpeed) || craftA.groundSpeed < COLLISION_MIN_GROUNDSPEED_KTS) continue;
+      if (
+        Number.isFinite(craftA.lastMessageAgeSec)
+        && craftA.lastMessageAgeSec > COLLISION_MAX_LAST_SEEN_SEC
+      ) {
+        continue;
+      }
+
+      for (let j = i + 1; j < aircraftList.length; j += 1) {
+        const craftB = aircraftList[j];
+        if (!craftB || craftB.onGround) continue;
+        if (!Number.isFinite(craftB.lat) || !Number.isFinite(craftB.lon)) continue;
+        if (!Number.isFinite(craftB.altitude) || craftB.altitude < 0) continue;
+        if (!Number.isFinite(craftB.heading)) continue;
+        if (!Number.isFinite(craftB.groundSpeed) || craftB.groundSpeed < COLLISION_MIN_GROUNDSPEED_KTS) continue;
+        if (
+          Number.isFinite(craftB.lastMessageAgeSec)
+          && craftB.lastMessageAgeSec > COLLISION_MAX_LAST_SEEN_SEC
+        ) {
+          continue;
+        }
+
+        const alertKey = getCollisionAlertKey(craftA, craftB);
+        if (!alertKey) {
+          continue;
+        }
+
+        const separationKm = haversine(craftA.lat, craftA.lon, craftB.lat, craftB.lon);
+        if (!Number.isFinite(separationKm) || separationKm > COLLISION_ALERT_DISTANCE_KM) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const altitudeDeltaFt = Math.abs(craftA.altitude - craftB.altitude);
+        if (!Number.isFinite(altitudeDeltaFt) || altitudeDeltaFt > COLLISION_ALTITUDE_DELTA_MAX_FT) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const headingA = normalizeHeading(craftA.heading);
+        const headingB = normalizeHeading(craftB.heading);
+        if (headingA === null || headingB === null) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const bearingAToB = calculateBearing(craftA.lat, craftA.lon, craftB.lat, craftB.lon);
+        const bearingBToA = calculateBearing(craftB.lat, craftB.lon, craftA.lat, craftA.lon);
+        const headingDeltaA = shortestHeadingDelta(headingA, bearingAToB);
+        const headingDeltaB = shortestHeadingDelta(headingB, bearingBToA);
+        if (
+          headingDeltaA === null
+          || headingDeltaB === null
+          || headingDeltaA > COLLISION_HEADING_ALIGNMENT_DEG
+          || headingDeltaB > COLLISION_HEADING_ALIGNMENT_DEG
+        ) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const identifierA = getCraftIdentifier(craftA);
+        const identifierB = getCraftIdentifier(craftB);
+        const distanceLabel = `${separationKm.toFixed(1)} km`;
+        const altitudeLabel = `${Math.round(altitudeDeltaFt).toLocaleString()} ft`;
+        const message = `Collision alert: ${identifierA} and ${identifierB} converging (${distanceLabel} apart, Δalt ${altitudeLabel}).`;
+
+        emitTickerAlert(alertKey, message, {
+          cooldownMs: 60 * 1000,
+          highlightCraftKey: craftA.key,
+          repeatWhileActive: true,
+        });
+        registerAlertHighlight(craftB.key, ALERT_HIGHLIGHT_DURATION_MS);
+        activePairs.add(alertKey);
+      }
+    }
+  }
+
+  if (tickerState.liveAlerts?.size) {
+    const staleKeys = [];
+    for (const key of tickerState.liveAlerts.keys()) {
+      if (key.startsWith('collision-') && !activePairs.has(key)) {
+        staleKeys.push(key);
+      }
+    }
+    staleKeys.forEach((key) => resolveTickerAlert(key));
+  }
+}
+
 function evaluateAlertTriggers(aircraftList) {
-  if (Array.isArray(aircraftList) && aircraftList.length > 0) {
-    for (const craft of aircraftList) {
+  const crafts = Array.isArray(aircraftList) ? aircraftList : [];
+
+  if (crafts.length > 0) {
+    for (const craft of crafts) {
+      evaluateSquawkAlert(craft);
       evaluateRapidDescentAlert(craft);
       evaluateBaseApproachAlert(craft);
     }
   }
 
+  evaluateCollisionCourseAlerts(crafts);
   pruneInactiveLiveAlerts();
 }
 
@@ -1544,11 +1705,12 @@ function adjustVolume(delta) {
 }
 
 function clearRadarContacts() {
-  state.trackedAircraft = [];
-  state.previousPositions.clear();
-  state.activeBlips = [];
-  state.paintedRotation.clear();
-  state.lastPingedAircraft = null;
+  state.trackedAircraft = [];
+  state.previousPositions.clear();
+  state.previousAltitudeSamples.clear();
+  state.activeBlips = [];
+  state.paintedRotation.clear();
+  state.lastPingedAircraft = null;
   state.selectedAircraftKey = null;
   state.displayOnlySelected = false;
 }
@@ -1561,7 +1723,6 @@ function adjustRange(delta) {
   if (nextIndex !== state.rangeStepIndex) {
     state.rangeStepIndex = nextIndex;
     clearRadarContacts();
-    showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
     writeCookie(RANGE_INDEX_STORAGE_KEY, String(state.rangeStepIndex));
     updateRangeInfo();
     updateAircraftInfo();
@@ -1576,11 +1737,6 @@ function adjustBaseAlertRange(delta) {
 
   if (nextRange !== state.baseAlertRangeKm) {
     state.baseAlertRangeKm = nextRange;
-    const message =
-      nextRange <= BASE_ALERT_RANGE_MIN_KM
-        ? 'Base approach alerts disabled'
-        : `Base approach alerts: ${nextRange} km`;
-    showMessage(message);
     writeCookie(ALERT_RANGE_STORAGE_KEY, String(state.baseAlertRangeKm));
     updateRangeInfo();
   }
@@ -1923,25 +2079,45 @@ function processAircraftData(data) {
   }
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   const previousPositions = state.previousPositions;
+  const previousAltitudeSamples = state.previousAltitudeSamples;
   const nextPositions = new Map();
+  const nextAltitudeSamples = new Map();
+  const sampleTimestamp = Date.now();
   const aircraft = [];
   for (const entry of data.aircraft) {
-    if (typeof entry.lat !== 'number' || typeof entry.lon !== 'number') continue;
-    const lat = entry.lat;
-    const lon = entry.lon;
-    const distanceKm = haversine(state.receiver.lat, state.receiver.lon, lat, lon);
-    if (!Number.isFinite(distanceKm) || distanceKm > radarRangeKm) continue;
+    if (typeof entry.lat !== 'number' || typeof entry.lon !== 'number') continue;
+    const lat = entry.lat;
+    const lon = entry.lon;
+    const distanceKm = haversine(state.receiver.lat, state.receiver.lon, lat, lon);
+    if (!Number.isFinite(distanceKm) || distanceKm > radarRangeKm) continue;
 
-    const bearing = calculateBearing(state.receiver.lat, state.receiver.lon, lat, lon);
-    const hex = typeof entry.hex === 'string' ? entry.hex.trim().toUpperCase() : '';
-    const flight = typeof entry.flight === 'string' ? entry.flight.trim() : '';
+    const bearing = calculateBearing(state.receiver.lat, state.receiver.lon, lat, lon);
+    const hex = typeof entry.hex === 'string' ? entry.hex.trim().toUpperCase() : '';
+    const flight = typeof entry.flight === 'string' ? entry.flight.trim() : '';
 
-    const prev = hex ? previousPositions.get(hex) : null;
-    const heading = calculateHeading(prev, { lat, lon, bearing }, resolveInitialHeading(entry));
+    const prev = hex ? previousPositions.get(hex) : null;
+    const heading = calculateHeading(prev, { lat, lon, bearing }, resolveInitialHeading(entry));
 
-    const altitude = Number.isInteger(entry.alt_baro) ? entry.alt_baro : -1;
-    const groundSpeed = typeof entry.gs === 'number' ? entry.gs : -1;
-    const squawk = typeof entry.squawk === 'string' ? entry.squawk.trim() : '';
+    const altitude = Number.isInteger(entry.alt_baro) ? entry.alt_baro : -1;
+    const hasValidAltitude = altitude >= 0;
+    const previousAltitudeSample = hex ? previousAltitudeSamples.get(hex) : null;
+    const previousAltitudeAgeMs = previousAltitudeSample?.timestamp != null
+      ? sampleTimestamp - previousAltitudeSample.timestamp
+      : null;
+    const previousAltitude = Number.isInteger(previousAltitudeSample?.altitude)
+      && previousAltitudeAgeMs !== null
+      && previousAltitudeAgeMs <= ALTITUDE_CORROBORATION_WINDOW_MS
+        ? previousAltitudeSample.altitude
+        : null;
+    const altitudeDelta = hasValidAltitude && previousAltitude !== null
+      ? altitude - previousAltitude
+      : null;
+    // Require a recent drop in reported altitude so we only alert on corroborated descents.
+    const altitudeDescentConfirmed = altitudeDelta !== null
+      && altitudeDelta <= -ALTITUDE_CORROBORATION_MIN_DELTA_FT;
+
+    const groundSpeed = typeof entry.gs === 'number' ? entry.gs : -1;
+    const squawk = typeof entry.squawk === 'string' ? entry.squawk.trim() : '';
     const verticalRate = Number.isFinite(entry.baro_rate)
       ? entry.baro_rate
       : Number.isFinite(entry.geom_rate)
@@ -1966,6 +2142,9 @@ function processAircraftData(data) {
       signalDb,
       lastMessageAgeSec,
       onGround,
+      previousAltitude,
+      altitudeDelta,
+      altitudeDescentConfirmed,
     };
 
     craft.key = getCraftKey(craft);
@@ -1973,13 +2152,24 @@ function processAircraftData(data) {
     craft.iconKey = resolveAircraftIconKey(entry);
 
     aircraft.push(craft);
-    if (hex) {
-      nextPositions.set(hex, { lat, lon });
-    }
-  }
+    if (hex) {
+      nextPositions.set(hex, { lat, lon });
+      if (hasValidAltitude) {
+        nextAltitudeSamples.set(hex, { altitude, timestamp: sampleTimestamp });
+      } else if (
+        previousAltitudeSample
+        && Number.isInteger(previousAltitudeSample.altitude)
+        && previousAltitudeAgeMs !== null
+        && previousAltitudeAgeMs <= ALTITUDE_CORROBORATION_WINDOW_MS
+      ) {
+        nextAltitudeSamples.set(hex, previousAltitudeSample);
+      }
+    }
+  }
 
   state.trackedAircraft = aircraft;
   state.previousPositions = nextPositions;
+  state.previousAltitudeSamples = nextAltitudeSamples;
 
   pruneAlertHighlights(
     aircraft.map((craft) => craft.key),
