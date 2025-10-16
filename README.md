@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.7.6
+**Current Version:** V1.7.7
 
 ---
 
@@ -28,7 +28,7 @@ from any modern browser.
   server path preferences.
 - Optional aircraft label overlay toggled from the sidebar to display callsigns, altitude, and inbound distance/ETA around each blip.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
-- Sidebar readout that surfaces the receiver latitude/longitude and whether defaults or overrides are active.
+- Sidebar readout that surfaces the receiver latitude/longitude for quick reference.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
@@ -39,7 +39,7 @@ from any modern browser.
 - When a contact is locked, the radar ping follows that aircraft so other
   traffic stays silent while still rendering on-screen (unless you have toggled
   the single-contact spotlight mode).
-- Automatic emergency detection surfaces rapid descents and critical squawk codes with prominent warnings in the data panel.
+- Automatic emergency detection surfaces rapid descents and critical squawk codes with prominent warnings in the data panel, highlights the affected blip on the scope, and names the flight in the alert banner.
 
 ## Requirements
 

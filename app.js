@@ -8,7 +8,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.6';
+const APP_VERSION = 'V1.7.7';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1030,20 +1030,19 @@ function findAirspacesInRange(rangeKm) {
 }
 
 function updateReceiverInfo() {
-  if (!receiverInfoEl) {
-    return;
-  }
+  if (!receiverInfoEl) {
+    return;
+  }
 
-  const { lat, lon, hasOverride } = state.receiver;
+  const { lat, lon } = state.receiver;
   const lines = [
     { label: 'Latitude', value: formatCoordinate(lat) },
     { label: 'Longitude', value: formatCoordinate(lon) },
-    { label: 'Source', value: hasOverride ? 'Stored override' : 'Default config' },
-  ];
+  ];
 
-  receiverInfoEl.innerHTML = lines
-    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
-    .join('');
+  receiverInfoEl.innerHTML = lines
+    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
+    .join('');
 }
 
 function adjustVolume(delta) {
@@ -1104,7 +1103,30 @@ function isEmergencySquawk(squawk) {
   return EMERGENCY_SQUAWKS.has(trimmed);
 }
 
+function resolveCallsign(info) {
+  if (!info || typeof info !== 'object') {
+    return 'Unknown';
+  }
+
+  if (typeof info.flight === 'string') {
+    const trimmedFlight = info.flight.trim();
+    if (trimmedFlight) {
+      return trimmedFlight;
+    }
+  }
+
+  if (typeof info.hex === 'string') {
+    const trimmedHex = info.hex.trim();
+    if (trimmedHex) {
+      return trimmedHex.toUpperCase();
+    }
+  }
+
+  return 'Unknown';
+}
+
 function evaluateAircraftAlerts(info) {
+  const callsign = resolveCallsign(info);
   const result = {
     alerts: [],
     emergencySquawk: false,
@@ -1117,12 +1139,12 @@ function evaluateAircraftAlerts(info) {
 
   if (isEmergencySquawk(info.squawk)) {
     result.emergencySquawk = true;
-    result.alerts.push(`Emergency squawk ${info.squawk}`);
+    result.alerts.push(`Emergency squawk ${info.squawk} - ${callsign}`);
   }
 
   if (!info.onGround && Number.isFinite(info.verticalRate) && info.verticalRate <= RAPID_DESCENT_THRESHOLD_FPM) {
     result.rapidDescent = true;
-    result.alerts.push(`Rapid descent (${Math.round(info.verticalRate)} fpm)`);
+    result.alerts.push(`Rapid descent: ${callsign}`);
   }
 
   return result;
@@ -1517,7 +1539,7 @@ function processAircraftData(data) {
       flight,
       hex,
       lat,
-      lon,
+      lon,
       distanceKm,
       bearing,
       heading,
@@ -1531,14 +1553,20 @@ function processAircraftData(data) {
       inbound: false,
     };
 
-    craft.key = getCraftKey(craft);
-    craft.iconScale = resolveAircraftIconScale(entry);
-    craft.iconKey = resolveAircraftIconKey(entry);
+    craft.key = getCraftKey(craft);
+    craft.iconScale = resolveAircraftIconScale(entry);
+    craft.iconKey = resolveAircraftIconKey(entry);
 
-    const inboundResult = evaluateInbound(craft);
-    craft.inbound = inboundResult.inbound;
-    if (inboundResult.inbound) {
-      inboundNames.push(inboundResult.name);
+    const alertState = evaluateAircraftAlerts(craft);
+    craft.alerts = alertState.alerts;
+    craft.hasAlert = alertState.alerts.length > 0;
+    craft.rapidDescent = alertState.rapidDescent;
+    craft.emergencySquawk = alertState.emergencySquawk;
+
+    const inboundResult = evaluateInbound(craft);
+    craft.inbound = inboundResult.inbound;
+    if (inboundResult.inbound) {
+      inboundNames.push(inboundResult.name);
       craft.minutesToBase = inboundResult.minutesToBase;
     }
 
@@ -1601,48 +1629,53 @@ function evaluateInbound(craft) {
 }
 
 function getBlipLabelAlpha(blip, alpha) {
-  const iconState = getIconState(blip);
-  if (iconState?.ready) {
-    return blip.inbound ? Math.max(0.6, alpha) : alpha;
-  }
-  return blip.inbound ? Math.max(0.2, alpha) : alpha * 0.9;
+  const iconState = getIconState(blip);
+  const highlighted = blip.alert || blip.inbound;
+  if (iconState?.ready) {
+    return highlighted ? Math.max(0.7, alpha) : alpha;
+  }
+  return highlighted ? Math.max(0.3, alpha) : alpha * 0.9;
 }
 
 function drawBlipMarker(blip, radarRadius, alpha) {
-  const iconState = getIconState(blip);
-  if (iconState?.ready) {
-    const scale = getBlipIconScale(blip);
-    const baseSize = radarRadius * 0.14 * scale;
-    const width = baseSize;
-    const height = baseSize * iconState.aspect;
-    const headingRad = deg2rad(blip.heading);
-    const iconSource = iconState.canvas || iconState.image;
-    ctx.save();
-    ctx.translate(blip.x, blip.y);
-    if (blip.inbound) {
-      const pulseAlpha = Math.max(0.3, alpha);
-      const highlightRadius = Math.max(width, height) * 0.55;
-      ctx.globalAlpha = pulseAlpha;
-      ctx.fillStyle = 'rgba(255,103,103,0.35)';
-      ctx.beginPath();
-      ctx.arc(0, 0, highlightRadius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.rotate(headingRad);
-    ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
-    ctx.drawImage(iconSource, -width / 2, -height / 2, width, height);
-    ctx.restore();
-    return;
-  }
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
+    const scale = getBlipIconScale(blip);
+    const baseSize = radarRadius * 0.14 * scale;
+    const width = baseSize;
+    const height = baseSize * iconState.aspect;
+    const headingRad = deg2rad(blip.heading);
+    const iconSource = iconState.canvas || iconState.image;
+    ctx.save();
+    ctx.translate(blip.x, blip.y);
+    if (blip.alert || blip.inbound) {
+      const pulseAlpha = blip.alert ? Math.max(0.45, alpha) : Math.max(0.3, alpha);
+      const highlightRadius = Math.max(width, height) * (blip.alert ? 0.7 : 0.55);
+      ctx.globalAlpha = pulseAlpha;
+      ctx.fillStyle = blip.alert ? 'rgba(255,214,64,0.45)' : 'rgba(255,103,103,0.35)';
+      ctx.beginPath();
+      ctx.arc(0, 0, highlightRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.rotate(headingRad);
+    ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
+    ctx.drawImage(iconSource, -width / 2, -height / 2, width, height);
+    ctx.restore();
+    return;
+  }
 
-  ctx.save();
-  ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
-  ctx.fillStyle = blip.inbound ? 'rgba(255,103,103,1)' : 'rgba(53,255,153,1)';
-  ctx.beginPath();
-  const scale = getBlipIconScale(blip);
-  ctx.arc(blip.x, blip.y, radarRadius * 0.02 * scale, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
+  ctx.fillStyle = blip.alert
+    ? 'rgba(255,214,64,1)'
+    : blip.inbound
+      ? 'rgba(255,103,103,1)'
+      : 'rgba(53,255,153,1)';
+  ctx.beginPath();
+  const scale = getBlipIconScale(blip);
+  ctx.arc(blip.x, blip.y, radarRadius * 0.02 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm, drawUprightTextAt) {
@@ -1854,18 +1887,19 @@ function drawRadar(deltaTime) {
         const x = centerX + Math.sin(angleRad) * screenRadius;
         const y = centerY - Math.cos(angleRad) * screenRadius;
         const minutesToBase = craft.minutesToBase;
-        newBlips.push({
-          key,
-          x,
-          y,
-          spawn: now,
-          heading: craft.heading,
-          inbound: craft.inbound,
-          iconScale: craft.iconScale,
-          iconKey: craft.iconKey,
-          minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
-          distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
-          altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
+        newBlips.push({
+          key,
+          x,
+          y,
+          spawn: now,
+          heading: craft.heading,
+          inbound: craft.inbound,
+          alert: craft.hasAlert,
+          iconScale: craft.iconScale,
+          iconKey: craft.iconKey,
+          minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
+          distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
+          altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
           hex: craft.hex || craft.flight,
           flight: craft.flight || null,
         });
@@ -1893,11 +1927,21 @@ function drawRadar(deltaTime) {
     const headingRad = deg2rad(blip.heading);
     const labelAlpha = getBlipLabelAlpha(blip, alpha);
 
-    ctx.save();
-    ctx.globalAlpha = blip.inbound ? Math.max(0.25, alpha) : alpha * 0.8;
-    ctx.strokeStyle = blip.inbound ? 'rgba(255,103,103,0.8)' : 'rgba(53,255,153,0.7)';
-    ctx.lineWidth = radarRadius * 0.0025;
-    ctx.beginPath();
+    ctx.save();
+    const blipHasAlert = blip.alert;
+    const blipInboundOnly = !blipHasAlert && blip.inbound;
+    ctx.globalAlpha = blipHasAlert
+      ? Math.max(0.35, alpha)
+      : blipInboundOnly
+        ? Math.max(0.25, alpha)
+        : alpha * 0.8;
+    ctx.strokeStyle = blipHasAlert
+      ? 'rgba(255,214,64,0.85)'
+      : blipInboundOnly
+        ? 'rgba(255,103,103,0.8)'
+        : 'rgba(53,255,153,0.7)';
+    ctx.lineWidth = radarRadius * 0.0025;
+    ctx.beginPath();
     ctx.moveTo(blip.x, blip.y);
     ctx.lineTo(blip.x + Math.sin(headingRad) * radarRadius * 0.05, blip.y - Math.cos(headingRad) * radarRadius * 0.05);
     ctx.stroke();
