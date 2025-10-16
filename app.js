@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.8';
+const APP_VERSION = 'V1.7.9';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -19,9 +19,22 @@ const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
 const AIRCRAFT_DETAILS_STORAGE_KEY = 'showAircraftDetails';
 const BEEP_VOLUME_STORAGE_KEY = 'beepVolumeLevel';
 const RANGE_INDEX_STORAGE_KEY = 'radarRangeIndex';
+const ALERT_RANGE_STORAGE_KEY = 'baseAlertDistanceKm';
 const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
+const BASE_ALERT_RANGE_MIN_KM = 0;
+const BASE_ALERT_RANGE_MAX_KM = 30;
+const BASE_ALERT_RANGE_STEP_KM = 1;
+const DEFAULT_BASE_ALERT_RANGE_KM = 15;
+const RAPID_DESCENT_THRESHOLD_FPM = -2500;
+const BASE_APPROACH_HEADING_TOLERANCE_DEG = 35;
+const BASE_APPROACH_MIN_GROUNDSPEED_KTS = 60;
+const ALERT_COOLDOWN_MS = 2 * 60 * 1000;
+const ALERT_HISTORY_MAX_AGE_MS = 10 * 60 * 1000;
+const TICKER_MIN_DURATION_MS = 4500;
+const TICKER_MAX_DURATION_MS = 9000;
+const TICKER_CHAR_DURATION_MS = 65;
 const DUMP1090_PROTOCOL = 'https';
 const DUMP1090_HOST = 'dump1090.dylanjones.org';
 const DUMP1090_PORT = 443;
@@ -112,6 +125,9 @@ const volumeIncreaseBtn = document.getElementById('volume-increase');
 const rangeValueEl = document.getElementById('range-value');
 const rangeDecreaseBtn = document.getElementById('range-decrease');
 const rangeIncreaseBtn = document.getElementById('range-increase');
+const alertRangeValueEl = document.getElementById('alert-range-value');
+const alertRangeDecreaseBtn = document.getElementById('alert-range-decrease');
+const alertRangeIncreaseBtn = document.getElementById('alert-range-increase');
 const radarRotateBtn = document.getElementById('radar-rotate');
 const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
@@ -398,6 +414,12 @@ const savedRadarOrientation = readIntPreference(
   0,
   3,
 );
+const savedBaseAlertRangeKm = readIntPreference(
+  ALERT_RANGE_STORAGE_KEY,
+  DEFAULT_BASE_ALERT_RANGE_KM,
+  BASE_ALERT_RANGE_MIN_KM,
+  BASE_ALERT_RANGE_MAX_KM,
+);
 const savedControlsPanelVisible = readBooleanPreference(
   CONTROLS_PANEL_VISIBLE_STORAGE_KEY,
   true,
@@ -430,6 +452,7 @@ const state = {
   displayOnlySelected: false,
   rangeStepIndex: savedRangeStepIndex,
   beepVolume: savedBeepVolume,
+  baseAlertRangeKm: savedBaseAlertRangeKm,
   sweepAngle: 0,
   lastFrameTime: performance.now(),
   rotationPeriodMs: 0,
@@ -440,6 +463,7 @@ const state = {
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
+  alertHistory: new Map(),
 };
 
 const tickerState = {
@@ -805,9 +829,11 @@ audioMuteToggleBtn?.addEventListener('click', () => {
 
 volumeDecreaseBtn?.addEventListener('click', () => adjustVolume(-1));
 volumeIncreaseBtn?.addEventListener('click', () => adjustVolume(1));
- rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
- rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
- radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
+rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
+rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
+alertRangeDecreaseBtn?.addEventListener('click', () => adjustBaseAlertRange(-BASE_ALERT_RANGE_STEP_KM));
+alertRangeIncreaseBtn?.addEventListener('click', () => adjustBaseAlertRange(BASE_ALERT_RANGE_STEP_KM));
+radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
 canvas?.addEventListener('click', handleRadarTap);
 
 controlsPanelToggleBtn?.addEventListener('click', () => {
@@ -916,26 +942,154 @@ function getCraftKey(craft) {
 }
 
 function shouldDisplayCraft(craft) {
-  if (!state.displayOnlySelected || !state.selectedAircraftKey) {
-   return true;
-  }
-  const key = craft.key || getCraftKey(craft);
-  return key === state.selectedAircraftKey;
+  if (!state.displayOnlySelected || !state.selectedAircraftKey) {
+    return true;
+  }
+  const key = craft.key || getCraftKey(craft);
+  return key === state.selectedAircraftKey;
 }
 
 function shouldDisplayBlip(blip) {
-  if (!state.displayOnlySelected || !state.selectedAircraftKey) {
-   return true;
-  }
-  const blipKey = blip.key || blip.hex || blip.flight || null;
-  return blipKey === state.selectedAircraftKey;
+  if (!state.displayOnlySelected || !state.selectedAircraftKey) {
+    return true;
+  }
+  const blipKey = blip.key || blip.hex || blip.flight || null;
+  return blipKey === state.selectedAircraftKey;
 }
 
 function getBeepFrequencyForAltitude(altitude) {
-  if (altitude == null || altitude < 0) return FREQ_MID;
-  if (altitude < ALT_LOW_FEET) return FREQ_LOW;
-  if (altitude < ALT_HIGH_FEET) return FREQ_MID;
-  return FREQ_HIGH;
+  if (altitude == null || altitude < 0) return FREQ_MID;
+  if (altitude < ALT_LOW_FEET) return FREQ_LOW;
+  if (altitude < ALT_HIGH_FEET) return FREQ_MID;
+  return FREQ_HIGH;
+}
+
+function shortestHeadingDelta(a, b) {
+  const normalizedA = normalizeHeading(a);
+  const normalizedB = normalizeHeading(b);
+  if (normalizedA === null || normalizedB === null) {
+    return null;
+  }
+
+  let delta = Math.abs(normalizedA - normalizedB) % 360;
+  if (delta > 180) {
+    delta = 360 - delta;
+  }
+  return delta;
+}
+
+function getCraftIdentifier(craft) {
+  if (!craft) {
+    return 'Unknown aircraft';
+  }
+
+  const flight = typeof craft.flight === 'string' ? craft.flight.trim() : '';
+  if (flight) {
+    return flight;
+  }
+
+  const hex = typeof craft.hex === 'string' ? craft.hex.trim().toUpperCase() : '';
+  if (hex) {
+    return hex;
+  }
+
+  return 'Unknown aircraft';
+}
+
+function pruneAlertHistory(now = Date.now()) {
+  if (!state.alertHistory) {
+    state.alertHistory = new Map();
+    return;
+  }
+
+  for (const [key, timestamp] of state.alertHistory) {
+    if (now - timestamp > ALERT_HISTORY_MAX_AGE_MS) {
+      state.alertHistory.delete(key);
+    }
+  }
+}
+
+function emitTickerAlert(alertKey, message, options = {}) {
+  const { duration = null, cooldownMs = ALERT_COOLDOWN_MS } = options;
+  const now = Date.now();
+  pruneAlertHistory(now);
+
+  if (alertKey) {
+    const lastShown = state.alertHistory.get(alertKey) || 0;
+    if (now - lastShown < cooldownMs) {
+      return;
+    }
+    state.alertHistory.set(alertKey, now);
+  }
+
+  enqueueTickerMessage(message, { duration });
+}
+
+function evaluateRapidDescentAlert(craft) {
+  if (!craft || craft.onGround) {
+    return;
+  }
+
+  if (!Number.isFinite(craft.verticalRate) || craft.verticalRate >= RAPID_DESCENT_THRESHOLD_FPM) {
+    return;
+  }
+
+  const identifier = getCraftIdentifier(craft);
+  const descentRate = Math.abs(Math.round(craft.verticalRate));
+  const altitudePortion = Number.isFinite(craft.altitude) && craft.altitude > 0
+    ? ` at ${craft.altitude.toLocaleString()} ft`
+    : '';
+  const message = `Rapid descent: ${identifier} dropping ${descentRate.toLocaleString()} fpm${altitudePortion}.`;
+  const alertKey = `rapid-descent-${craft.key || identifier}`;
+
+  emitTickerAlert(alertKey, message, { cooldownMs: 3 * 60 * 1000 });
+}
+
+function evaluateBaseApproachAlert(craft) {
+  if (!craft || craft.onGround) {
+    return;
+  }
+
+  if (state.baseAlertRangeKm <= BASE_ALERT_RANGE_MIN_KM) {
+    return;
+  }
+
+  if (!Number.isFinite(craft.distanceKm) || craft.distanceKm > state.baseAlertRangeKm) {
+    return;
+  }
+
+  if (!Number.isFinite(craft.groundSpeed) || craft.groundSpeed < BASE_APPROACH_MIN_GROUNDSPEED_KTS) {
+    return;
+  }
+
+  const heading = normalizeHeading(craft.heading);
+  if (heading === null) {
+    return;
+  }
+
+  const bearingToBase = calculateBearing(craft.lat, craft.lon, state.receiver.lat, state.receiver.lon);
+  const delta = shortestHeadingDelta(heading, bearingToBase);
+  if (delta === null || delta > BASE_APPROACH_HEADING_TOLERANCE_DEG) {
+    return;
+  }
+
+  const identifier = getCraftIdentifier(craft);
+  const distanceLabel = `${Math.round(craft.distanceKm)} km`;
+  const message = `Inbound alert: ${identifier} ${distanceLabel} out and tracking to base.`;
+  const alertKey = `base-approach-${craft.key || identifier}`;
+
+  emitTickerAlert(alertKey, message, { cooldownMs: 5 * 60 * 1000 });
+}
+
+function evaluateAlertTriggers(aircraftList) {
+  if (!Array.isArray(aircraftList) || aircraftList.length === 0) {
+    return;
+  }
+
+  for (const craft of aircraftList) {
+    evaluateRapidDescentAlert(craft);
+    evaluateBaseApproachAlert(craft);
+  }
 }
 
 function showMessage(text, options = {}) {
@@ -984,12 +1138,24 @@ function playNextTickerMessage() {
   messageTickerEl.setAttribute('data-active', 'true');
 }
 
+function computeTickerDuration(text, overrideDuration) {
+  if (Number.isFinite(overrideDuration)) {
+    return Math.max(1000, overrideDuration);
+  }
+
+  const lengthWeighted = (text.length || 1) * TICKER_CHAR_DURATION_MS;
+  return Math.max(
+    TICKER_MIN_DURATION_MS,
+    Math.min(TICKER_MAX_DURATION_MS, lengthWeighted),
+  );
+}
+
 function enqueueTickerMessage(text, options = {}) {
   if (!messageTickerEl || !messageTickerTrackEl) {
     return;
   }
 
-  const { duration = 12000, key = null } = options;
+  const { duration = null, key = null } = options;
   const trimmed = typeof text === 'string' ? text.trim() : '';
   if (!trimmed) {
     return;
@@ -999,7 +1165,9 @@ function enqueueTickerMessage(text, options = {}) {
     return;
   }
 
-  tickerState.queue.push({ text: trimmed, duration });
+  const computedDuration = computeTickerDuration(trimmed, duration);
+
+  tickerState.queue.push({ text: trimmed, duration: computedDuration });
   if (key) {
     tickerState.shownKeys.add(key);
   }
@@ -1033,11 +1201,20 @@ function updateRangeInfo() {
   if (volumeDescriptionEl) volumeDescriptionEl.textContent = 'Adjust the audio cue loudness.';
   if (volumeValueEl) volumeValueEl.textContent = `${state.beepVolume}`;
   if (rangeValueEl) rangeValueEl.textContent = `${RANGE_STEPS[state.rangeStepIndex]} km`;
+  if (alertRangeValueEl) {
+    alertRangeValueEl.textContent =
+      state.baseAlertRangeKm <= BASE_ALERT_RANGE_MIN_KM ? 'Off' : `${state.baseAlertRangeKm} km`;
+  }
 
   const trackedCount = state.trackedAircraft.filter(shouldDisplayCraft).length;
   const infoLines = [
     { label: 'Contacts', value: trackedCount > 0 ? String(trackedCount) : 'None' },
   ];
+
+  infoLines.push({
+    label: 'Base alert radius',
+    value: state.baseAlertRangeKm > BASE_ALERT_RANGE_MIN_KM ? `${state.baseAlertRangeKm} km` : 'Off',
+  });
 
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   state.airspacesInRange = findAirspacesInRange(radarRangeKm);
@@ -1115,18 +1292,36 @@ function clearRadarContacts() {
 }
 
 function adjustRange(delta) {
-  const nextIndex = Math.min(
-    RANGE_STEPS.length - 1,
-    Math.max(0, state.rangeStepIndex + delta)
-  );
-  if (nextIndex !== state.rangeStepIndex) {
-    state.rangeStepIndex = nextIndex;
-    clearRadarContacts();
-    showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
-    writeCookie(RANGE_INDEX_STORAGE_KEY, String(state.rangeStepIndex));
-    updateRangeInfo();
-    updateAircraftInfo();
-  }
+  const nextIndex = Math.min(
+    RANGE_STEPS.length - 1,
+    Math.max(0, state.rangeStepIndex + delta)
+  );
+  if (nextIndex !== state.rangeStepIndex) {
+    state.rangeStepIndex = nextIndex;
+    clearRadarContacts();
+    showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
+    writeCookie(RANGE_INDEX_STORAGE_KEY, String(state.rangeStepIndex));
+    updateRangeInfo();
+    updateAircraftInfo();
+  }
+}
+
+function adjustBaseAlertRange(delta) {
+  const nextRange = Math.min(
+    BASE_ALERT_RANGE_MAX_KM,
+    Math.max(BASE_ALERT_RANGE_MIN_KM, state.baseAlertRangeKm + delta),
+  );
+
+  if (nextRange !== state.baseAlertRangeKm) {
+    state.baseAlertRangeKm = nextRange;
+    const message =
+      nextRange <= BASE_ALERT_RANGE_MIN_KM
+        ? 'Base approach alerts disabled'
+        : `Base approach alerts: ${nextRange} km`;
+    showMessage(message);
+    writeCookie(ALERT_RANGE_STORAGE_KEY, String(state.baseAlertRangeKm));
+    updateRangeInfo();
+  }
 }
 
 function updateAircraftInfo() {
@@ -1543,6 +1738,7 @@ function processAircraftData(data) {
     }
   }
 
+  evaluateAlertTriggers(aircraft);
 }
 
 function getBlipLabelAlpha(blip, alpha) {
@@ -1896,7 +2092,7 @@ updateStatus();
 updateRangeInfo();
 updateReceiverInfo();
 updateAircraftInfo();
-enqueueTickerMessage('Welcome To Radar1090', { duration: 16000, key: 'welcome' });
+enqueueTickerMessage('Welcome To Radar1090', { key: 'welcome' });
 fetchReceiverLocation().catch(() => {});
 pollData();
 requestAnimationFrame(loop);

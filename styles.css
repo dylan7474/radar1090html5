@@ -230,7 +230,7 @@ main.app.data-hidden .data-panel {
 }
 
 .message-ticker__track--animate {
-  animation: message-ticker-scroll var(--ticker-duration, 12000ms) linear forwards;
+  animation: message-ticker-scroll var(--ticker-duration, 9000ms) linear forwards;
 }
 
 @keyframes message-ticker-scroll {
