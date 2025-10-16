@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.16';
+const APP_VERSION = 'V1.7.17';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -476,7 +476,6 @@ let audioUnlockListenerAttached = false;
 let desiredAudioMuted = false;
 let pendingAutoUnmute = false;
 let audioRetryTimer = null;
-let autoplayHintShown = false;
 
 function updateAudioStatus(text, options = {}) {
   if (!audioStatusEl) {
@@ -501,24 +500,29 @@ function refreshAudioStreamControls() {
     audioMuteToggleBtn.classList.toggle('primary', highlight);
   }
 
-  if (audioStreamError) {
-    updateAudioStatus('Stream unavailable', { alert: true });
-    return;
-  }
+  if (audioStreamError) {
+    updateAudioStatus('Stream unavailable', { alert: true });
+    displayAlertMessage('Audio stream unavailable. Check the receiver.', 'system|audio|unavailable', {
+      durationMultiplier: 6,
+      persistent: true,
+    });
+    return;
+  }
 
-  if (audioAutoplayBlocked && !isMuted) {
-    updateAudioStatus('Autoplay blocked. Tap anywhere to start audio.', { alert: true });
-    if (!autoplayHintShown) {
-      autoplayHintShown = true;
-      showMessage('Browser blocked autoplay—tap anywhere to enable the live feed.', {
-        alert: true,
-        duration: DISPLAY_TIMEOUT_MS * 4,
-      });
-    }
-    return;
-  }
+  removeAlertMessage('system|audio|unavailable');
 
-  if (pendingAutoUnmute) {
+  if (audioAutoplayBlocked && !isMuted) {
+    updateAudioStatus('Autoplay blocked. Tap anywhere to start audio.', { alert: true });
+    displayAlertMessage('Browser blocked autoplay—tap anywhere to enable the live feed.', 'system|audio|autoplay', {
+      durationMultiplier: 8,
+      persistent: true,
+    });
+    return;
+  }
+
+  removeAlertMessage('system|audio|autoplay');
+
+  if (pendingAutoUnmute) {
     updateAudioStatus('Starting audio…');
     return;
   }
@@ -641,34 +645,30 @@ function scheduleAudioRetry() {
 }
 
 function handleAudioPlaybackSuccess() {
-  audioAutoplayBlocked = false;
-  audioStreamError = false;
-  autoplayHintShown = false;
-  if (!desiredAudioMuted && pendingAutoUnmute) {
-    audioStreamEl.muted = false;
-  } else {
-    audioStreamEl.muted = desiredAudioMuted;
-  }
-  pendingAutoUnmute = false;
-  clearAudioRetryTimer();
-  refreshAudioStreamControls();
+  audioAutoplayBlocked = false;
+  audioStreamError = false;
+  if (!desiredAudioMuted && pendingAutoUnmute) {
+    audioStreamEl.muted = false;
+  } else {
+    audioStreamEl.muted = desiredAudioMuted;
+  }
+  pendingAutoUnmute = false;
+  clearAudioRetryTimer();
+  removeAlertMessage('system|audio|autoplay');
+  removeAlertMessage('system|audio|unavailable');
+  refreshAudioStreamControls();
 }
 
 function handleAudioPlaybackFailure(error) {
-  autoplayHintShown = false;
-  if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
-    audioAutoplayBlocked = true;
-    ensureAudioUnlockListener();
-  } else {
-    audioStreamError = true;
-    showMessage('Audio stream unavailable. Check the receiver.', {
-      alert: true,
-      duration: DISPLAY_TIMEOUT_MS * 2,
-    });
-    console.warn('Unable to start audio stream', error);
-    scheduleAudioRetry();
-  }
-  refreshAudioStreamControls();
+  if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
+    audioAutoplayBlocked = true;
+    ensureAudioUnlockListener();
+  } else {
+    audioStreamError = true;
+    console.warn('Unable to start audio stream', error);
+    scheduleAudioRetry();
+  }
+  refreshAudioStreamControls();
 }
 
 function attemptAudioPlayback() {
@@ -742,12 +742,14 @@ if (audioStreamEl) {
 
   refreshAudioStreamControls();
 
-  audioStreamEl.addEventListener('playing', () => {
-    audioStreamError = false;
-    audioAutoplayBlocked = false;
-    clearAudioRetryTimer();
-    refreshAudioStreamControls();
-  });
+  audioStreamEl.addEventListener('playing', () => {
+    audioStreamError = false;
+    audioAutoplayBlocked = false;
+    clearAudioRetryTimer();
+    removeAlertMessage('system|audio|autoplay');
+    removeAlertMessage('system|audio|unavailable');
+    refreshAudioStreamControls();
+  });
 
   audioStreamEl.addEventListener('pause', () => {
     if (!audioStreamEl.muted) {
@@ -769,16 +771,12 @@ if (audioStreamEl) {
     attemptAudioPlayback();
   });
 
-  audioStreamEl.addEventListener('error', (event) => {
-    audioStreamError = true;
-    refreshAudioStreamControls();
-    showMessage('Audio stream unavailable. Check the receiver.', {
-      alert: true,
-      duration: DISPLAY_TIMEOUT_MS * 2,
-    });
-    console.warn('Audio stream error', event);
-    scheduleAudioRetry();
-  });
+  audioStreamEl.addEventListener('error', (event) => {
+    audioStreamError = true;
+    refreshAudioStreamControls();
+    console.warn('Audio stream error', event);
+    scheduleAudioRetry();
+  });
 
   attemptAudioPlayback();
 }
@@ -806,8 +804,7 @@ audioMuteToggleBtn?.addEventListener('click', () => {
   const shouldMute = !desiredAudioMuted;
   desiredAudioMuted = shouldMute;
   audioStreamEl.muted = shouldMute;
-  pendingAutoUnmute = !shouldMute && audioStreamEl.paused;
-  autoplayHintShown = false;
+  pendingAutoUnmute = !shouldMute && audioStreamEl.paused;
 
   try {
     writeCookie(AUDIO_MUTED_STORAGE_KEY, shouldMute ? 'true' : 'false');
@@ -1117,6 +1114,7 @@ function displayAlertMessage(messageText, signature, options = {}) {
   }
 
   const normalizedSignature = signature || messageText;
+  const persistent = options.persistent === true;
   const entryOptions = {
     durationMultiplier: Number.isFinite(options.durationMultiplier) && options.durationMultiplier > 0
       ? options.durationMultiplier
@@ -1129,11 +1127,13 @@ function displayAlertMessage(messageText, signature, options = {}) {
     existing.text = messageText;
     existing.options = entryOptions;
     existing.lastSeenCycle = cycleId;
+    existing.persistent = persistent;
   } else {
     state.alertRegistry.set(normalizedSignature, {
       text: messageText,
       options: entryOptions,
       lastSeenCycle: cycleId,
+      persistent,
     });
     state.alertQueue.push(normalizedSignature);
   }
@@ -1150,6 +1150,33 @@ function displayAlertMessage(messageText, signature, options = {}) {
   return true;
 }
 
+function removeAlertMessage(signature) {
+  if (!signature) {
+    return false;
+  }
+
+  const registry = state.alertRegistry;
+  if (!registry.has(signature)) {
+    return false;
+  }
+
+  registry.delete(signature);
+  const index = state.alertQueue.indexOf(signature);
+  if (index !== -1) {
+    state.alertQueue.splice(index, 1);
+  }
+
+  const wasActive = state.activeAlertSignature === signature;
+  if (wasActive) {
+    state.activeAlertSignature = null;
+    advanceAlertQueue();
+  } else if (state.alertQueue.length === 0) {
+    clearActiveAlert();
+  }
+
+  return true;
+}
+
 function startAlertCycle() {
   // Each polling pass marks a new cycle so stale alerts can expire cleanly.
   state.alertCycleId += 1;
@@ -1160,6 +1187,10 @@ function finalizeAlertCycle() {
   let removedActive = false;
 
   for (const [signature, entry] of state.alertRegistry.entries()) {
+    if (entry.persistent) {
+      continue;
+    }
+
     if (entry.lastSeenCycle === currentCycle) {
       continue;
     }
@@ -1725,7 +1756,9 @@ async function pollData() {
         await determineServerBasePath();
       } catch (error) {
         console.warn('Failed to determine dump1090 path', error);
-        showMessage(`Unable to reach server: ${error.message}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 4 });
+        displayAlertMessage(`Unable to reach server: ${error.message}`, 'system|server|unreachable', {
+          durationMultiplier: 4,
+        });
         finalizeAlertCycle();
         await new Promise((resolve) => setTimeout(resolve, REFRESH_INTERVAL_MS));
         continue;
@@ -1740,7 +1773,9 @@ async function pollData() {
       state.dataConnectionOk = false;
       clearRadarContacts();
       state.server.basePath = null;
-      showMessage('Failed to fetch aircraft data. Check receiver connection.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
+      displayAlertMessage('Failed to fetch aircraft data. Check receiver connection.', 'system|server|aircraft', {
+        durationMultiplier: 2,
+      });
     }
     updateStatus();
     updateRangeInfo();
