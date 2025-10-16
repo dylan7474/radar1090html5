@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.23';
+const APP_VERSION = 'V1.7.24';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1003,46 +1003,9 @@ function renderMessageTicker(text) {
   ticker.className = 'message__ticker';
   ticker.textContent = text;
   messageEl.appendChild(ticker);
-
-  const containerWidth = messageEl.clientWidth;
-  const tickerWidth = ticker.scrollWidth;
-  const forceScroll = state.messageAlert === true;
-
-  if (!Number.isFinite(containerWidth) || containerWidth <= 0 || !Number.isFinite(tickerWidth)) {
-    state.renderedMessageScroll = false;
-    state.messageScrollDurationMs = 0;
-    state.messageEndTime = state.messageUntil;
-    return;
-  }
-
-  if (tickerWidth <= containerWidth && !forceScroll) {
-    state.renderedMessageScroll = false;
-    state.messageScrollDurationMs = 0;
-    state.messageEndTime = state.messageUntil;
-    return;
-  }
-
-  const scrollDistance = containerWidth + tickerWidth;
-  const scrollDurationSec = Math.max(
-    scrollDistance / MESSAGE_SCROLL_SPEED_PX_PER_SEC,
-    MESSAGE_SCROLL_MIN_DURATION_S,
-  );
-
-  messageEl.style.setProperty('--scroll-duration', `${scrollDurationSec}s`);
-  messageEl.classList.add('message--scroll');
-  state.renderedMessageScroll = true;
-
-  const totalDurationMs = scrollDurationSec * 1000 + MESSAGE_SCROLL_END_PADDING_MS;
-  state.messageScrollDurationMs = totalDurationMs;
-
-  const startTime = state.messageStartTime || performance.now();
-  const targetUntil = startTime + totalDurationMs;
-  if (state.messageUntil < targetUntil) {
-    state.messageUntil = targetUntil;
-  }
-  if (state.messageEndTime < targetUntil) {
-    state.messageEndTime = targetUntil;
-  }
+  state.renderedMessageScroll = false;
+  state.messageScrollDurationMs = 0;
+  state.messageEndTime = state.messageUntil;
 }
 
 function displayMessageNow(text, options = {}) {
