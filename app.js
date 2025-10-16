@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.5';
+const APP_VERSION = 'V1.8.6';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -23,6 +23,11 @@ const ALERT_RANGE_STORAGE_KEY = 'baseAlertDistanceKm';
 const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
+const EMERGENCY_SQUAWK_CODES = Object.freeze({
+  '7500': 'Possible hijacking',
+  '7600': 'Lost communications',
+  '7700': 'General emergency',
+});
 const BASE_ALERT_RANGE_MIN_KM = 0;
 const BASE_ALERT_RANGE_MAX_KM = 30;
 const BASE_ALERT_RANGE_STEP_KM = 1;
@@ -32,6 +37,11 @@ const ALTITUDE_CORROBORATION_MIN_DELTA_FT = 100;
 const ALTITUDE_CORROBORATION_WINDOW_MS = REFRESH_INTERVAL_MS * 3;
 const BASE_APPROACH_HEADING_TOLERANCE_DEG = 35;
 const BASE_APPROACH_MIN_GROUNDSPEED_KTS = 60;
+const COLLISION_ALERT_DISTANCE_KM = 3.5;
+const COLLISION_ALTITUDE_DELTA_MAX_FT = 1000;
+const COLLISION_HEADING_ALIGNMENT_DEG = 25;
+const COLLISION_MIN_GROUNDSPEED_KTS = 80;
+const COLLISION_MAX_LAST_SEEN_SEC = 20;
 const ALERT_COOLDOWN_MS = 2 * 60 * 1000;
 const ALERT_HISTORY_MAX_AGE_MS = 10 * 60 * 1000;
 const LIVE_ALERT_GRACE_MS = REFRESH_INTERVAL_MS * 2;
@@ -991,11 +1001,27 @@ function canvasAngleFromNorth(angleDeg) {
 }
 
 function getCraftKey(craft) {
-  if (craft.hex) return craft.hex;
-  if (craft.flight) return craft.flight;
-  const lat = Number.isFinite(craft.lat) ? craft.lat.toFixed(3) : 'na';
-  const lon = Number.isFinite(craft.lon) ? craft.lon.toFixed(3) : 'na';
-  return `${lat},${lon}`;
+  if (craft.hex) return craft.hex;
+  if (craft.flight) return craft.flight;
+  const lat = Number.isFinite(craft.lat) ? craft.lat.toFixed(3) : 'na';
+  const lon = Number.isFinite(craft.lon) ? craft.lon.toFixed(3) : 'na';
+  return `${lat},${lon}`;
+}
+
+function getCollisionAlertKey(craftA, craftB) {
+  if (!craftA || !craftB) {
+    return null;
+  }
+
+  const keyA = craftA.key || getCraftKey(craftA);
+  const keyB = craftB.key || getCraftKey(craftB);
+  if (!keyA || !keyB || keyA === keyB) {
+    return null;
+  }
+
+  return keyA < keyB
+    ? `collision-${keyA}-${keyB}`
+    : `collision-${keyB}-${keyA}`;
 }
 
 function shouldDisplayCraft(craft) {
@@ -1247,6 +1273,31 @@ function emitTickerAlert(alertKey, message, options = {}) {
   }
 }
 
+function evaluateSquawkAlert(craft) {
+  if (!craft) {
+    return;
+  }
+
+  const squawk = typeof craft.squawk === 'string' ? craft.squawk.trim() : '';
+  const normalized = /^[0-7]{4}$/.test(squawk) ? squawk : '';
+  const description = normalized ? EMERGENCY_SQUAWK_CODES[normalized] : null;
+  const alertKey = `squawk-${craft.key || getCraftKey(craft)}`;
+
+  if (!description) {
+    resolveTickerAlert(alertKey);
+    return;
+  }
+
+  const identifier = getCraftIdentifier(craft);
+  const message = `Squawk alert: ${identifier} transmitting emergency code ${normalized} (${description}).`;
+
+  emitTickerAlert(alertKey, message, {
+    cooldownMs: 5 * 60 * 1000,
+    highlightCraftKey: craft.key,
+    repeatWhileActive: true,
+  });
+}
+
 function evaluateRapidDescentAlert(craft) {
   if (!craft) {
     return;
@@ -1335,14 +1386,116 @@ function evaluateBaseApproachAlert(craft) {
   });
 }
 
+function evaluateCollisionCourseAlerts(aircraftList) {
+  const activePairs = new Set();
+
+  if (Array.isArray(aircraftList) && aircraftList.length >= 2) {
+    for (let i = 0; i < aircraftList.length - 1; i += 1) {
+      const craftA = aircraftList[i];
+      if (!craftA || craftA.onGround) continue;
+      if (!Number.isFinite(craftA.lat) || !Number.isFinite(craftA.lon)) continue;
+      if (!Number.isFinite(craftA.altitude) || craftA.altitude < 0) continue;
+      if (!Number.isFinite(craftA.heading)) continue;
+      if (!Number.isFinite(craftA.groundSpeed) || craftA.groundSpeed < COLLISION_MIN_GROUNDSPEED_KTS) continue;
+      if (
+        Number.isFinite(craftA.lastMessageAgeSec)
+        && craftA.lastMessageAgeSec > COLLISION_MAX_LAST_SEEN_SEC
+      ) {
+        continue;
+      }
+
+      for (let j = i + 1; j < aircraftList.length; j += 1) {
+        const craftB = aircraftList[j];
+        if (!craftB || craftB.onGround) continue;
+        if (!Number.isFinite(craftB.lat) || !Number.isFinite(craftB.lon)) continue;
+        if (!Number.isFinite(craftB.altitude) || craftB.altitude < 0) continue;
+        if (!Number.isFinite(craftB.heading)) continue;
+        if (!Number.isFinite(craftB.groundSpeed) || craftB.groundSpeed < COLLISION_MIN_GROUNDSPEED_KTS) continue;
+        if (
+          Number.isFinite(craftB.lastMessageAgeSec)
+          && craftB.lastMessageAgeSec > COLLISION_MAX_LAST_SEEN_SEC
+        ) {
+          continue;
+        }
+
+        const alertKey = getCollisionAlertKey(craftA, craftB);
+        if (!alertKey) {
+          continue;
+        }
+
+        const separationKm = haversine(craftA.lat, craftA.lon, craftB.lat, craftB.lon);
+        if (!Number.isFinite(separationKm) || separationKm > COLLISION_ALERT_DISTANCE_KM) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const altitudeDeltaFt = Math.abs(craftA.altitude - craftB.altitude);
+        if (!Number.isFinite(altitudeDeltaFt) || altitudeDeltaFt > COLLISION_ALTITUDE_DELTA_MAX_FT) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const headingA = normalizeHeading(craftA.heading);
+        const headingB = normalizeHeading(craftB.heading);
+        if (headingA === null || headingB === null) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const bearingAToB = calculateBearing(craftA.lat, craftA.lon, craftB.lat, craftB.lon);
+        const bearingBToA = calculateBearing(craftB.lat, craftB.lon, craftA.lat, craftA.lon);
+        const headingDeltaA = shortestHeadingDelta(headingA, bearingAToB);
+        const headingDeltaB = shortestHeadingDelta(headingB, bearingBToA);
+        if (
+          headingDeltaA === null
+          || headingDeltaB === null
+          || headingDeltaA > COLLISION_HEADING_ALIGNMENT_DEG
+          || headingDeltaB > COLLISION_HEADING_ALIGNMENT_DEG
+        ) {
+          resolveTickerAlert(alertKey);
+          continue;
+        }
+
+        const identifierA = getCraftIdentifier(craftA);
+        const identifierB = getCraftIdentifier(craftB);
+        const distanceLabel = `${separationKm.toFixed(1)} km`;
+        const altitudeLabel = `${Math.round(altitudeDeltaFt).toLocaleString()} ft`;
+        const message = `Collision alert: ${identifierA} and ${identifierB} converging (${distanceLabel} apart, Δalt ${altitudeLabel}).`;
+
+        emitTickerAlert(alertKey, message, {
+          cooldownMs: 60 * 1000,
+          highlightCraftKey: craftA.key,
+          repeatWhileActive: true,
+        });
+        registerAlertHighlight(craftB.key, ALERT_HIGHLIGHT_DURATION_MS);
+        activePairs.add(alertKey);
+      }
+    }
+  }
+
+  if (tickerState.liveAlerts?.size) {
+    const staleKeys = [];
+    for (const key of tickerState.liveAlerts.keys()) {
+      if (key.startsWith('collision-') && !activePairs.has(key)) {
+        staleKeys.push(key);
+      }
+    }
+    staleKeys.forEach((key) => resolveTickerAlert(key));
+  }
+}
+
 function evaluateAlertTriggers(aircraftList) {
-  if (Array.isArray(aircraftList) && aircraftList.length > 0) {
-    for (const craft of aircraftList) {
+  const crafts = Array.isArray(aircraftList) ? aircraftList : [];
+
+  if (crafts.length > 0) {
+    for (const craft of crafts) {
+      evaluateSquawkAlert(craft);
       evaluateRapidDescentAlert(craft);
       evaluateBaseApproachAlert(craft);
     }
   }
 
+  evaluateCollisionCourseAlerts(crafts);
   pruneInactiveLiveAlerts();
 }
 
