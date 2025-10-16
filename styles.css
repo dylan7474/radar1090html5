@@ -201,6 +201,11 @@ main.app.data-hidden .data-panel {
   color: var(--accent);
 }
 
+.info-line--alert span,
+.info-line--alert strong {
+  color: var(--alert);
+}
+
 .message {
   min-height: 3rem;
   font-size: 1rem;
