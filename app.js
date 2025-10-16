@@ -7,13 +7,13 @@ const MESSAGE_SCROLL_SPEED_PX_PER_SEC = 90;
 const MESSAGE_SCROLL_MIN_DURATION_S = 12;
 const MESSAGE_SCROLL_END_PADDING_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
-const ALERT_MESSAGES_ENABLED = false;
-const INBOUND_ALERT_MESSAGES_ENABLED = false;
+const ALERT_MESSAGES_ENABLED = true;
+const INBOUND_ALERT_MESSAGES_ENABLED = true;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.26';
+const APP_VERSION = 'V1.7.27';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -994,9 +994,10 @@ function renderMessageTicker(text) {
   messageEl.style.removeProperty('--scroll-duration');
   messageEl.innerHTML = '';
 
+  state.renderedMessageScroll = false;
+  state.messageScrollDurationMs = 0;
+
   if (!text) {
-    state.renderedMessageScroll = false;
-    state.messageScrollDurationMs = 0;
     state.messageEndTime = state.messageUntil;
     return;
   }
@@ -1005,9 +1006,47 @@ function renderMessageTicker(text) {
   ticker.className = 'message__ticker';
   ticker.textContent = text;
   messageEl.appendChild(ticker);
-  state.renderedMessageScroll = false;
-  state.messageScrollDurationMs = 0;
-  state.messageEndTime = state.messageUntil;
+
+  const configureTicker = () => {
+    const containerWidth = messageEl.clientWidth || messageEl.offsetWidth || 0;
+    const tickerWidth = ticker.scrollWidth || ticker.offsetWidth || 0;
+
+    if (!containerWidth || !tickerWidth) {
+      // Wait for layout to settle so measurements are accurate.
+      state.messageTickerFrame = requestAnimationFrame(configureTicker);
+      return;
+    }
+
+    const shouldScroll = state.messageAlert || tickerWidth > containerWidth;
+    if (!shouldScroll) {
+      state.messageEndTime = state.messageUntil;
+      state.messageTickerFrame = null;
+      return;
+    }
+
+    const travelDistancePx = containerWidth + tickerWidth;
+    const durationMs = Math.max(
+      MESSAGE_SCROLL_MIN_DURATION_S * 1000,
+      (travelDistancePx / MESSAGE_SCROLL_SPEED_PX_PER_SEC) * 1000,
+    );
+
+    // Drive the marquee animation via CSS with a duration tuned to the banner width.
+    messageEl.classList.add('message--scroll');
+    messageEl.style.setProperty('--scroll-duration', `${(durationMs / 1000).toFixed(2)}s`);
+
+    state.renderedMessageScroll = true;
+    state.messageScrollDurationMs = durationMs;
+
+    // Keep the alert visible until it fully traverses the banner plus a small buffer.
+    const scrollEndTime = state.messageStartTime + durationMs + MESSAGE_SCROLL_END_PADDING_MS;
+    if (!state.messageEndTime || state.messageEndTime < scrollEndTime) {
+      state.messageEndTime = scrollEndTime;
+    }
+
+    state.messageTickerFrame = null;
+  };
+
+  state.messageTickerFrame = requestAnimationFrame(configureTicker);
 }
 
 function clearMessageDisplay() {
