@@ -5,12 +5,13 @@ const AUDIO_RETRY_INTERVAL_MS = 8000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const MESSAGE_SCROLL_SPEED_PX_PER_SEC = 90;
 const MESSAGE_SCROLL_MIN_DURATION_S = 12;
+const MESSAGE_SCROLL_END_PADDING_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.14';
+const APP_VERSION = 'V1.7.15';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -455,6 +456,7 @@ const state = {
   renderedMessageText: '',
   renderedMessageAlert: false,
   renderedMessageScroll: false,
+  messageScrollDurationMs: 0,
   messageTickerFrame: null,
   // Alert message queue tracking for the scrolling ticker.
   alertCycleId: 0,
@@ -992,6 +994,7 @@ function renderMessageTicker(text) {
 
   if (!text) {
     state.renderedMessageScroll = false;
+    state.messageScrollDurationMs = 0;
     return;
   }
 
@@ -1010,10 +1013,19 @@ function renderMessageTicker(text) {
     if (shouldScroll) {
       const durationSeconds = Math.max(
         MESSAGE_SCROLL_MIN_DURATION_S,
-        contentWidth / MESSAGE_SCROLL_SPEED_PX_PER_SEC,
+        (contentWidth + containerWidth) / MESSAGE_SCROLL_SPEED_PX_PER_SEC,
       );
+      const scrollDurationMs = durationSeconds * 1000;
+      state.messageScrollDurationMs = scrollDurationMs;
+
+      const targetUntil = performance.now() + scrollDurationMs + MESSAGE_SCROLL_END_PADDING_MS;
+      if (state.messageUntil < targetUntil) {
+        state.messageUntil = targetUntil;
+      }
+
       ticker.style.setProperty('--scroll-duration', `${durationSeconds.toFixed(2)}s`);
     } else {
+      state.messageScrollDurationMs = 0;
       ticker.style.removeProperty('--scroll-duration');
     }
 
@@ -1028,6 +1040,7 @@ function showMessage(text, options = {}) {
   state.messageAlert = alert;
   state.messageUntil = performance.now() + duration;
   state.renderedMessageText = '';
+  state.messageScrollDurationMs = 0;
 
   if (state.messageTickerFrame !== null) {
     cancelAnimationFrame(state.messageTickerFrame);
@@ -1236,6 +1249,7 @@ function updateMessage() {
       messageEl.classList.remove('message--scroll');
       state.renderedMessageText = '';
       state.renderedMessageScroll = false;
+      state.messageScrollDurationMs = 0;
     }
 
     if (state.renderedMessageAlert) {
