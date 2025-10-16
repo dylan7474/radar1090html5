@@ -10,7 +10,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.12';
+const APP_VERSION = 'V1.7.13';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -457,6 +457,7 @@ const state = {
   renderedMessageScroll: false,
   messageTickerFrame: null,
   lastDisplayedAlertSignature: '',
+  lastInboundAlertSignature: '',
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
@@ -1031,6 +1032,31 @@ function showMessage(text, options = {}) {
   updateMessage();
 }
 
+function displayAlertMessage(messageText, signature, options = {}) {
+  if (!messageText) {
+    return false;
+  }
+
+  const {
+    signatureKey = 'lastDisplayedAlertSignature',
+    durationMultiplier = 6,
+  } = options;
+
+  const normalizedSignature = signature || messageText;
+  const lastSignature = state[signatureKey] || '';
+  if (normalizedSignature !== lastSignature || state.message !== messageText) {
+    const displayDurationMs = Math.max(
+      DISPLAY_TIMEOUT_MS * durationMultiplier,
+      MESSAGE_SCROLL_MIN_DURATION_S * 1000,
+    );
+    showMessage(messageText, { alert: true, duration: displayDurationMs });
+    state[signatureKey] = normalizedSignature;
+    return true;
+  }
+
+  return false;
+}
+
 function updateMessage() {
   if (!messageEl) {
     return;
@@ -1315,10 +1341,9 @@ function updateAircraftInfo() {
   if (alerts.length > 0) {
     const alertSignature = alerts.join(' | ');
     const messageText = alerts.join(' • ');
-    if (alertSignature !== state.lastDisplayedAlertSignature || state.message !== messageText) {
-      showMessage(messageText, { alert: true, duration: DISPLAY_TIMEOUT_MS * 6 });
-      state.lastDisplayedAlertSignature = alertSignature;
-    }
+    displayAlertMessage(messageText, `selected|${alertSignature}`, {
+      signatureKey: 'lastDisplayedAlertSignature',
+    });
   } else if (state.lastDisplayedAlertSignature) {
     state.lastDisplayedAlertSignature = '';
   }
@@ -1706,14 +1731,12 @@ function processAircraftData(data) {
     const messageBody = formatted.join(' • ');
     const suffix = unique.length > 3 ? ' …' : '';
     const messageText = `${messageBody}${suffix}`;
-
-    if (state.message !== messageText) {
-      const displayDurationMs = Math.max(
-        DISPLAY_TIMEOUT_MS * 6,
-        MESSAGE_SCROLL_MIN_DURATION_S * 1000,
-      );
-      showMessage(messageText, { alert: true, duration: displayDurationMs });
-    }
+    const signature = `inbound|${unique.join('|')}|${unique.length}`;
+    displayAlertMessage(messageText, signature, {
+      signatureKey: 'lastInboundAlertSignature',
+    });
+  } else if (state.lastInboundAlertSignature) {
+    state.lastInboundAlertSignature = '';
   }
 }
 
