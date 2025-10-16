@@ -10,7 +10,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.11';
+const APP_VERSION = 'V1.7.12';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1705,7 +1705,15 @@ function processAircraftData(data) {
     const formatted = unique.slice(0, 3).map((name) => formatAlertLine('Inbound', name));
     const messageBody = formatted.join(' • ');
     const suffix = unique.length > 3 ? ' …' : '';
-    showMessage(`${messageBody}${suffix}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
+    const messageText = `${messageBody}${suffix}`;
+
+    if (state.message !== messageText) {
+      const displayDurationMs = Math.max(
+        DISPLAY_TIMEOUT_MS * 6,
+        MESSAGE_SCROLL_MIN_DURATION_S * 1000,
+      );
+      showMessage(messageText, { alert: true, duration: displayDurationMs });
+    }
   }
 }
 
