@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.18';
+const APP_VERSION = 'V1.7.19';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -463,6 +463,7 @@ const state = {
   alertRegistry: new Map(),
   alertQueue: [],
   activeAlertSignature: null,
+  infoMessageQueue: [],
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
@@ -476,6 +477,7 @@ let audioUnlockListenerAttached = false;
 let desiredAudioMuted = false;
 let pendingAutoUnmute = false;
 let audioRetryTimer = null;
+let isUpdatingMessage = false;
 
 function updateAudioStatus(text, options = {}) {
   if (!audioStatusEl) {
@@ -1029,7 +1031,7 @@ function renderMessageTicker(text) {
   });
 }
 
-function showMessage(text, options = {}) {
+function displayMessageNow(text, options = {}) {
   const { alert = false, duration = DISPLAY_TIMEOUT_MS } = options;
   state.message = text;
   state.messageAlert = alert;
@@ -1042,7 +1044,36 @@ function showMessage(text, options = {}) {
     state.messageTickerFrame = null;
   }
 
-  updateMessage();
+  if (!isUpdatingMessage) {
+    updateMessage();
+  }
+}
+
+function displayInfoMessage(text, options = {}) {
+  if (!text) {
+    return false;
+  }
+
+  const duration = Number.isFinite(options.duration) && options.duration > 0
+    ? options.duration
+    : DISPLAY_TIMEOUT_MS;
+
+  const entry = {
+    text,
+    duration,
+  };
+
+  const now = performance.now();
+  const hasActiveAlert = state.messageAlert && now < state.messageUntil;
+  const hasQueuedAlerts = Array.isArray(state.alertQueue) && state.alertQueue.length > 0;
+
+  if (!hasActiveAlert && !hasQueuedAlerts && (!state.message || now > state.messageUntil)) {
+    displayMessageNow(text, { alert: false, duration });
+    return true;
+  }
+
+  state.infoMessageQueue.push(entry);
+  return true;
 }
 
 function computeAlertDuration(options = {}) {
@@ -1096,7 +1127,7 @@ function advanceAlertQueue(preferredSignature = null) {
 
   state.activeAlertSignature = nextSignature;
   const duration = computeAlertDuration(entry.options);
-  showMessage(entry.text, { alert: true, duration });
+  displayMessageNow(entry.text, { alert: true, duration });
 }
 
 function displayAlertMessage(messageText, signature, options = {}) {
@@ -1136,7 +1167,7 @@ function displayAlertMessage(messageText, signature, options = {}) {
   } else if (state.activeAlertSignature === normalizedSignature) {
     if (state.message !== messageText || !state.messageAlert) {
       const duration = computeAlertDuration(entryOptions);
-      showMessage(messageText, { alert: true, duration });
+      displayMessageNow(messageText, { alert: true, duration });
     }
   }
 
@@ -1191,6 +1222,33 @@ function removeAlertMessage(signature) {
   return true;
 }
 
+function maybeDisplayQueuedInfoMessage(now = performance.now()) {
+  if (!Array.isArray(state.infoMessageQueue) || state.infoMessageQueue.length === 0) {
+    return false;
+  }
+
+  const hasQueuedAlerts = Array.isArray(state.alertQueue) && state.alertQueue.length > 0;
+  if (hasQueuedAlerts) {
+    return false;
+  }
+
+  if (state.messageAlert && now < state.messageUntil) {
+    return false;
+  }
+
+  if (state.message && now < state.messageUntil) {
+    return false;
+  }
+
+  const next = state.infoMessageQueue.shift();
+  if (!next) {
+    return false;
+  }
+
+  displayMessageNow(next.text, { alert: false, duration: next.duration });
+  return true;
+}
+
 function startAlertCycle() {
   // Each polling pass marks a new cycle so stale alerts can expire cleanly.
   state.alertCycleId += 1;
@@ -1240,67 +1298,81 @@ function updateMessage() {
     return;
   }
 
-  const now = performance.now();
-  const hasQueuedAlerts = Array.isArray(state.alertQueue) && state.alertQueue.length > 0;
-
-  if (hasQueuedAlerts) {
-    const activeSignature = state.activeAlertSignature;
-    const activeEntry = activeSignature ? state.alertRegistry.get(activeSignature) : null;
-
-    if (!activeEntry) {
-      advanceAlertQueue();
-      return;
-    }
-
-    if (!state.messageAlert || state.message !== activeEntry.text) {
-      const duration = computeAlertDuration(activeEntry.options);
-      showMessage(activeEntry.text, { alert: true, duration });
-      return;
-    }
-
-    if (now > state.messageUntil) {
-      advanceAlertQueue();
-      return;
-    }
-  }
-
-  if (!state.message || now > state.messageUntil) {
-    if (state.message && now > state.messageUntil) {
-      state.message = '';
-    }
-
-    state.messageAlert = false;
-    state.messageUntil = 0;
-
-    if (state.messageTickerFrame !== null) {
-      cancelAnimationFrame(state.messageTickerFrame);
-      state.messageTickerFrame = null;
-    }
-
-    if (state.renderedMessageText) {
-      messageEl.innerHTML = '';
-      messageEl.classList.remove('message--scroll');
-      state.renderedMessageText = '';
-      state.renderedMessageScroll = false;
-      state.messageScrollDurationMs = 0;
-    }
-
-    if (state.renderedMessageAlert) {
-      messageEl.classList.remove('alert');
-      state.renderedMessageAlert = false;
-    }
-
+  if (isUpdatingMessage) {
     return;
   }
 
-  if (state.message !== state.renderedMessageText) {
-    renderMessageTicker(state.message);
-    state.renderedMessageText = state.message;
-  }
+  isUpdatingMessage = true;
 
-  if (state.messageAlert !== state.renderedMessageAlert) {
-    messageEl.classList.toggle('alert', state.messageAlert);
-    state.renderedMessageAlert = state.messageAlert;
+  try {
+    const now = performance.now();
+    maybeDisplayQueuedInfoMessage(now);
+
+    const hasQueuedAlerts = Array.isArray(state.alertQueue) && state.alertQueue.length > 0;
+
+    if (hasQueuedAlerts) {
+      const activeSignature = state.activeAlertSignature;
+      const activeEntry = activeSignature ? state.alertRegistry.get(activeSignature) : null;
+
+      if (!activeEntry) {
+        advanceAlertQueue();
+        return;
+      }
+
+      if (!state.messageAlert || state.message !== activeEntry.text) {
+        const duration = computeAlertDuration(activeEntry.options);
+        displayMessageNow(activeEntry.text, { alert: true, duration });
+        return;
+      }
+
+      if (now > state.messageUntil) {
+        advanceAlertQueue();
+        return;
+      }
+    }
+
+    if (!state.message || now > state.messageUntil) {
+      if (state.message && now > state.messageUntil) {
+        state.message = '';
+      }
+
+      state.messageAlert = false;
+      state.messageUntil = 0;
+
+      if (state.messageTickerFrame !== null) {
+        cancelAnimationFrame(state.messageTickerFrame);
+        state.messageTickerFrame = null;
+      }
+
+      if (state.renderedMessageText) {
+        messageEl.innerHTML = '';
+        messageEl.classList.remove('message--scroll');
+        state.renderedMessageText = '';
+        state.renderedMessageScroll = false;
+        state.messageScrollDurationMs = 0;
+      }
+
+      if (state.renderedMessageAlert) {
+        messageEl.classList.remove('alert');
+        state.renderedMessageAlert = false;
+      }
+
+      if (!maybeDisplayQueuedInfoMessage(now)) {
+        return;
+      }
+    }
+
+    if (state.message !== state.renderedMessageText) {
+      renderMessageTicker(state.message);
+      state.renderedMessageText = state.message;
+    }
+
+    if (state.messageAlert !== state.renderedMessageAlert) {
+      messageEl.classList.toggle('alert', state.messageAlert);
+      state.renderedMessageAlert = state.messageAlert;
+    }
+  } finally {
+    isUpdatingMessage = false;
   }
 }
 
@@ -1374,7 +1446,7 @@ function adjustVolume(delta) {
   const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
   if (nextVolume !== state.beepVolume) {
     state.beepVolume = nextVolume;
-    showMessage(`Volume: ${state.beepVolume}`);
+    displayInfoMessage(`Volume: ${state.beepVolume}`);
     writeCookie(BEEP_VOLUME_STORAGE_KEY, String(state.beepVolume));
     updateRangeInfo();
   }
@@ -1398,7 +1470,7 @@ function adjustRange(delta) {
   if (nextIndex !== state.rangeStepIndex) {
     state.rangeStepIndex = nextIndex;
     clearRadarContacts();
-    showMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
+    displayInfoMessage(`Range: ${RANGE_STEPS[state.rangeStepIndex]} km`);
     writeCookie(RANGE_INDEX_STORAGE_KEY, String(state.rangeStepIndex));
     updateRangeInfo();
     updateAircraftInfo();
@@ -1409,7 +1481,7 @@ function adjustAlertRadius(delta) {
   const nextValue = Math.min(20, Math.max(1, state.inboundAlertDistanceKm + delta));
   if (nextValue !== state.inboundAlertDistanceKm) {
     state.inboundAlertDistanceKm = nextValue;
-    showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
+    displayInfoMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
     writeCookie(ALERT_DISTANCE_STORAGE_KEY, String(state.inboundAlertDistanceKm));
     updateRangeInfo();
   }
@@ -1815,7 +1887,7 @@ async function determineServerBasePath() {
       await fetchJson(url, { timeout: 2500 });
       state.server.basePath = safeCandidate;
       writeCookie('dump1090BasePath', safeCandidate);
-      showMessage(`Connected via /${safeCandidate}`, { duration: DISPLAY_TIMEOUT_MS });
+      displayInfoMessage(`Connected via /${safeCandidate}`, { duration: DISPLAY_TIMEOUT_MS });
       return safeCandidate;
     } catch (error) {
       lastError = error;
