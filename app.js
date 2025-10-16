@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.2';
+const APP_VERSION = 'V1.8.3';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -32,6 +32,7 @@ const BASE_APPROACH_HEADING_TOLERANCE_DEG = 35;
 const BASE_APPROACH_MIN_GROUNDSPEED_KTS = 60;
 const ALERT_COOLDOWN_MS = 2 * 60 * 1000;
 const ALERT_HISTORY_MAX_AGE_MS = 10 * 60 * 1000;
+const LIVE_ALERT_GRACE_MS = REFRESH_INTERVAL_MS * 2;
 const TICKER_MIN_DURATION_MS = 4500;
 const TICKER_MAX_DURATION_MS = 9000;
 const TICKER_CHAR_DURATION_MS = 65;
@@ -472,6 +473,8 @@ const tickerState = {
   queue: [],
   active: null,
   shownKeys: new Set(),
+  liveAlerts: new Map(),
+  liveRotation: [],
 };
 
 state.rotationPeriodMs = (360 / SWEEP_SPEED_DEG_PER_SEC) * 1000;
@@ -1085,13 +1088,144 @@ function pruneAlertHighlights(activeKeys = [], now = Date.now()) {
   }
 }
 
-function emitTickerAlert(alertKey, message, options = {}) {
+function removeQueuedTickerMessagesByKey(key) {
+  if (!key || !Array.isArray(tickerState.queue) || tickerState.queue.length === 0) {
+    return;
+  }
+
+  tickerState.queue = tickerState.queue.filter((entry) => entry?.key !== key);
+}
+
+function pruneInactiveLiveAlerts(now = Date.now()) {
+  if (!tickerState.liveAlerts || tickerState.liveAlerts.size === 0) {
+    return;
+  }
+
+  const cutoff = now - LIVE_ALERT_GRACE_MS;
+  const staleKeys = [];
+  for (const [key, entry] of tickerState.liveAlerts) {
+    if (!entry || !Number.isFinite(entry.lastSeenAt) || entry.lastSeenAt < cutoff) {
+      staleKeys.push(key);
+    }
+  }
+
+  staleKeys.forEach((key) => resolveTickerAlert(key));
+}
+
+function getNextLiveTickerAlertEntry() {
+  pruneInactiveLiveAlerts();
+
+  if (!Array.isArray(tickerState.liveRotation) || tickerState.liveRotation.length === 0) {
+    return null;
+  }
+
+  const rotationLength = tickerState.liveRotation.length;
+  for (let i = 0; i < rotationLength; i += 1) {
+    const key = tickerState.liveRotation.shift();
+    if (!key) {
+      continue;
+    }
+
+    const entry = tickerState.liveAlerts.get(key);
+    if (entry) {
+      tickerState.liveRotation.push(key);
+      return {
+        text: entry.message,
+        duration: entry.duration,
+        key,
+      };
+    }
+  }
+
+  return null;
+}
+
+function resolveTickerAlert(alertKey) {
+  if (!alertKey) {
+    return;
+  }
+
+  if (tickerState.liveAlerts?.has(alertKey)) {
+    tickerState.liveAlerts.delete(alertKey);
+  }
+
+  if (Array.isArray(tickerState.liveRotation) && tickerState.liveRotation.length > 0) {
+    tickerState.liveRotation = tickerState.liveRotation.filter((key) => key !== alertKey);
+  }
+
+  removeQueuedTickerMessagesByKey(alertKey);
+}
+
+function activateLiveTickerAlert(alertKey, message, options = {}) {
   const {
     duration = null,
     cooldownMs = ALERT_COOLDOWN_MS,
     highlightCraftKey = null,
     highlightDurationMs = ALERT_HIGHLIGHT_DURATION_MS,
   } = options;
+
+  if (!alertKey) {
+    enqueueTickerMessage(message, { duration });
+    if (highlightCraftKey) {
+      registerAlertHighlight(highlightCraftKey, highlightDurationMs);
+    }
+    return;
+  }
+
+  const now = Date.now();
+  pruneAlertHistory(now);
+
+  const existingEntry = tickerState.liveAlerts.get(alertKey) || null;
+  if (!existingEntry) {
+    const lastShown = state.alertHistory.get(alertKey) || 0;
+    if (now - lastShown < cooldownMs) {
+      return;
+    }
+  }
+
+  const computedDuration = computeTickerDuration(message, duration);
+  const updatedEntry = existingEntry ? { ...existingEntry } : {};
+  updatedEntry.message = message;
+  updatedEntry.duration = computedDuration;
+  updatedEntry.lastSeenAt = now;
+  tickerState.liveAlerts.set(alertKey, updatedEntry);
+
+  if (!existingEntry) {
+    state.alertHistory.set(alertKey, now);
+    if (!tickerState.liveRotation.includes(alertKey)) {
+      tickerState.liveRotation.push(alertKey);
+    }
+    enqueueTickerMessage(message, { duration: computedDuration, queueKey: alertKey });
+  }
+
+  if (highlightCraftKey) {
+    registerAlertHighlight(highlightCraftKey, highlightDurationMs);
+  }
+
+  if (!tickerState.active) {
+    playNextTickerMessage();
+  }
+}
+
+function emitTickerAlert(alertKey, message, options = {}) {
+  const {
+    duration = null,
+    cooldownMs = ALERT_COOLDOWN_MS,
+    highlightCraftKey = null,
+    highlightDurationMs = ALERT_HIGHLIGHT_DURATION_MS,
+    repeatWhileActive = false,
+  } = options;
+
+  if (repeatWhileActive) {
+    activateLiveTickerAlert(alertKey, message, {
+      duration,
+      cooldownMs,
+      highlightCraftKey,
+      highlightDurationMs,
+    });
+    return;
+  }
+
   const now = Date.now();
   pruneAlertHistory(now);
 
@@ -1111,53 +1245,64 @@ function emitTickerAlert(alertKey, message, options = {}) {
 }
 
 function evaluateRapidDescentAlert(craft) {
-  if (!craft || craft.onGround) {
-    return;
-  }
-
-  if (!Number.isFinite(craft.verticalRate) || craft.verticalRate >= RAPID_DESCENT_THRESHOLD_FPM) {
+  if (!craft) {
     return;
   }
 
   const identifier = getCraftIdentifier(craft);
+  const alertKey = `rapid-descent-${craft.key || identifier}`;
+
+  if (craft.onGround || !Number.isFinite(craft.verticalRate) || craft.verticalRate >= RAPID_DESCENT_THRESHOLD_FPM) {
+    resolveTickerAlert(alertKey);
+    return;
+  }
+
   const descentRate = Math.abs(Math.round(craft.verticalRate));
   const altitudePortion = Number.isFinite(craft.altitude) && craft.altitude > 0
     ? ` at ${craft.altitude.toLocaleString()} ft`
     : '';
   const message = `Rapid descent: ${identifier} dropping ${descentRate.toLocaleString()} fpm${altitudePortion}.`;
-  const alertKey = `rapid-descent-${craft.key || identifier}`;
 
   emitTickerAlert(alertKey, message, {
     cooldownMs: 3 * 60 * 1000,
     highlightCraftKey: craft.key,
+    repeatWhileActive: true,
   });
 }
 
 function evaluateBaseApproachAlert(craft) {
-  if (!craft || craft.onGround) {
+  if (!craft) {
     return;
   }
 
-  if (state.baseAlertRangeKm <= BASE_ALERT_RANGE_MIN_KM) {
+  const identifier = getCraftIdentifier(craft);
+  const alertKey = `base-approach-${craft.key || identifier}`;
+
+  if (craft.onGround || state.baseAlertRangeKm <= BASE_ALERT_RANGE_MIN_KM) {
+    resolveTickerAlert(alertKey);
     return;
   }
 
   if (!Number.isFinite(craft.distanceKm)) {
+    resolveTickerAlert(alertKey);
     return;
   }
 
   if (!Number.isFinite(craft.groundSpeed) || craft.groundSpeed < BASE_APPROACH_MIN_GROUNDSPEED_KTS) {
+    resolveTickerAlert(alertKey);
     return;
   }
 
   const heading = normalizeHeading(craft.heading);
   if (heading === null) {
+    resolveTickerAlert(alertKey);
     return;
   }
 
   const bearingToBase = calculateBearing(craft.lat, craft.lon, state.receiver.lat, state.receiver.lon);
   const delta = shortestHeadingDelta(heading, bearingToBase);
   if (delta === null || delta > BASE_APPROACH_HEADING_TOLERANCE_DEG) {
+    resolveTickerAlert(alertKey);
     return;
   }
 
@@ -1165,32 +1310,32 @@ function evaluateBaseApproachAlert(craft) {
   const closestApproachKm = estimateClosestApproachToBaseKm(craft);
   if (!withinRangeNow) {
     if (!Number.isFinite(closestApproachKm) || closestApproachKm > state.baseAlertRangeKm) {
+      resolveTickerAlert(alertKey);
       return;
     }
   }
 
-  const identifier = getCraftIdentifier(craft);
   const distanceLabel = `${Math.round(craft.distanceKm)} km`;
   const message = withinRangeNow
     ? `Inbound alert: ${identifier} ${distanceLabel} out and tracking to base.`
     : `Inbound alert: ${identifier} ${distanceLabel} out and projected to enter the ${state.baseAlertRangeKm} km base radius.`;
-  const alertKey = `base-approach-${craft.key || identifier}`;
 
   emitTickerAlert(alertKey, message, {
     cooldownMs: 5 * 60 * 1000,
     highlightCraftKey: craft.key,
+    repeatWhileActive: true,
   });
 }
 
 function evaluateAlertTriggers(aircraftList) {
-  if (!Array.isArray(aircraftList) || aircraftList.length === 0) {
-    return;
+  if (Array.isArray(aircraftList) && aircraftList.length > 0) {
+    for (const craft of aircraftList) {
+      evaluateRapidDescentAlert(craft);
+      evaluateBaseApproachAlert(craft);
+    }
   }
 
-  for (const craft of aircraftList) {
-    evaluateRapidDescentAlert(craft);
-    evaluateBaseApproachAlert(craft);
-  }
+  pruneInactiveLiveAlerts();
 }
 
 function showMessage(text, options = {}) {
@@ -1222,7 +1367,19 @@ function playNextTickerMessage() {
     return;
   }
 
-  if (tickerState.active || tickerState.queue.length === 0) {
+  if (tickerState.active) {
+    return;
+  }
+
+  if (tickerState.queue.length === 0) {
+    const liveEntry = getNextLiveTickerAlertEntry();
+    if (liveEntry) {
+      tickerState.queue.push(liveEntry);
+    }
+  }
+
+  if (tickerState.queue.length === 0) {
+    messageTickerEl.removeAttribute('data-active');
     return;
   }
 
@@ -1256,7 +1413,7 @@ function enqueueTickerMessage(text, options = {}) {
     return;
   }
 
-  const { duration = null, key = null } = options;
+  const { duration = null, key = null, queueKey = null } = options;
   const trimmed = typeof text === 'string' ? text.trim() : '';
   if (!trimmed) {
     return;
@@ -1267,8 +1424,18 @@ function enqueueTickerMessage(text, options = {}) {
   }
 
   const computedDuration = computeTickerDuration(trimmed, duration);
+  const queueEntry = {
+    text: trimmed,
+    duration: computedDuration,
+  };
 
-  tickerState.queue.push({ text: trimmed, duration: computedDuration });
+  if (queueKey) {
+    queueEntry.key = queueKey;
+  } else if (key) {
+    queueEntry.key = key;
+  }
+
+  tickerState.queue.push(queueEntry);
   if (key) {
     tickerState.shownKeys.add(key);
   }
