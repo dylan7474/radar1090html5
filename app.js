@@ -7,7 +7,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.3';
+const APP_VERSION = 'V1.8.4';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -28,6 +28,8 @@ const BASE_ALERT_RANGE_MAX_KM = 30;
 const BASE_ALERT_RANGE_STEP_KM = 1;
 const DEFAULT_BASE_ALERT_RANGE_KM = 15;
 const RAPID_DESCENT_THRESHOLD_FPM = -2500;
+const ALTITUDE_CORROBORATION_MIN_DELTA_FT = 100;
+const ALTITUDE_CORROBORATION_WINDOW_MS = REFRESH_INTERVAL_MS * 3;
 const BASE_APPROACH_HEADING_TOLERANCE_DEG = 35;
 const BASE_APPROACH_MIN_GROUNDSPEED_KTS = 60;
 const ALERT_COOLDOWN_MS = 2 * 60 * 1000;
@@ -431,10 +433,10 @@ const savedDataPanelVisible = readBooleanPreference(
   true,
 );
 const state = {
-  server: {
-    protocol: DUMP1090_PROTOCOL,
-    host: DUMP1090_HOST,
-    port: DUMP1090_PORT,
+  server: {
+    protocol: DUMP1090_PROTOCOL,
+    host: DUMP1090_HOST,
+    port: DUMP1090_PORT,
     basePath: readCookie('dump1090BasePath') || DEFAULT_BASE_PATH,
   },
   receiver: {
@@ -443,9 +445,10 @@ const state = {
     hasOverride: receiverHasOverride,
   },
   running: true,
-  trackedAircraft: [],
-  previousPositions: new Map(),
-  paintedRotation: new Map(),
+  trackedAircraft: [],
+  previousPositions: new Map(),
+  previousAltitudeSamples: new Map(),
+  paintedRotation: new Map(),
   currentSweepId: 0,
   activeBlips: [],
   airspacesInRange: [],
@@ -1252,7 +1255,12 @@ function evaluateRapidDescentAlert(craft) {
   const identifier = getCraftIdentifier(craft);
   const alertKey = `rapid-descent-${craft.key || identifier}`;
 
-  if (craft.onGround || !Number.isFinite(craft.verticalRate) || craft.verticalRate >= RAPID_DESCENT_THRESHOLD_FPM) {
+  if (
+    craft.onGround
+    || !Number.isFinite(craft.verticalRate)
+    || craft.verticalRate >= RAPID_DESCENT_THRESHOLD_FPM
+    || craft.altitudeDescentConfirmed !== true
+  ) {
     resolveTickerAlert(alertKey);
     return;
   }
@@ -1544,11 +1552,12 @@ function adjustVolume(delta) {
 }
 
 function clearRadarContacts() {
-  state.trackedAircraft = [];
-  state.previousPositions.clear();
-  state.activeBlips = [];
-  state.paintedRotation.clear();
-  state.lastPingedAircraft = null;
+  state.trackedAircraft = [];
+  state.previousPositions.clear();
+  state.previousAltitudeSamples.clear();
+  state.activeBlips = [];
+  state.paintedRotation.clear();
+  state.lastPingedAircraft = null;
   state.selectedAircraftKey = null;
   state.displayOnlySelected = false;
 }
@@ -1923,25 +1932,45 @@ function processAircraftData(data) {
   }
   const radarRangeKm = RANGE_STEPS[state.rangeStepIndex];
   const previousPositions = state.previousPositions;
+  const previousAltitudeSamples = state.previousAltitudeSamples;
   const nextPositions = new Map();
+  const nextAltitudeSamples = new Map();
+  const sampleTimestamp = Date.now();
   const aircraft = [];
   for (const entry of data.aircraft) {
-    if (typeof entry.lat !== 'number' || typeof entry.lon !== 'number') continue;
-    const lat = entry.lat;
-    const lon = entry.lon;
-    const distanceKm = haversine(state.receiver.lat, state.receiver.lon, lat, lon);
-    if (!Number.isFinite(distanceKm) || distanceKm > radarRangeKm) continue;
+    if (typeof entry.lat !== 'number' || typeof entry.lon !== 'number') continue;
+    const lat = entry.lat;
+    const lon = entry.lon;
+    const distanceKm = haversine(state.receiver.lat, state.receiver.lon, lat, lon);
+    if (!Number.isFinite(distanceKm) || distanceKm > radarRangeKm) continue;
 
-    const bearing = calculateBearing(state.receiver.lat, state.receiver.lon, lat, lon);
-    const hex = typeof entry.hex === 'string' ? entry.hex.trim().toUpperCase() : '';
-    const flight = typeof entry.flight === 'string' ? entry.flight.trim() : '';
+    const bearing = calculateBearing(state.receiver.lat, state.receiver.lon, lat, lon);
+    const hex = typeof entry.hex === 'string' ? entry.hex.trim().toUpperCase() : '';
+    const flight = typeof entry.flight === 'string' ? entry.flight.trim() : '';
 
-    const prev = hex ? previousPositions.get(hex) : null;
-    const heading = calculateHeading(prev, { lat, lon, bearing }, resolveInitialHeading(entry));
+    const prev = hex ? previousPositions.get(hex) : null;
+    const heading = calculateHeading(prev, { lat, lon, bearing }, resolveInitialHeading(entry));
 
-    const altitude = Number.isInteger(entry.alt_baro) ? entry.alt_baro : -1;
-    const groundSpeed = typeof entry.gs === 'number' ? entry.gs : -1;
-    const squawk = typeof entry.squawk === 'string' ? entry.squawk.trim() : '';
+    const altitude = Number.isInteger(entry.alt_baro) ? entry.alt_baro : -1;
+    const hasValidAltitude = altitude >= 0;
+    const previousAltitudeSample = hex ? previousAltitudeSamples.get(hex) : null;
+    const previousAltitudeAgeMs = previousAltitudeSample?.timestamp != null
+      ? sampleTimestamp - previousAltitudeSample.timestamp
+      : null;
+    const previousAltitude = Number.isInteger(previousAltitudeSample?.altitude)
+      && previousAltitudeAgeMs !== null
+      && previousAltitudeAgeMs <= ALTITUDE_CORROBORATION_WINDOW_MS
+        ? previousAltitudeSample.altitude
+        : null;
+    const altitudeDelta = hasValidAltitude && previousAltitude !== null
+      ? altitude - previousAltitude
+      : null;
+    // Require a recent drop in reported altitude so we only alert on corroborated descents.
+    const altitudeDescentConfirmed = altitudeDelta !== null
+      && altitudeDelta <= -ALTITUDE_CORROBORATION_MIN_DELTA_FT;
+
+    const groundSpeed = typeof entry.gs === 'number' ? entry.gs : -1;
+    const squawk = typeof entry.squawk === 'string' ? entry.squawk.trim() : '';
     const verticalRate = Number.isFinite(entry.baro_rate)
       ? entry.baro_rate
       : Number.isFinite(entry.geom_rate)
@@ -1966,6 +1995,9 @@ function processAircraftData(data) {
       signalDb,
       lastMessageAgeSec,
       onGround,
+      previousAltitude,
+      altitudeDelta,
+      altitudeDescentConfirmed,
     };
 
     craft.key = getCraftKey(craft);
@@ -1973,13 +2005,24 @@ function processAircraftData(data) {
     craft.iconKey = resolveAircraftIconKey(entry);
 
     aircraft.push(craft);
-    if (hex) {
-      nextPositions.set(hex, { lat, lon });
-    }
-  }
+    if (hex) {
+      nextPositions.set(hex, { lat, lon });
+      if (hasValidAltitude) {
+        nextAltitudeSamples.set(hex, { altitude, timestamp: sampleTimestamp });
+      } else if (
+        previousAltitudeSample
+        && Number.isInteger(previousAltitudeSample.altitude)
+        && previousAltitudeAgeMs !== null
+        && previousAltitudeAgeMs <= ALTITUDE_CORROBORATION_WINDOW_MS
+      ) {
+        nextAltitudeSamples.set(hex, previousAltitudeSample);
+      }
+    }
+  }
 
   state.trackedAircraft = aircraft;
   state.previousPositions = nextPositions;
+  state.previousAltitudeSamples = nextAltitudeSamples;
 
   pruneAlertHighlights(
     aircraft.map((craft) => craft.key),
