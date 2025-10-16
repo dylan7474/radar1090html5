@@ -10,7 +10,6 @@ html {
   --panel-border: #1f2436;
   --text: #f2f6ff;
   --accent: #35ff99;
-  --alert: #ff6767;
   --muted: #8592ad;
   font-family: "Share Tech Mono", system-ui, sans-serif;
 }
@@ -201,19 +200,10 @@ main.app.data-hidden .data-panel {
   color: var(--accent);
 }
 
-.info-line--alert span,
-.info-line--alert strong {
-  color: var(--alert);
-}
-
 .message {
   min-height: 3rem;
   font-size: 1rem;
   color: var(--accent);
-}
-
-.message.alert {
-  color: var(--alert);
 }
 
 .controls {
@@ -370,10 +360,6 @@ main.app.data-hidden .data-panel {
   font-size: 0.85rem;
   color: var(--muted);
   flex: 1 1 140px;
-}
-
-.audio-status.alert {
-  color: var(--alert);
 }
 
 #airband-stream {

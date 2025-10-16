@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.7.6
+**Current Version:** V1.7.7
 
 ---
 
@@ -89,7 +89,7 @@ controlled region falls inside the active range rings.
 - Connection issues surface in the message area and in the browser developer console
   (open it with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> or
   <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd> on macOS).
-- If the audio stream cannot be reached, the app displays an alert in the message area.
+- If the audio stream cannot be reached, the app displays a warning message in the sidebar.
 - When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
   or audio endpoints are plain HTTP.
 

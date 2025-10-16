@@ -3,26 +3,22 @@ import { CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
 const REFRESH_INTERVAL_MS = 5000;
 const AUDIO_RETRY_INTERVAL_MS = 8000;
 const DISPLAY_TIMEOUT_MS = 1500;
-const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.6';
+const APP_VERSION = 'V1.7.7';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
 const FREQ_MID = 1200;
 const FREQ_HIGH = 1800;
-const RAPID_DESCENT_THRESHOLD_FPM = -3000;
-const EMERGENCY_SQUAWKS = new Set(['7500', '7600', '7700']);
 const EARTH_RADIUS_KM = 6371;
 const AUDIO_STREAM_URL = 'https://audio.dylanjones.org/airbands';
 const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
 const AIRCRAFT_DETAILS_STORAGE_KEY = 'showAircraftDetails';
 const BEEP_VOLUME_STORAGE_KEY = 'beepVolumeLevel';
 const RANGE_INDEX_STORAGE_KEY = 'radarRangeIndex';
-const ALERT_DISTANCE_STORAGE_KEY = 'inboundAlertDistanceKm';
 const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
@@ -114,9 +110,6 @@ const volumeIncreaseBtn = document.getElementById('volume-increase');
 const rangeValueEl = document.getElementById('range-value');
 const rangeDecreaseBtn = document.getElementById('range-decrease');
 const rangeIncreaseBtn = document.getElementById('range-increase');
-const alertValueEl = document.getElementById('alert-value');
-const alertDecreaseBtn = document.getElementById('alert-decrease');
-const alertIncreaseBtn = document.getElementById('alert-increase');
 const radarRotateBtn = document.getElementById('radar-rotate');
 const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
@@ -290,7 +283,7 @@ function getBlipIconScale(blip) {
   return Number.isFinite(blip?.iconScale) ? blip.iconScale : ICON_SCALE_DEFAULT;
 }
 
-// The label offsets depend on the rendered marker height so inbound callouts clear the icon.
+// The label offsets depend on the rendered marker height so callouts clear the icon.
 function getIconState(blip) {
   const key = blip?.iconKey;
   if (key && iconLibrary[key]) {
@@ -397,12 +390,6 @@ const savedRangeStepIndex = readIntPreference(
   0,
   Math.max(RANGE_STEPS.length - 1, 0),
 );
-const savedAlertRadius = readIntPreference(
-  ALERT_DISTANCE_STORAGE_KEY,
-  INBOUND_ALERT_DISTANCE_KM,
-  1,
-  20,
-);
 const savedRadarOrientation = readIntPreference(
   RADAR_ORIENTATION_STORAGE_KEY,
   0,
@@ -439,18 +426,15 @@ const state = {
   lastPingedAircraft: null,
   selectedAircraftKey: null,
   displayOnlySelected: false,
-  inboundAlertDistanceKm: savedAlertRadius,
-  rangeStepIndex: savedRangeStepIndex,
-  beepVolume: savedBeepVolume,
-  sweepAngle: 0,
-  lastFrameTime: performance.now(),
-  rotationPeriodMs: 0,
-  radarRotationQuarterTurns: savedRadarOrientation,
-  dataConnectionOk: false,
+  rangeStepIndex: savedRangeStepIndex,
+  beepVolume: savedBeepVolume,
+  sweepAngle: 0,
+  lastFrameTime: performance.now(),
+  rotationPeriodMs: 0,
+  radarRotationQuarterTurns: savedRadarOrientation,
+  dataConnectionOk: false,
   message: '',
-  messageAlert: false,
   messageUntil: 0,
-  lastDisplayedAlertSignature: '',
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
@@ -466,14 +450,12 @@ let pendingAutoUnmute = false;
 let audioRetryTimer = null;
 let autoplayHintShown = false;
 
-function updateAudioStatus(text, options = {}) {
-  if (!audioStatusEl) {
-    return;
-  }
+function updateAudioStatus(text) {
+  if (!audioStatusEl) {
+    return;
+  }
 
-  const { alert = false } = options;
-  audioStatusEl.textContent = text;
-  audioStatusEl.classList.toggle('alert', alert);
+  audioStatusEl.textContent = text;
 }
 
 function refreshAudioStreamControls() {
@@ -489,22 +471,21 @@ function refreshAudioStreamControls() {
     audioMuteToggleBtn.classList.toggle('primary', highlight);
   }
 
-  if (audioStreamError) {
-    updateAudioStatus('Stream unavailable', { alert: true });
-    return;
-  }
+  if (audioStreamError) {
+    updateAudioStatus('Stream unavailable');
+    return;
+  }
 
-  if (audioAutoplayBlocked && !isMuted) {
-    updateAudioStatus('Autoplay blocked. Tap anywhere to start audio.', { alert: true });
-    if (!autoplayHintShown) {
-      autoplayHintShown = true;
-      showMessage('Browser blocked autoplay—tap anywhere to enable the live feed.', {
-        alert: true,
-        duration: DISPLAY_TIMEOUT_MS * 4,
-      });
-    }
-    return;
-  }
+  if (audioAutoplayBlocked && !isMuted) {
+    updateAudioStatus('Autoplay blocked. Tap anywhere to start audio.');
+    if (!autoplayHintShown) {
+      autoplayHintShown = true;
+      showMessage('Browser blocked autoplay—tap anywhere to enable the live feed.', {
+        duration: DISPLAY_TIMEOUT_MS * 4,
+      });
+    }
+    return;
+  }
 
   if (pendingAutoUnmute) {
     updateAudioStatus('Starting audio…');
@@ -649,10 +630,9 @@ function handleAudioPlaybackFailure(error) {
     ensureAudioUnlockListener();
   } else {
     audioStreamError = true;
-    showMessage('Audio stream unavailable. Check the receiver.', {
-      alert: true,
-      duration: DISPLAY_TIMEOUT_MS * 2,
-    });
+    showMessage('Audio stream unavailable. Check the receiver.', {
+      duration: DISPLAY_TIMEOUT_MS * 2,
+    });
     console.warn('Unable to start audio stream', error);
     scheduleAudioRetry();
   }
@@ -760,10 +740,9 @@ if (audioStreamEl) {
   audioStreamEl.addEventListener('error', (event) => {
     audioStreamError = true;
     refreshAudioStreamControls();
-    showMessage('Audio stream unavailable. Check the receiver.', {
-      alert: true,
-      duration: DISPLAY_TIMEOUT_MS * 2,
-    });
+    showMessage('Audio stream unavailable. Check the receiver.', {
+      duration: DISPLAY_TIMEOUT_MS * 2,
+    });
     console.warn('Audio stream error', event);
     scheduleAudioRetry();
   });
@@ -818,11 +797,9 @@ audioMuteToggleBtn?.addEventListener('click', () => {
 
 volumeDecreaseBtn?.addEventListener('click', () => adjustVolume(-1));
 volumeIncreaseBtn?.addEventListener('click', () => adjustVolume(1));
-rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
-rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
-alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
-alertIncreaseBtn?.addEventListener('click', () => adjustAlertRadius(1));
-radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
+ rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
+ rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
+ radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
 canvas?.addEventListener('click', handleRadarTap);
 
 controlsPanelToggleBtn?.addEventListener('click', () => {
@@ -954,29 +931,25 @@ function getBeepFrequencyForAltitude(altitude) {
 }
 
 function showMessage(text, options = {}) {
-  const { alert = false, duration = DISPLAY_TIMEOUT_MS } = options;
-  state.message = text;
-  state.messageAlert = alert;
-  state.messageUntil = performance.now() + duration;
-  updateMessage();
+  const { duration = DISPLAY_TIMEOUT_MS } = options;
+  state.message = text;
+  state.messageUntil = performance.now() + duration;
+  updateMessage();
 }
 
 function updateMessage() {
-  if (!state.message) {
-    messageEl.textContent = '';
-    messageEl.classList.remove('alert');
-    return;
-  }
+  if (!state.message) {
+    messageEl.textContent = '';
+    return;
+  }
 
-  if (performance.now() > state.messageUntil) {
-    state.message = '';
-    messageEl.textContent = '';
-    messageEl.classList.remove('alert');
-    return;
-  }
+  if (performance.now() > state.messageUntil) {
+    state.message = '';
+    messageEl.textContent = '';
+    return;
+  }
 
-  messageEl.textContent = state.message;
-  messageEl.classList.toggle('alert', state.messageAlert);
+  messageEl.textContent = state.message;
 }
 
 function updateRangeInfo() {
@@ -984,7 +957,6 @@ function updateRangeInfo() {
   if (volumeDescriptionEl) volumeDescriptionEl.textContent = 'Adjust the audio cue loudness.';
   if (volumeValueEl) volumeValueEl.textContent = `${state.beepVolume}`;
   if (rangeValueEl) rangeValueEl.textContent = `${RANGE_STEPS[state.rangeStepIndex]} km`;
-  if (alertValueEl) alertValueEl.textContent = `${state.inboundAlertDistanceKm.toFixed(1)} km`;
 
   const trackedCount = state.trackedAircraft.filter(shouldDisplayCraft).length;
   const infoLines = [
@@ -1081,61 +1053,12 @@ function adjustRange(delta) {
   }
 }
 
-function adjustAlertRadius(delta) {
-  const nextValue = Math.min(20, Math.max(1, state.inboundAlertDistanceKm + delta));
-  if (nextValue !== state.inboundAlertDistanceKm) {
-    state.inboundAlertDistanceKm = nextValue;
-    showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
-    writeCookie(ALERT_DISTANCE_STORAGE_KEY, String(state.inboundAlertDistanceKm));
-    updateRangeInfo();
-  }
-}
-
-function isEmergencySquawk(squawk) {
-  if (typeof squawk !== 'string') {
-    return false;
-  }
-
-  const trimmed = squawk.trim();
-  if (trimmed.length !== 4) {
-    return false;
-  }
-
-  return EMERGENCY_SQUAWKS.has(trimmed);
-}
-
-function evaluateAircraftAlerts(info) {
-  const result = {
-    alerts: [],
-    emergencySquawk: false,
-    rapidDescent: false,
-  };
-
-  if (!info) {
-    return result;
-  }
-
-  if (isEmergencySquawk(info.squawk)) {
-    result.emergencySquawk = true;
-    result.alerts.push(`Emergency squawk ${info.squawk}`);
-  }
-
-  if (!info.onGround && Number.isFinite(info.verticalRate) && info.verticalRate <= RAPID_DESCENT_THRESHOLD_FPM) {
-    result.rapidDescent = true;
-    result.alerts.push(`Rapid descent (${Math.round(info.verticalRate)} fpm)`);
-  }
-
-  return result;
-}
-
 function updateAircraftInfo() {
   const info = state.lastPingedAircraft;
   if (!info) {
     aircraftInfoEl.innerHTML = '<p>Scanning…</p>';
     return;
   }
-
-  const { alerts, emergencySquawk, rapidDescent } = evaluateAircraftAlerts(info);
 
   const climbLabel = (() => {
     if (info.onGround) {
@@ -1160,13 +1083,13 @@ function updateAircraftInfo() {
     { label: 'Distance', value: `${info.distanceKm.toFixed(1)} km` },
     { label: 'Altitude', value: info.altitude > 0 ? `${info.altitude} ft` : '-----' },
     { label: 'Speed', value: info.groundSpeed > 0 ? `${info.groundSpeed.toFixed(0)} kt` : '---' },
-    { label: 'Climb', value: climbLabel, alert: rapidDescent },
+    { label: 'Climb', value: climbLabel },
   ];
 
   const hasSquawk = typeof info.squawk === 'string' && info.squawk.trim().length > 0;
   const squawkDisplay = hasSquawk ? info.squawk : 'NODATA';
   // Keep the squawk row visible so the data panel layout remains stable even without a code.
-  lines.push({ label: 'Squawk', value: squawkDisplay, alert: hasSquawk && emergencySquawk });
+  lines.push({ label: 'Squawk', value: squawkDisplay });
 
   if (Number.isFinite(info.signalDb)) {
     const formattedSignal = `${info.signalDb.toFixed(1)} dBFS`;
@@ -1180,25 +1103,8 @@ function updateAircraftInfo() {
   }
 
   aircraftInfoEl.innerHTML = lines
-    .map(({ label, value, alert }) => {
-      const classes = ['info-line'];
-      if (alert) {
-        classes.push('info-line--alert');
-      }
-      return `<div class="${classes.join(' ')}"><span>${label}</span><strong>${value}</strong></div>`;
-    })
+    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
     .join('');
-
-  if (alerts.length > 0) {
-    const alertSignature = alerts.join(' | ');
-    const messageText = alerts.join(' • ');
-    if (alertSignature !== state.lastDisplayedAlertSignature || state.message !== messageText) {
-      showMessage(messageText, { alert: true, duration: DISPLAY_TIMEOUT_MS * 6 });
-      state.lastDisplayedAlertSignature = alertSignature;
-    }
-  } else if (state.lastDisplayedAlertSignature) {
-    state.lastDisplayedAlertSignature = '';
-  }
 }
 
 function updateStatus() {
@@ -1425,8 +1331,8 @@ async function pollData() {
       try {
         await determineServerBasePath();
       } catch (error) {
-        console.warn('Failed to determine dump1090 path', error);
-        showMessage(`Unable to reach server: ${error.message}`, { alert: true, duration: DISPLAY_TIMEOUT_MS * 4 });
+        console.warn('Failed to determine dump1090 path', error);
+        showMessage(`Unable to reach server: ${error.message}`, { duration: DISPLAY_TIMEOUT_MS * 4 });
         await new Promise((resolve) => setTimeout(resolve, REFRESH_INTERVAL_MS));
         continue;
       }
@@ -1438,9 +1344,9 @@ async function pollData() {
     } catch (error) {
       console.warn('Failed to fetch aircraft data', error);
       state.dataConnectionOk = false;
-      clearRadarContacts();
-      state.server.basePath = null;
-      showMessage('Failed to fetch aircraft data. Check receiver connection.', { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
+      clearRadarContacts();
+      state.server.basePath = null;
+      showMessage('Failed to fetch aircraft data. Check receiver connection.', { duration: DISPLAY_TIMEOUT_MS * 2 });
     }
     updateStatus();
     updateRangeInfo();
@@ -1485,9 +1391,7 @@ function processAircraftData(data) {
   const previousPositions = state.previousPositions;
   const nextPositions = new Map();
   const aircraft = [];
-  const inboundNames = [];
-
-  for (const entry of data.aircraft) {
+  for (const entry of data.aircraft) {
     if (typeof entry.lat !== 'number' || typeof entry.lon !== 'number') continue;
     const lat = entry.lat;
     const lon = entry.lon;
@@ -1517,32 +1421,24 @@ function processAircraftData(data) {
       flight,
       hex,
       lat,
-      lon,
-      distanceKm,
-      bearing,
-      heading,
-      altitude,
-      groundSpeed,
+      lon,
+      distanceKm,
+      bearing,
+      heading,
+      altitude,
+      groundSpeed,
       squawk,
       verticalRate,
       signalDb,
       lastMessageAgeSec,
       onGround,
-      inbound: false,
     };
 
-    craft.key = getCraftKey(craft);
-    craft.iconScale = resolveAircraftIconScale(entry);
-    craft.iconKey = resolveAircraftIconKey(entry);
+    craft.key = getCraftKey(craft);
+    craft.iconScale = resolveAircraftIconScale(entry);
+    craft.iconKey = resolveAircraftIconKey(entry);
 
-    const inboundResult = evaluateInbound(craft);
-    craft.inbound = inboundResult.inbound;
-    if (inboundResult.inbound) {
-      inboundNames.push(inboundResult.name);
-      craft.minutesToBase = inboundResult.minutesToBase;
-    }
-
-    aircraft.push(craft);
+    aircraft.push(craft);
     if (hex) {
       nextPositions.set(hex, { lat, lon });
     }
@@ -1571,78 +1467,42 @@ function processAircraftData(data) {
     }
   }
 
-  if (inboundNames.length > 0) {
-    const unique = [...new Set(inboundNames)];
-    const message = unique.length === 1
-      ? `Inbound alert: ${unique[0]}`
-      : `Inbound alert: ${unique.slice(0, 3).join(', ')}${unique.length > 3 ? '…' : ''}`;
-    showMessage(message, { alert: true, duration: DISPLAY_TIMEOUT_MS * 2 });
-  }
-}
-
-function evaluateInbound(craft) {
-  const name = craft.flight || craft.hex || 'Unknown';
-  const headingToBase = (craft.bearing + 180) % 360;
-  let diff = Math.abs(headingToBase - craft.heading);
-  diff = (diff + 360) % 360;
-  if (diff > 180) diff = 360 - diff;
-  const distanceAlong = craft.distanceKm * Math.cos(deg2rad(diff));
-  if (distanceAlong <= 0) return { inbound: false, name };
-  const minDist = craft.distanceKm * Math.sin(deg2rad(diff));
-  const inbound = minDist <= state.inboundAlertDistanceKm;
-  let minutesToBase = null;
-  if (inbound && craft.groundSpeed > 0) {
-    const speedKmh = craft.groundSpeed * 1.852;
-    if (speedKmh > 0) {
-      minutesToBase = Math.round((distanceAlong / speedKmh) * 60);
-    }
-  }
-  return { inbound, name, minutesToBase };
 }
 
 function getBlipLabelAlpha(blip, alpha) {
-  const iconState = getIconState(blip);
-  if (iconState?.ready) {
-    return blip.inbound ? Math.max(0.6, alpha) : alpha;
-  }
-  return blip.inbound ? Math.max(0.2, alpha) : alpha * 0.9;
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
+    return alpha;
+  }
+  return alpha * 0.9;
 }
 
 function drawBlipMarker(blip, radarRadius, alpha) {
   const iconState = getIconState(blip);
-  if (iconState?.ready) {
-    const scale = getBlipIconScale(blip);
-    const baseSize = radarRadius * 0.14 * scale;
-    const width = baseSize;
-    const height = baseSize * iconState.aspect;
-    const headingRad = deg2rad(blip.heading);
-    const iconSource = iconState.canvas || iconState.image;
-    ctx.save();
-    ctx.translate(blip.x, blip.y);
-    if (blip.inbound) {
-      const pulseAlpha = Math.max(0.3, alpha);
-      const highlightRadius = Math.max(width, height) * 0.55;
-      ctx.globalAlpha = pulseAlpha;
-      ctx.fillStyle = 'rgba(255,103,103,0.35)';
-      ctx.beginPath();
-      ctx.arc(0, 0, highlightRadius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.rotate(headingRad);
-    ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
-    ctx.drawImage(iconSource, -width / 2, -height / 2, width, height);
-    ctx.restore();
-    return;
-  }
+  if (iconState?.ready) {
+    const scale = getBlipIconScale(blip);
+    const baseSize = radarRadius * 0.14 * scale;
+    const width = baseSize;
+    const height = baseSize * iconState.aspect;
+    const headingRad = deg2rad(blip.heading);
+    const iconSource = iconState.canvas || iconState.image;
+    ctx.save();
+    ctx.translate(blip.x, blip.y);
+    ctx.rotate(headingRad);
+    ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
+    ctx.drawImage(iconSource, -width / 2, -height / 2, width, height);
+    ctx.restore();
+    return;
+  }
 
-  ctx.save();
-  ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
-  ctx.fillStyle = blip.inbound ? 'rgba(255,103,103,1)' : 'rgba(53,255,153,1)';
-  ctx.beginPath();
-  const scale = getBlipIconScale(blip);
-  ctx.arc(blip.x, blip.y, radarRadius * 0.02 * scale, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = getBlipLabelAlpha(blip, alpha);
+  ctx.fillStyle = 'rgba(53,255,153,1)';
+  ctx.beginPath();
+  const scale = getBlipIconScale(blip);
+  ctx.arc(blip.x, blip.y, radarRadius * 0.02 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm, drawUprightTextAt) {
@@ -1853,21 +1713,18 @@ function drawRadar(deltaTime) {
         const screenRadius = Math.min(1, craft.distanceKm / radarRangeKm) * radarRadius;
         const x = centerX + Math.sin(angleRad) * screenRadius;
         const y = centerY - Math.cos(angleRad) * screenRadius;
-        const minutesToBase = craft.minutesToBase;
-        newBlips.push({
-          key,
-          x,
-          y,
-          spawn: now,
-          heading: craft.heading,
-          inbound: craft.inbound,
-          iconScale: craft.iconScale,
-          iconKey: craft.iconKey,
-          minutesToBase: Number.isFinite(minutesToBase) ? minutesToBase : null,
-          distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
-          altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
-          hex: craft.hex || craft.flight,
-          flight: craft.flight || null,
+        newBlips.push({
+          key,
+          x,
+          y,
+          spawn: now,
+          heading: craft.heading,
+          iconScale: craft.iconScale,
+          iconKey: craft.iconKey,
+          distanceKm: Number.isFinite(craft.distanceKm) ? craft.distanceKm : null,
+          altitude: Number.isFinite(craft.altitude) && craft.altitude > 0 ? craft.altitude : null,
+          hex: craft.hex || craft.flight,
+          flight: craft.flight || null,
         });
         state.paintedRotation.set(key, state.currentSweepId);
         const shouldFocusOnCraft = !state.selectedAircraftKey || state.selectedAircraftKey === key;
@@ -1893,9 +1750,9 @@ function drawRadar(deltaTime) {
     const headingRad = deg2rad(blip.heading);
     const labelAlpha = getBlipLabelAlpha(blip, alpha);
 
-    ctx.save();
-    ctx.globalAlpha = blip.inbound ? Math.max(0.25, alpha) : alpha * 0.8;
-    ctx.strokeStyle = blip.inbound ? 'rgba(255,103,103,0.8)' : 'rgba(53,255,153,0.7)';
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.8;
+    ctx.strokeStyle = 'rgba(53,255,153,0.7)';
     ctx.lineWidth = radarRadius * 0.0025;
     ctx.beginPath();
     ctx.moveTo(blip.x, blip.y);
@@ -1909,26 +1766,16 @@ function drawRadar(deltaTime) {
 
     if (showAircraftDetails) {
       const fontSize = Math.round(radarRadius * 0.055);
-      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-      const markerWidth = getBlipMarkerWidth(blip, radarRadius);
-      const verticalSpacing = fontSize * 0.45;
-      const horizontalSpacing = fontSize * 0.6;
-      const identifierRaw = blip.flight || blip.hex || 'Unknown';
-      const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
-      const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
-      const distanceLabel = Number.isFinite(blip.distanceKm)
-        ? (() => {
-            const km = blip.distanceKm;
-            const kmValue = km >= 10 ? Math.round(km) : km.toFixed(1);
-            return `${kmValue}km`;
-          })()
-        : null;
-      const etaLabel = blip.minutesToBase != null ? `ETA ${blip.minutesToBase}m` : null;
+      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
+      const verticalSpacing = fontSize * 0.45;
+      const identifierRaw = blip.flight || blip.hex || 'Unknown';
+      const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
+      const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
 
-      const drawAircraftLabel = (text, anchorX, anchorY, align, baseline) => {
-        if (!text) {
-          return;
-        }
+      const drawAircraftLabel = (text, anchorX, anchorY, align, baseline) => {
+        if (!text) {
+          return;
+        }
 
         drawUprightAt(anchorX, anchorY, () => {
           ctx.save();
@@ -1947,71 +1794,12 @@ function drawRadar(deltaTime) {
         drawAircraftLabel(identifier, blip.x, identifierY, 'center', 'bottom');
       }
 
-      if (altitudeLabel) {
-        const altitudeY = blip.y + markerHeight / 2 + verticalSpacing;
-        drawAircraftLabel(altitudeLabel, blip.x, altitudeY, 'center', 'top');
-      }
-
-      if (blip.inbound && (distanceLabel || etaLabel)) {
-        const offsetX = markerWidth / 2 + horizontalSpacing;
-        if (distanceLabel) {
-          drawAircraftLabel(distanceLabel, blip.x - offsetX, blip.y, 'right', 'middle');
-        }
-
-        if (etaLabel) {
-          drawAircraftLabel(etaLabel, blip.x + offsetX, blip.y, 'left', 'middle');
-        }
-      }
-    } else if (blip.inbound) {
-      const distanceLabel = Number.isFinite(blip.distanceKm)
-        ? (() => {
-            const km = blip.distanceKm;
-            const kmValue = km >= 10 ? Math.round(km) : km.toFixed(1);
-            return `${kmValue}km`;
-          })()
-        : null;
-      const etaLabel = blip.minutesToBase != null ? `ETA ${blip.minutesToBase}m` : null;
-      const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
-
-      if (distanceLabel || etaLabel || altitudeLabel) {
-        const fontSize = Math.round(radarRadius * 0.055);
-        const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-        const labelSpacing = fontSize * 0.45;
-
-        const drawInboundLabel = (text, anchorX, anchorY, baseline) => {
-          if (!text) {
-            return;
-          }
-
-          drawUprightAt(anchorX, anchorY, () => {
-            ctx.save();
-            ctx.globalAlpha = labelAlpha;
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = baseline;
-            ctx.fillText(text, anchorX, anchorY);
-            ctx.restore();
-          });
-        };
-
-        if (distanceLabel) {
-          const distanceY = blip.y - markerHeight / 2 - labelSpacing;
-          drawInboundLabel(distanceLabel, blip.x, distanceY, 'bottom');
-        }
-
-        const lowerLabels = [etaLabel, altitudeLabel].filter(Boolean);
-        if (lowerLabels.length > 0) {
-          const firstLineY = blip.y + markerHeight / 2 + labelSpacing;
-          const lineHeight = fontSize * 1.05;
-          lowerLabels.forEach((label, index) => {
-            const lineY = firstLineY + index * lineHeight;
-            drawInboundLabel(label, blip.x, lineY, 'top');
-          });
-        }
-      }
-    }
-  }
+      if (altitudeLabel) {
+        const altitudeY = blip.y + markerHeight / 2 + verticalSpacing;
+        drawAircraftLabel(altitudeLabel, blip.x, altitudeY, 'center', 'top');
+      }
+    }
+  }
 
   ctx.restore();
 
