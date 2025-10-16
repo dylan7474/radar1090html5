@@ -210,10 +210,32 @@ main.app.data-hidden .data-panel {
   min-height: 3rem;
   font-size: 1rem;
   color: var(--accent);
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
 }
 
 .message.alert {
   color: var(--alert);
+}
+
+.message__ticker {
+  display: inline-block;
+  padding-inline-end: 2.5rem;
+}
+
+.message--scroll .message__ticker {
+  animation: message-scroll var(--scroll-duration, 12s) linear infinite;
+}
+
+@keyframes message-scroll {
+  0% {
+    transform: translateX(100%);
+  }
+
+  100% {
+    transform: translateX(-100%);
+  }
 }
 
 .controls {

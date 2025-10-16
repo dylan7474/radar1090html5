@@ -3,12 +3,14 @@ import { CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
 const REFRESH_INTERVAL_MS = 5000;
 const AUDIO_RETRY_INTERVAL_MS = 8000;
 const DISPLAY_TIMEOUT_MS = 1500;
+const MESSAGE_SCROLL_SPEED_PX_PER_SEC = 90;
+const MESSAGE_SCROLL_MIN_DURATION_S = 12;
 const INBOUND_ALERT_DISTANCE_KM = 5;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.10';
+const APP_VERSION = 'V1.7.11';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -450,6 +452,10 @@ const state = {
   message: '',
   messageAlert: false,
   messageUntil: 0,
+  renderedMessageText: '',
+  renderedMessageAlert: false,
+  renderedMessageScroll: false,
+  messageTickerFrame: null,
   lastDisplayedAlertSignature: '',
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
@@ -822,6 +828,18 @@ rangeDecreaseBtn?.addEventListener('click', () => adjustRange(-1));
 rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
 alertDecreaseBtn?.addEventListener('click', () => adjustAlertRadius(-1));
 alertIncreaseBtn?.addEventListener('click', () => adjustAlertRadius(1));
+
+window.addEventListener('resize', () => {
+  state.renderedMessageText = '';
+  if (state.messageTickerFrame !== null) {
+    cancelAnimationFrame(state.messageTickerFrame);
+    state.messageTickerFrame = null;
+  }
+
+  if (state.message) {
+    updateMessage();
+  }
+});
 radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
 canvas?.addEventListener('click', handleRadarTap);
 
@@ -953,30 +971,109 @@ function getBeepFrequencyForAltitude(altitude) {
   return FREQ_HIGH;
 }
 
+function renderMessageTicker(text) {
+  if (!messageEl) {
+    return;
+  }
+
+  if (state.messageTickerFrame !== null) {
+    cancelAnimationFrame(state.messageTickerFrame);
+    state.messageTickerFrame = null;
+  }
+
+  messageEl.classList.remove('message--scroll');
+  messageEl.innerHTML = '';
+
+  if (!text) {
+    state.renderedMessageScroll = false;
+    return;
+  }
+
+  const ticker = document.createElement('span');
+  ticker.className = 'message__ticker';
+  ticker.textContent = text;
+  ticker.style.removeProperty('--scroll-duration');
+  messageEl.appendChild(ticker);
+
+  state.messageTickerFrame = requestAnimationFrame(() => {
+    state.messageTickerFrame = null;
+    const containerWidth = messageEl.clientWidth;
+    const contentWidth = ticker.scrollWidth;
+    const shouldScroll = containerWidth > 0 && contentWidth > containerWidth + 1;
+
+    if (shouldScroll) {
+      const durationSeconds = Math.max(
+        MESSAGE_SCROLL_MIN_DURATION_S,
+        contentWidth / MESSAGE_SCROLL_SPEED_PX_PER_SEC,
+      );
+      ticker.style.setProperty('--scroll-duration', `${durationSeconds.toFixed(2)}s`);
+    } else {
+      ticker.style.removeProperty('--scroll-duration');
+    }
+
+    messageEl.classList.toggle('message--scroll', shouldScroll);
+    state.renderedMessageScroll = shouldScroll;
+  });
+}
+
 function showMessage(text, options = {}) {
-  const { alert = false, duration = DISPLAY_TIMEOUT_MS } = options;
-  state.message = text;
-  state.messageAlert = alert;
-  state.messageUntil = performance.now() + duration;
-  updateMessage();
+  const { alert = false, duration = DISPLAY_TIMEOUT_MS } = options;
+  state.message = text;
+  state.messageAlert = alert;
+  state.messageUntil = performance.now() + duration;
+  state.renderedMessageText = '';
+
+  if (state.messageTickerFrame !== null) {
+    cancelAnimationFrame(state.messageTickerFrame);
+    state.messageTickerFrame = null;
+  }
+
+  updateMessage();
 }
 
 function updateMessage() {
-  if (!state.message) {
-    messageEl.textContent = '';
-    messageEl.classList.remove('alert');
-    return;
-  }
+  if (!messageEl) {
+    return;
+  }
 
-  if (performance.now() > state.messageUntil) {
-    state.message = '';
-    messageEl.textContent = '';
-    messageEl.classList.remove('alert');
-    return;
-  }
+  const now = performance.now();
+  if (!state.message || now > state.messageUntil) {
+    if (state.message && now > state.messageUntil) {
+      state.message = '';
+    }
 
-  messageEl.textContent = state.message;
-  messageEl.classList.toggle('alert', state.messageAlert);
+    state.messageAlert = false;
+    state.messageUntil = 0;
+
+    if (state.messageTickerFrame !== null) {
+      cancelAnimationFrame(state.messageTickerFrame);
+      state.messageTickerFrame = null;
+    }
+
+    if (state.renderedMessageText) {
+      messageEl.innerHTML = '';
+      messageEl.classList.remove('message--scroll');
+      state.renderedMessageText = '';
+      state.renderedMessageScroll = false;
+    }
+
+    if (state.renderedMessageAlert) {
+      messageEl.classList.remove('alert');
+      state.renderedMessageAlert = false;
+    }
+
+    return;
+  }
+
+  if (state.message !== state.renderedMessageText) {
+    renderMessageTicker(state.message);
+    state.renderedMessageText = state.message;
+  }
+
+  if (state.messageAlert !== state.renderedMessageAlert) {
+    messageEl.classList.toggle('alert', state.messageAlert);
+    state.renderedMessageAlert = state.messageAlert;
+  }
 }
 
 function updateRangeInfo() {
