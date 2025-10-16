@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.22';
+const APP_VERSION = 'V1.7.23';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1006,6 +1006,7 @@ function renderMessageTicker(text) {
 
   const containerWidth = messageEl.clientWidth;
   const tickerWidth = ticker.scrollWidth;
+  const forceScroll = state.messageAlert === true;
 
   if (!Number.isFinite(containerWidth) || containerWidth <= 0 || !Number.isFinite(tickerWidth)) {
     state.renderedMessageScroll = false;
@@ -1014,7 +1015,7 @@ function renderMessageTicker(text) {
     return;
   }
 
-  if (tickerWidth <= containerWidth) {
+  if (tickerWidth <= containerWidth && !forceScroll) {
     state.renderedMessageScroll = false;
     state.messageScrollDurationMs = 0;
     state.messageEndTime = state.messageUntil;
