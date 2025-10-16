@@ -7,11 +7,12 @@ const MESSAGE_SCROLL_SPEED_PX_PER_SEC = 90;
 const MESSAGE_SCROLL_MIN_DURATION_S = 12;
 const MESSAGE_SCROLL_END_PADDING_MS = 1500;
 const INBOUND_ALERT_DISTANCE_KM = 5;
+const INBOUND_ALERT_MESSAGES_ENABLED = false;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.24';
+const APP_VERSION = 'V1.7.25';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1008,6 +1009,65 @@ function renderMessageTicker(text) {
   state.messageEndTime = state.messageUntil;
 }
 
+function clearMessageDisplay() {
+  if (state.messageTickerFrame !== null) {
+    cancelAnimationFrame(state.messageTickerFrame);
+    state.messageTickerFrame = null;
+  }
+
+  state.message = '';
+  state.messageAlert = false;
+  state.messageUntil = 0;
+  state.messageStartTime = 0;
+  state.messageEndTime = 0;
+  state.renderedMessageText = '';
+  state.renderedMessageAlert = false;
+  state.renderedMessageScroll = false;
+  state.messageScrollDurationMs = 0;
+
+  if (!messageEl) {
+    return;
+  }
+
+  messageEl.innerHTML = '';
+  messageEl.classList.remove('message--scroll');
+  messageEl.classList.remove('alert');
+}
+
+function suppressAlertMessage(signature) {
+  if (!signature) {
+    return false;
+  }
+
+  const wasActive = state.activeAlertSignature === signature;
+  let removedFromQueue = false;
+
+  if (Array.isArray(state.alertQueue)) {
+    const index = state.alertQueue.indexOf(signature);
+    if (index !== -1) {
+      state.alertQueue.splice(index, 1);
+      removedFromQueue = true;
+    }
+  }
+
+  const hadEntry = state.alertRegistry.delete(signature);
+
+  if (wasActive) {
+    state.activeAlertSignature = null;
+    clearMessageDisplay();
+  }
+
+  if (!wasActive && !hadEntry && !removedFromQueue) {
+    return false;
+  }
+
+  if (!isUpdatingMessage) {
+    updateMessage();
+  }
+
+  return true;
+}
+
 function displayMessageNow(text, options = {}) {
   const { alert = false, duration = DISPLAY_TIMEOUT_MS } = options;
   const now = performance.now();
@@ -1974,24 +2034,22 @@ function processAircraftData(data) {
     }
 
     const inboundResult = evaluateInbound(craft);
+    const inboundSignature = buildInboundAlertSignature(craft, inboundResult.name);
     craft.inbound = inboundResult.inbound;
     if (inboundResult.inbound) {
       craft.minutesToBase = inboundResult.minutesToBase;
-      const inboundLabel = formatAlertLine('Inbound', inboundResult.name);
-      const etaLabel = Number.isFinite(inboundResult.minutesToBase)
-        ? `ETA ${inboundResult.minutesToBase} min`
-        : null;
-      const inboundMessage = etaLabel ? `${inboundLabel} • ${etaLabel}` : inboundLabel;
-      const inboundSignatureParts = ['inbound'];
-      if (craft.hex) {
-        inboundSignatureParts.push(craft.hex);
-      } else if (craft.flight) {
-        inboundSignatureParts.push(craft.flight);
+      if (INBOUND_ALERT_MESSAGES_ENABLED) {
+        const inboundLabel = formatAlertLine('Inbound', inboundResult.name);
+        const etaLabel = Number.isFinite(inboundResult.minutesToBase)
+          ? `ETA ${inboundResult.minutesToBase} min`
+          : null;
+        const inboundMessage = etaLabel ? `${inboundLabel} • ${etaLabel}` : inboundLabel;
+        queuedAlerts.set(inboundSignature, inboundMessage);
       } else {
-        inboundSignatureParts.push(inboundResult.name);
+        suppressAlertMessage(inboundSignature);
       }
-      const inboundSignature = inboundSignatureParts.join('|');
-      queuedAlerts.set(inboundSignature, inboundMessage);
+    } else {
+      suppressAlertMessage(inboundSignature);
     }
 
     aircraft.push(craft);
@@ -2026,6 +2084,36 @@ function processAircraftData(data) {
   for (const [signature, text] of queuedAlerts.entries()) {
     displayAlertMessage(text, signature);
   }
+}
+
+function buildInboundAlertSignature(craft, fallbackName = 'Unknown') {
+  const parts = ['inbound'];
+  if (craft && typeof craft.hex === 'string') {
+    const hex = craft.hex.trim().toUpperCase();
+    if (hex) {
+      parts.push(hex);
+      return parts.join('|');
+    }
+  }
+
+  if (craft && typeof craft.flight === 'string') {
+    const flight = craft.flight.trim();
+    if (flight) {
+      parts.push(flight);
+      return parts.join('|');
+    }
+  }
+
+  if (typeof fallbackName === 'string') {
+    const name = fallbackName.trim();
+    if (name) {
+      parts.push(name);
+      return parts.join('|');
+    }
+  }
+
+  parts.push('Unknown');
+  return parts.join('|');
 }
 
 function evaluateInbound(craft) {
