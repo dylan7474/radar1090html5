@@ -11,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.17';
+const APP_VERSION = 'V1.7.18';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1054,9 +1054,6 @@ function computeAlertDuration(options = {}) {
 
 function clearActiveAlert() {
   state.activeAlertSignature = null;
-  if (state.messageAlert) {
-    state.messageUntil = performance.now() - 1;
-  }
 }
 
 function advanceAlertQueue(preferredSignature = null) {
@@ -1087,14 +1084,8 @@ function advanceAlertQueue(preferredSignature = null) {
   }
 
   const entry = state.alertRegistry.get(nextSignature);
-  if (!entry) {
-    const removalIndex = queue.indexOf(nextSignature);
-    if (removalIndex !== -1) {
-      queue.splice(removalIndex, 1);
-    }
-    if (state.activeAlertSignature === nextSignature) {
-      state.activeAlertSignature = null;
-    }
+  if (!entry || entry.expired) {
+    pruneAlertEntry(nextSignature);
     if (queue.length === 0) {
       clearActiveAlert();
       return;
@@ -1128,12 +1119,14 @@ function displayAlertMessage(messageText, signature, options = {}) {
     existing.options = entryOptions;
     existing.lastSeenCycle = cycleId;
     existing.persistent = persistent;
+    existing.expired = false;
   } else {
     state.alertRegistry.set(normalizedSignature, {
       text: messageText,
       options: entryOptions,
       lastSeenCycle: cycleId,
       persistent,
+      expired: false,
     });
     state.alertQueue.push(normalizedSignature);
   }
@@ -1150,7 +1143,7 @@ function displayAlertMessage(messageText, signature, options = {}) {
   return true;
 }
 
-function removeAlertMessage(signature) {
+function pruneAlertEntry(signature) {
   if (!signature) {
     return false;
   }
@@ -1166,12 +1159,33 @@ function removeAlertMessage(signature) {
     state.alertQueue.splice(index, 1);
   }
 
-  const wasActive = state.activeAlertSignature === signature;
-  if (wasActive) {
+  if (state.activeAlertSignature === signature) {
     state.activeAlertSignature = null;
-    advanceAlertQueue();
-  } else if (state.alertQueue.length === 0) {
-    clearActiveAlert();
+  }
+
+  return true;
+}
+
+function removeAlertMessage(signature) {
+  if (!signature) {
+    return false;
+  }
+
+  const registry = state.alertRegistry;
+  const entry = registry.get(signature);
+  if (!entry) {
+    return false;
+  }
+
+  const wasActive = state.activeAlertSignature === signature;
+  if (wasActive && state.messageAlert) {
+    entry.expired = true;
+    entry.lastSeenCycle = state.alertCycleId;
+  } else {
+    pruneAlertEntry(signature);
+    if (state.alertQueue.length === 0) {
+      clearActiveAlert();
+    }
   }
 
   return true;
@@ -1184,6 +1198,7 @@ function startAlertCycle() {
 
 function finalizeAlertCycle() {
   const currentCycle = state.alertCycleId;
+  const now = performance.now();
   let removedActive = false;
 
   for (const [signature, entry] of state.alertRegistry.entries()) {
@@ -1195,22 +1210,22 @@ function finalizeAlertCycle() {
       continue;
     }
 
-    state.alertRegistry.delete(signature);
-    const index = state.alertQueue.indexOf(signature);
-    if (index !== -1) {
-      state.alertQueue.splice(index, 1);
+    const isActive = state.activeAlertSignature === signature;
+    const activelyDisplayed = isActive && state.messageAlert && now < state.messageUntil;
+
+    if (activelyDisplayed) {
+      entry.expired = true;
+      entry.lastSeenCycle = currentCycle;
+      continue;
     }
 
-    if (state.activeAlertSignature === signature) {
+    pruneAlertEntry(signature);
+    if (isActive) {
       removedActive = true;
     }
   }
 
-  if (removedActive) {
-    state.activeAlertSignature = null;
-  }
-
-  if (state.alertQueue.length === 0) {
+  if (removedActive && state.alertQueue.length === 0) {
     clearActiveAlert();
     return;
   }
@@ -1247,8 +1262,6 @@ function updateMessage() {
       advanceAlertQueue();
       return;
     }
-  } else if (state.messageAlert && now <= state.messageUntil) {
-    state.messageUntil = now - 1;
   }
 
   if (!state.message || now > state.messageUntil) {
