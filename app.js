@@ -8,12 +8,14 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.7.4';
+const APP_VERSION = 'V1.7.6';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
 const FREQ_MID = 1200;
 const FREQ_HIGH = 1800;
+const RAPID_DESCENT_THRESHOLD_FPM = -3000;
+const EMERGENCY_SQUAWKS = new Set(['7500', '7600', '7700']);
 const EARTH_RADIUS_KM = 6371;
 const AUDIO_STREAM_URL = 'https://audio.dylanjones.org/airbands';
 const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
@@ -448,6 +450,7 @@ const state = {
   message: '',
   messageAlert: false,
   messageUntil: 0,
+  lastDisplayedAlertSignature: '',
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
@@ -1079,21 +1082,60 @@ function adjustRange(delta) {
 }
 
 function adjustAlertRadius(delta) {
-  const nextValue = Math.min(20, Math.max(1, state.inboundAlertDistanceKm + delta));
-  if (nextValue !== state.inboundAlertDistanceKm) {
-    state.inboundAlertDistanceKm = nextValue;
-    showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
-    writeCookie(ALERT_DISTANCE_STORAGE_KEY, String(state.inboundAlertDistanceKm));
-    updateRangeInfo();
-  }
+  const nextValue = Math.min(20, Math.max(1, state.inboundAlertDistanceKm + delta));
+  if (nextValue !== state.inboundAlertDistanceKm) {
+    state.inboundAlertDistanceKm = nextValue;
+    showMessage(`Alert radius: ${state.inboundAlertDistanceKm.toFixed(1)} km`);
+    writeCookie(ALERT_DISTANCE_STORAGE_KEY, String(state.inboundAlertDistanceKm));
+    updateRangeInfo();
+  }
+}
+
+function isEmergencySquawk(squawk) {
+  if (typeof squawk !== 'string') {
+    return false;
+  }
+
+  const trimmed = squawk.trim();
+  if (trimmed.length !== 4) {
+    return false;
+  }
+
+  return EMERGENCY_SQUAWKS.has(trimmed);
+}
+
+function evaluateAircraftAlerts(info) {
+  const result = {
+    alerts: [],
+    emergencySquawk: false,
+    rapidDescent: false,
+  };
+
+  if (!info) {
+    return result;
+  }
+
+  if (isEmergencySquawk(info.squawk)) {
+    result.emergencySquawk = true;
+    result.alerts.push(`Emergency squawk ${info.squawk}`);
+  }
+
+  if (!info.onGround && Number.isFinite(info.verticalRate) && info.verticalRate <= RAPID_DESCENT_THRESHOLD_FPM) {
+    result.rapidDescent = true;
+    result.alerts.push(`Rapid descent (${Math.round(info.verticalRate)} fpm)`);
+  }
+
+  return result;
 }
 
 function updateAircraftInfo() {
-  const info = state.lastPingedAircraft;
-  if (!info) {
-    aircraftInfoEl.innerHTML = '<p>Scanning…</p>';
-    return;
-  }
+  const info = state.lastPingedAircraft;
+  if (!info) {
+    aircraftInfoEl.innerHTML = '<p>Scanning…</p>';
+    return;
+  }
+
+  const { alerts, emergencySquawk, rapidDescent } = evaluateAircraftAlerts(info);
 
   const climbLabel = (() => {
     if (info.onGround) {
@@ -1118,12 +1160,13 @@ function updateAircraftInfo() {
     { label: 'Distance', value: `${info.distanceKm.toFixed(1)} km` },
     { label: 'Altitude', value: info.altitude > 0 ? `${info.altitude} ft` : '-----' },
     { label: 'Speed', value: info.groundSpeed > 0 ? `${info.groundSpeed.toFixed(0)} kt` : '---' },
-    { label: 'Climb', value: climbLabel },
+    { label: 'Climb', value: climbLabel, alert: rapidDescent },
   ];
 
-  if (info.squawk) {
-    lines.push({ label: 'Squawk', value: info.squawk });
-  }
+  const hasSquawk = typeof info.squawk === 'string' && info.squawk.trim().length > 0;
+  const squawkDisplay = hasSquawk ? info.squawk : 'NODATA';
+  // Keep the squawk row visible so the data panel layout remains stable even without a code.
+  lines.push({ label: 'Squawk', value: squawkDisplay, alert: hasSquawk && emergencySquawk });
 
   if (Number.isFinite(info.signalDb)) {
     const formattedSignal = `${info.signalDb.toFixed(1)} dBFS`;
@@ -1136,9 +1179,26 @@ function updateAircraftInfo() {
     lines.push({ label: 'Last seen', value: seenLabel });
   }
 
-  aircraftInfoEl.innerHTML = lines
-    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
-    .join('');
+  aircraftInfoEl.innerHTML = lines
+    .map(({ label, value, alert }) => {
+      const classes = ['info-line'];
+      if (alert) {
+        classes.push('info-line--alert');
+      }
+      return `<div class="${classes.join(' ')}"><span>${label}</span><strong>${value}</strong></div>`;
+    })
+    .join('');
+
+  if (alerts.length > 0) {
+    const alertSignature = alerts.join(' | ');
+    const messageText = alerts.join(' • ');
+    if (alertSignature !== state.lastDisplayedAlertSignature || state.message !== messageText) {
+      showMessage(messageText, { alert: true, duration: DISPLAY_TIMEOUT_MS * 6 });
+      state.lastDisplayedAlertSignature = alertSignature;
+    }
+  } else if (state.lastDisplayedAlertSignature) {
+    state.lastDisplayedAlertSignature = '';
+  }
 }
 
 function updateStatus() {
