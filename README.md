@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.8.7
+**Current Version:** V1.8.8
 
 ---
 
@@ -30,6 +30,7 @@ from any modern browser.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
 - Sidebar readout that surfaces the receiver latitude/longitude for quick verification.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
+- Faint hashed landmass overlays that help distinguish coastline from open water during scope sweeps.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
 - Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
@@ -84,6 +85,11 @@ Controlled airspace footprints are also defined in [`config.js`](config.js) via 
 latitude/longitude, and radius in kilometers. Tune or expand this list to reflect the
 airports you care about monitoring; the radar will automatically highlight any whose
 controlled region falls inside the active range rings.
+
+Landmass silhouettes are described by `LAND_MASS_OUTLINES` in [`config.js`](config.js).
+Provide simple latitude/longitude polygons for any coastlines you want hatched on the
+scope—the renderer automatically clips them to the active range rings and keeps them
+aligned as you rotate the display.
 
 ## Troubleshooting
 

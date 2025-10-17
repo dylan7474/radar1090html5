@@ -40,3 +40,24 @@ export const CONTROLLED_AIRSPACES = Object.freeze([
     radiusKm: 17,
   }),
 ]);
+
+export const LAND_MASS_OUTLINES = Object.freeze([
+  Object.freeze({
+    id: 'north-east-england',
+    name: 'North East England Coast',
+    points: Object.freeze([
+      Object.freeze({ lat: 55.6, lon: -3.8 }),
+      Object.freeze({ lat: 55.6, lon: -2.4 }),
+      Object.freeze({ lat: 55.4, lon: -1.6 }),
+      Object.freeze({ lat: 55.1, lon: -1.1 }),
+      Object.freeze({ lat: 54.8, lon: -1.0 }),
+      Object.freeze({ lat: 54.5, lon: -1.2 }),
+      Object.freeze({ lat: 54.2, lon: -0.9 }),
+      Object.freeze({ lat: 53.9, lon: -0.6 }),
+      Object.freeze({ lat: 53.6, lon: -0.2 }),
+      Object.freeze({ lat: 53.3, lon: 0.2 }),
+      Object.freeze({ lat: 52.9, lon: 0.2 }),
+      Object.freeze({ lat: 52.9, lon: -3.8 }),
+    ]),
+  }),
+]);

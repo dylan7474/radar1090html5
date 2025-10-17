@@ -1,4 +1,8 @@
-import { CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
+import {
+  CONTROLLED_AIRSPACES,
+  DEFAULT_RECEIVER_LOCATION,
+  LAND_MASS_OUTLINES,
+} from './config.js';
 
 const REFRESH_INTERVAL_MS = 5000;
 const AUDIO_RETRY_INTERVAL_MS = 8000;
@@ -7,7 +11,7 @@ const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.7';
+const APP_VERSION = 'V1.8.8';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -206,10 +210,12 @@ const CATEGORY_ICON_MAP = {
 };
 
 const SPECIES_ICON_MAP = {
-  4: 'rotor',
-  5: 'rotor',
-  6: 'rotor',
+  4: 'rotor',
+  5: 'rotor',
+  6: 'rotor',
 };
+
+let cachedLandMassPattern = null;
 
 function resolveIconKeyFromWtc(entry) {
   const raw = typeof entry.wtc === 'string' ? entry.wtc.trim().toUpperCase() : '';
@@ -459,9 +465,10 @@ const state = {
   previousPositions: new Map(),
   previousAltitudeSamples: new Map(),
   paintedRotation: new Map(),
-  currentSweepId: 0,
-  activeBlips: [],
-  airspacesInRange: [],
+  currentSweepId: 0,
+  activeBlips: [],
+  airspacesInRange: [],
+  landMasses: LAND_MASS_OUTLINES,
   lastPingedAircraft: null,
   selectedAircraftKey: null,
   displayOnlySelected: false,
@@ -910,6 +917,153 @@ function projectOffsetsKm(originLat, originLon, targetLat, targetLon) {
   const eastKm = EARTH_RADIUS_KM * dLonRad * Math.cos(meanLatRad);
   const northKm = EARTH_RADIUS_KM * dLatRad;
   return { eastKm, northKm };
+}
+
+function getLandMassPattern(context) {
+  if (!context) {
+    return null;
+  }
+
+  if (cachedLandMassPattern) {
+    return cachedLandMassPattern;
+  }
+
+  const size = 16;
+  const spacing = 6;
+  const patternCanvas = document.createElement('canvas');
+  patternCanvas.width = size;
+  patternCanvas.height = size;
+
+  const patternCtx = patternCanvas.getContext('2d');
+  if (!patternCtx) {
+    return null;
+  }
+
+  patternCtx.clearRect(0, 0, size, size);
+  patternCtx.fillStyle = 'rgba(64, 196, 255, 0.035)';
+  patternCtx.fillRect(0, 0, size, size);
+  patternCtx.strokeStyle = 'rgba(64, 196, 255, 0.12)';
+  patternCtx.lineWidth = 1;
+
+  for (let offset = -size; offset <= size; offset += spacing) {
+    patternCtx.beginPath();
+    patternCtx.moveTo(offset, size);
+    patternCtx.lineTo(offset + size, 0);
+    patternCtx.stroke();
+  }
+
+  cachedLandMassPattern = context.createPattern(patternCanvas, 'repeat');
+  return cachedLandMassPattern;
+}
+
+function projectRadarPoint(lat, lon, centerX, centerY, radarRadius, radarRangeKm) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+
+  if (!Number.isFinite(radarRangeKm) || radarRangeKm <= 0) {
+    return null;
+  }
+
+  const { eastKm, northKm } = projectOffsetsKm(
+    state.receiver.lat,
+    state.receiver.lon,
+    lat,
+    lon,
+  );
+
+  const distanceKm = Math.sqrt(eastKm * eastKm + northKm * northKm);
+  if (!Number.isFinite(distanceKm)) {
+    return null;
+  }
+
+  const angleRad = Math.atan2(eastKm, northKm);
+  const clampedDistanceKm = Math.min(distanceKm, radarRangeKm);
+  const radius = (clampedDistanceKm / radarRangeKm) * radarRadius;
+
+  return {
+    x: centerX + Math.sin(angleRad) * radius,
+    y: centerY - Math.cos(angleRad) * radius,
+    distanceKm,
+  };
+}
+
+function drawLandMasses(centerX, centerY, radarRadius, radarRangeKm) {
+  const outlines = state.landMasses;
+  if (!Array.isArray(outlines) || outlines.length === 0) {
+    return;
+  }
+
+  if (!Number.isFinite(radarRadius) || radarRadius <= 0) {
+    return;
+  }
+
+  if (!Number.isFinite(radarRangeKm) || radarRangeKm <= 0) {
+    return;
+  }
+
+  const pattern = getLandMassPattern(ctx);
+  const fallbackFill = 'rgba(64, 196, 255, 0.05)';
+  const outlineColor = 'rgba(64, 196, 255, 0.2)';
+  const outlineWidth = Math.max(1, radarRadius * 0.0015);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
+  ctx.clip();
+
+  for (const outline of outlines) {
+    const points = Array.isArray(outline?.points) ? outline.points : null;
+    if (!points || points.length < 3) {
+      continue;
+    }
+
+    const projected = [];
+    for (const point of points) {
+      const projectedPoint = projectRadarPoint(
+        point?.lat,
+        point?.lon,
+        centerX,
+        centerY,
+        radarRadius,
+        radarRangeKm,
+      );
+
+      if (projectedPoint) {
+        projected.push(projectedPoint);
+      }
+    }
+
+    if (projected.length < 3) {
+      continue;
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(projected[0].x, projected[0].y);
+    for (let i = 1; i < projected.length; i += 1) {
+      ctx.lineTo(projected[i].x, projected[i].y);
+    }
+    ctx.closePath();
+
+    if (pattern) {
+      ctx.fillStyle = pattern;
+      ctx.globalAlpha = 0.6;
+      ctx.fill();
+    } else {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = fallbackFill;
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = outlineWidth;
+    ctx.strokeStyle = outlineColor;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore();
 }
 
 // Estimate how close an aircraft's current trajectory will bring it to the
@@ -2381,20 +2535,22 @@ function drawRadar(deltaTime) {
   ctx.rotate(rotationRad);
   ctx.translate(-centerX, -centerY);
 
-  // background glow
-  const gradient = ctx.createRadialGradient(centerX, centerY, radarRadius * 0.1, centerX, centerY, radarRadius);
-  gradient.addColorStop(0, 'rgba(53, 255, 153, 0.25)');
-  gradient.addColorStop(1, 'rgba(11, 14, 23, 0)');
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
-  ctx.fill();
+  // background glow
+  const gradient = ctx.createRadialGradient(centerX, centerY, radarRadius * 0.1, centerX, centerY, radarRadius);
+  gradient.addColorStop(0, 'rgba(53, 255, 153, 0.25)');
+  gradient.addColorStop(1, 'rgba(11, 14, 23, 0)');
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
+  ctx.fill();
 
-  ctx.lineWidth = Math.max(1, radarRadius * 0.0025);
-  ctx.strokeStyle = 'rgba(53,255,153,0.35)';
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
-  ctx.stroke();
+  drawLandMasses(centerX, centerY, radarRadius, radarRangeKm);
+
+  ctx.lineWidth = Math.max(1, radarRadius * 0.0025);
+  ctx.strokeStyle = 'rgba(53,255,153,0.35)';
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.beginPath();
   ctx.arc(centerX, centerY, radarRadius * 0.66, 0, Math.PI * 2);
   ctx.stroke();
