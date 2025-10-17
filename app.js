@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.23';
+const APP_VERSION = 'V1.9.24';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -2764,6 +2764,23 @@ function buildOpenStreetMapEmbedUrl(lat, lon, rangeKm) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`;
 }
 
+function getRadarRotationDegrees() {
+  const quarterTurns = Number.isFinite(state?.radarRotationQuarterTurns)
+    ? state.radarRotationQuarterTurns
+    : 0;
+  const normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+  return normalizedQuarterTurns * 90;
+}
+
+function applyOpenStreetMapOverlayRotation() {
+  if (!openStreetMapOverlayEl) {
+    return;
+  }
+
+  const rotationDeg = getRadarRotationDegrees();
+  openStreetMapOverlayEl.style.setProperty('--radar-rotation', `${rotationDeg}deg`);
+}
+
 function updateOpenStreetMapOverlaySource() {
   if (!openStreetMapFrameEl) {
     return;
@@ -2780,6 +2797,8 @@ function updateOpenStreetMapOverlaySource() {
   if (url && openStreetMapFrameEl.getAttribute('src') !== url) {
     openStreetMapFrameEl.setAttribute('src', url);
   }
+
+  applyOpenStreetMapOverlayRotation();
 }
 
 function refreshOpenStreetMapOverlay() {
@@ -2807,6 +2826,7 @@ function refreshOpenStreetMapOverlay() {
   openStreetMapOverlayEl.classList.toggle('openstreetmap-overlay--visible', shouldShowOverlay);
   openStreetMapOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
   openStreetMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
+  applyOpenStreetMapOverlayRotation();
 }
 
 function loadLeafletAssets() {
@@ -3579,6 +3599,7 @@ function isClickInsideRadar(canvasX, canvasY, geometry) {
 function rotateRadarClockwise() {
   state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
   writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
+  applyOpenStreetMapOverlayRotation();
 }
 
 function handleRadarTap(event) {
