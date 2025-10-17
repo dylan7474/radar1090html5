@@ -2667,10 +2667,13 @@ function updateReceiverInfo() {
     .join('');
 }
 
-const supportsGeolocation = () =>
-  typeof navigator !== 'undefined' &&
-  !!navigator.geolocation &&
-  typeof navigator.geolocation.getCurrentPosition === 'function';
+function supportsGeolocation() {
+  return (
+    typeof navigator !== 'undefined' &&
+    !!navigator.geolocation &&
+    typeof navigator.geolocation.getCurrentPosition === 'function'
+  );
+}
 
 function setCenterOnLocationBusy(busy) {
   if (!centerOnLocationBtn) {
