@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.7';
+const APP_VERSION = 'V1.9.8';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -541,10 +541,11 @@ function computeCalloutPlacement({
   const textHeight = dimensions.height;
   const margin = fontSize * 0.35;
   const planeRadius = Math.max(markerWidth, markerHeight) * 0.5 + margin;
-  const labelSlack = Math.max(fontSize * 0.2, Math.min(textWidth, textHeight) * 0.15);
+  const labelSlack = Math.max(fontSize * 0.15, Math.min(textWidth, textHeight) * 0.12);
   const baseDistance = planeRadius + labelSlack;
-  const stepDistance = Math.max(fontSize * 0.55, Math.min(textWidth, textHeight) * 0.25);
+  const stepDistance = Math.max(fontSize * 0.5, Math.min(textWidth, textHeight) * 0.22);
   const maxAttempts = 16;
+  const distanceTolerance = Math.max(0.75, fontSize * 0.04);
 
   const planeBounds = expandBounds(
     {
@@ -556,9 +557,26 @@ function computeCalloutPlacement({
     margin,
   );
 
+  let bestPlacement = null;
+  let bestScore = Infinity;
+  let bestAttempt = Infinity;
+  let bestAlignmentRank = Infinity;
+
+  const getAlignmentRank = (align) => {
+    if (align === 'center') {
+      return 0;
+    }
+    if (align === 'left') {
+      return 1;
+    }
+    return 2;
+  };
+
   // Walk each candidate direction and progressively increase the distance
   // until we find a placement that clears the icon and existing callouts.
   for (const direction of CALLOUT_DIRECTION_CANDIDATES) {
+    const alignmentRank = getAlignmentRank(direction.align);
+
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const distance = baseDistance + attempt * stepDistance;
       let anchorX = blip.x + direction.dx * distance;
@@ -645,7 +663,8 @@ function computeCalloutPlacement({
 
       const pointerVecX = anchorX - blip.x;
       const pointerVecY = anchorY - blip.y;
-      const pointerVecLength = Math.hypot(pointerVecX, pointerVecY) || 1;
+      const pointerDistance = Math.hypot(pointerVecX, pointerVecY);
+      const pointerVecLength = pointerDistance || 1;
       const pointerStart = {
         x: blip.x + (pointerVecX / pointerVecLength) * markerWidth * 0.45,
         y: blip.y + (pointerVecY / pointerVecLength) * markerHeight * 0.45,
@@ -665,21 +684,36 @@ function computeCalloutPlacement({
         y: midY + normalY,
       };
 
-      return {
-        anchorX,
-        anchorY,
-        textAlign: direction.align,
-        textBaseline: 'middle',
-        bounds,
-        expandedBounds,
-        pointerStart,
-        pointerEnd,
-        pointerControl,
-      };
+      if (
+        bestPlacement === null ||
+        pointerDistance + distanceTolerance < bestScore ||
+        (Math.abs(pointerDistance - bestScore) <= distanceTolerance &&
+          (attempt < bestAttempt ||
+            (attempt === bestAttempt && alignmentRank < bestAlignmentRank)))
+      ) {
+        bestPlacement = {
+          anchorX,
+          anchorY,
+          textAlign: direction.align,
+          textBaseline: 'middle',
+          bounds,
+          expandedBounds,
+          pointerStart,
+          pointerEnd,
+          pointerControl,
+        };
+        bestScore = pointerDistance;
+        bestAttempt = attempt;
+        bestAlignmentRank = alignmentRank;
+
+        if (pointerDistance <= baseDistance + distanceTolerance && attempt === 0) {
+          return bestPlacement;
+        }
+      }
     }
   }
 
-  return null;
+  return bestPlacement;
 }
 
 function createTransparentIconCanvas(image) {
