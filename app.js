@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.21';
+const APP_VERSION = 'V1.9.22';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -32,6 +32,25 @@ const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
 const GOOGLE_MAP_OVERLAY_STORAGE_KEY = 'googleMapOverlayVisible';
+const LEAFLET_ASSET_SOURCES = Object.freeze([
+  {
+    id: 'unpkg',
+    cssHref: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+    cssIntegrity: 'sha512-sA+Rw8fK1HgNHQJrWZLxE+nobVhtSGcVwqDAVBBusZT6F4LmSpaV0Uy1Ik5+pNSTsKQWP9k+rquDaXw2C5uXmw==',
+    jsSrc: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+    jsIntegrity: 'sha512-XQoYMqMTK8LvdlxUMF4Gx7Z7tGDZC1x1i+6whhtj6Vxz41IrT9jpJ1rssZgGSyEtpI0PtmF6TuN7+7e2Jc2RMQ==',
+  },
+  {
+    id: 'jsdelivr',
+    cssHref: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css',
+    jsSrc: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js',
+  },
+  {
+    id: 'cdnjs',
+    cssHref: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
+    jsSrc: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
+  },
+]);
 const EMERGENCY_SQUAWK_CODES = Object.freeze({
   '7500': 'Possible hijacking',
   '7600': 'Lost communications',
@@ -2793,6 +2812,38 @@ function loadLeafletAssets() {
     return leafletAssetsPromise;
   }
 
+  const ensureLeafletStylesheet = (source) => {
+    if (!source || typeof source !== 'object' || !source.cssHref) {
+      return null;
+    }
+
+    const existing = document.querySelector('link[data-leaflet="css"]');
+    if (existing) {
+      const currentHref = existing.getAttribute('href');
+      if (currentHref === source.cssHref) {
+        return existing;
+      }
+      existing.remove();
+    }
+
+    const stylesheet = document.createElement('link');
+    stylesheet.rel = 'stylesheet';
+    stylesheet.href = source.cssHref;
+    stylesheet.setAttribute('data-leaflet', 'css');
+    if (source.id) {
+      stylesheet.setAttribute('data-leaflet-source', source.id);
+    }
+    if (source.cssIntegrity) {
+      stylesheet.integrity = source.cssIntegrity;
+      stylesheet.crossOrigin = 'anonymous';
+    } else {
+      stylesheet.crossOrigin = 'anonymous';
+    }
+
+    document.head.appendChild(stylesheet);
+    return stylesheet;
+  };
+
   leafletAssetsPromise = new Promise((resolve, reject) => {
     const resolveIfReady = () => {
       if (window.L && typeof window.L.map === 'function') {
@@ -2802,38 +2853,60 @@ function loadLeafletAssets() {
       return false;
     };
 
-    const handleError = () => {
-      leafletAssetsPromise = null;
-      reject(new Error('The map library could not be loaded. Check your connection and try again.'));
-    };
-
-    if (!document.querySelector('link[data-leaflet="css"]')) {
-      const stylesheet = document.createElement('link');
-      stylesheet.rel = 'stylesheet';
-      stylesheet.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      stylesheet.integrity = 'sha512-sA+Rw8fK1HgNHQJrWZLxE+nobVhtSGcVwqDAVBBusZT6F4LmSpaV0Uy1Ik5+pNSTsKQWP9k+rquDaXw2C5uXmw==';
-      stylesheet.crossOrigin = '';
-      stylesheet.setAttribute('data-leaflet', 'css');
-      document.head.appendChild(stylesheet);
-    }
-
-    if (resolveIfReady()) {
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.integrity = 'sha512-XQoYMqMTK8LvdlxUMF4Gx7Z7tGDZC1x1i+6whhtj6Vxz41IrT9jpJ1rssZgGSyEtpI0PtmF6TuN7+7e2Jc2RMQ==';
-    script.crossOrigin = '';
-    script.defer = true;
-    script.setAttribute('data-leaflet', 'js');
-    script.onload = () => {
-      if (!resolveIfReady()) {
-        handleError();
+    const trySource = (index) => {
+      if (resolveIfReady()) {
+        return;
       }
+
+      if (index >= LEAFLET_ASSET_SOURCES.length) {
+        leafletAssetsPromise = null;
+        reject(new Error('The map library could not be loaded from any source. Check your connection or firewall and try again.'));
+        return;
+      }
+
+      const source = LEAFLET_ASSET_SOURCES[index];
+      ensureLeafletStylesheet(source);
+
+      let script = null;
+      const loadNextSource = () => {
+        if (script) {
+          if (typeof script.remove === 'function') {
+            script.remove();
+          } else if (script.parentNode) {
+            script.parentNode.removeChild(script);
+          }
+        }
+        // Defer the next attempt slightly to allow error handlers to settle.
+        setTimeout(() => {
+          trySource(index + 1);
+        }, 0);
+      };
+
+      script = document.createElement('script');
+      script.src = source.jsSrc;
+      script.defer = true;
+      script.setAttribute('data-leaflet', 'js');
+      if (source.id) {
+        script.setAttribute('data-leaflet-source', source.id);
+      }
+      if (source.jsIntegrity) {
+        script.integrity = source.jsIntegrity;
+        script.crossOrigin = 'anonymous';
+      } else {
+        script.crossOrigin = 'anonymous';
+      }
+
+      script.onload = () => {
+        if (!resolveIfReady()) {
+          loadNextSource();
+        }
+      };
+      script.onerror = loadNextSource;
+
+      document.head.appendChild(script);
     };
-    script.onerror = handleError;
-    document.head.appendChild(script);
+
+    trySource(0);
   });
 
   return leafletAssetsPromise;
@@ -2988,7 +3061,7 @@ async function openManualLocationPicker() {
   } catch (error) {
     const message = error && typeof error === 'object' && typeof error.message === 'string'
       ? error.message
-      : 'The map could not be loaded. Check your connection and try again.';
+      : 'The map could not be loaded. Check your connection or firewall and try again.';
     setManualLocationStatus(message, { isError: true });
     if (manualLocationCancelBtn) {
       manualLocationCancelBtn.focus();
