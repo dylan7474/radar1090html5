@@ -103,6 +103,18 @@
               </button>
             </div>
           </div>
+          <div class="control-row control-row--single">
+            <div class="control-buttons">
+              <button
+                type="button"
+                class="control-button"
+                id="manual-location"
+                aria-label="Open the manual receiver location picker"
+              >
+                Set Location Manually
+              </button>
+            </div>
+          </div>
           <div class="control-row">
             <div class="control-info">
               <span class="control-name">Aircraft Labels</span>
@@ -210,6 +222,28 @@
         <button type="button" class="control-button primary" id="geolocation-permission-close">
           Got it
         </button>
+      </div>
+    </section>
+  </div>
+  <div class="modal" id="manual-location-modal" hidden aria-hidden="true">
+    <div class="modal__backdrop" id="manual-location-backdrop" role="presentation"></div>
+    <section
+      class="modal__dialog modal__dialog--wide manual-location-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="manual-location-title"
+    >
+      <h2 id="manual-location-title">Set receiver location</h2>
+      <p>
+        Pan and zoom the map, then click to drop the marker where your receiver is located.
+        You can drag the marker afterward for fine adjustments.
+      </p>
+      <div class="manual-location__map" id="manual-location-map" role="presentation"></div>
+      <p class="manual-location__coordinates" id="manual-location-coordinates">Click the map to drop the marker.</p>
+      <p class="manual-location__status" id="manual-location-status" hidden aria-live="polite"></p>
+      <div class="modal__actions">
+        <button type="button" class="control-button" id="manual-location-cancel">Cancel</button>
+        <button type="button" class="control-button primary" id="manual-location-confirm" disabled>Use This Location</button>
       </div>
     </section>
   </div>

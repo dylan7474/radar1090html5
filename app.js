@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.19';
+const APP_VERSION = 'V1.9.22';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -32,6 +32,25 @@ const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
 const GOOGLE_MAP_OVERLAY_STORAGE_KEY = 'googleMapOverlayVisible';
+const LEAFLET_ASSET_SOURCES = Object.freeze([
+  {
+    id: 'unpkg',
+    cssHref: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+    cssIntegrity: 'sha512-sA+Rw8fK1HgNHQJrWZLxE+nobVhtSGcVwqDAVBBusZT6F4LmSpaV0Uy1Ik5+pNSTsKQWP9k+rquDaXw2C5uXmw==',
+    jsSrc: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+    jsIntegrity: 'sha512-XQoYMqMTK8LvdlxUMF4Gx7Z7tGDZC1x1i+6whhtj6Vxz41IrT9jpJ1rssZgGSyEtpI0PtmF6TuN7+7e2Jc2RMQ==',
+  },
+  {
+    id: 'jsdelivr',
+    cssHref: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css',
+    jsSrc: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js',
+  },
+  {
+    id: 'cdnjs',
+    cssHref: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
+    jsSrc: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
+  },
+]);
 const EMERGENCY_SQUAWK_CODES = Object.freeze({
   '7500': 'Possible hijacking',
   '7600': 'Lost communications',
@@ -154,6 +173,7 @@ const alertRangeDecreaseBtn = document.getElementById('alert-range-decrease');
 const alertRangeIncreaseBtn = document.getElementById('alert-range-increase');
 const radarRotateBtn = document.getElementById('radar-rotate');
 const centerOnLocationBtn = document.getElementById('center-on-location');
+const manualLocationBtn = document.getElementById('manual-location');
 const geolocationPermissionModal = document.getElementById('geolocation-permission-modal');
 const geolocationPermissionBackdrop = document.getElementById('geolocation-permission-backdrop');
 const geolocationPermissionCloseBtn = document.getElementById('geolocation-permission-close');
@@ -166,6 +186,13 @@ const googleMapOverlayToggleBtn = document.getElementById('google-map-overlay-to
 const googleMapOverlayStateEl = document.getElementById('google-map-overlay-state');
 const googleMapOverlayEl = document.getElementById('google-map-overlay');
 const googleMapFrameEl = document.getElementById('google-map-frame');
+const manualLocationModal = document.getElementById('manual-location-modal');
+const manualLocationBackdrop = document.getElementById('manual-location-backdrop');
+const manualLocationMapEl = document.getElementById('manual-location-map');
+const manualLocationStatusEl = document.getElementById('manual-location-status');
+const manualLocationCoordinatesEl = document.getElementById('manual-location-coordinates');
+const manualLocationConfirmBtn = document.getElementById('manual-location-confirm');
+const manualLocationCancelBtn = document.getElementById('manual-location-cancel');
 const mainAppEl = document.querySelector('main.app');
 const controlsPanelEl = document.getElementById('controls-panel');
 const dataPanelEl = document.getElementById('data-panel');
@@ -189,15 +216,21 @@ const ICON_DEFINITIONS = {
 };
 
 const iconLibrary = Object.entries(ICON_DEFINITIONS).reduce((acc, [key, src]) => {
-  acc[key] = {
-    image: new Image(),
-    ready: false,
-    aspect: 1,
-    canvas: null,
-    src,
-  };
-  return acc;
+  acc[key] = {
+    image: new Image(),
+    ready: false,
+    aspect: 1,
+    canvas: null,
+    src,
+  };
+  return acc;
 }, {});
+
+let manualLocationReturnFocusEl = null;
+let manualLocationSelection = null;
+let manualLocationMap = null;
+let manualLocationMarker = null;
+let leafletAssetsPromise = null;
 
 // First character of the wake turbulence category -> icon key.
 const WTC_ICON_MAP = {
@@ -1324,6 +1357,39 @@ if (centerOnLocationBtn) {
     applyGeolocationPermissionState(geolocationPermissionState);
     void watchGeolocationPermissionState();
   }
+}
+
+if (manualLocationBtn) {
+  manualLocationBtn.addEventListener('click', () => {
+    openManualLocationPicker();
+  });
+}
+
+if (manualLocationCancelBtn) {
+  manualLocationCancelBtn.addEventListener('click', () => {
+    closeManualLocationPicker();
+  });
+}
+
+if (manualLocationConfirmBtn) {
+  manualLocationConfirmBtn.addEventListener('click', () => {
+    applyManualLocationSelection();
+  });
+}
+
+if (manualLocationBackdrop) {
+  manualLocationBackdrop.addEventListener('click', () => {
+    closeManualLocationPicker();
+  });
+}
+
+if (manualLocationModal) {
+  manualLocationModal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeManualLocationPicker();
+    }
+  });
 }
 
 if (aircraftDetailsToggleBtn) {
@@ -2661,7 +2727,7 @@ function updateRangeInfo() {
   updateGoogleMapOverlaySource();
 }
 
-function calculateGoogleMapZoom(rangeKm) {
+function calculateBasemapZoom(rangeKm) {
   if (!Number.isFinite(rangeKm)) {
     return 9;
   }
@@ -2698,7 +2764,7 @@ function updateGoogleMapOverlaySource() {
   }
 
   const rangeKm = RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX];
-  const zoom = calculateGoogleMapZoom(rangeKm);
+  const zoom = calculateBasemapZoom(rangeKm);
   const url = buildGoogleMapEmbedUrl(lat, lon, zoom);
 
   if (url && googleMapFrameEl.getAttribute('src') !== url) {
@@ -2731,6 +2797,309 @@ function refreshGoogleMapOverlay() {
   googleMapOverlayEl.classList.toggle('google-map-overlay--visible', shouldShowOverlay);
   googleMapOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
   googleMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
+}
+
+function loadLeafletAssets() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return Promise.reject(new Error('The manual picker requires a browser environment.'));
+  }
+
+  if (window.L && typeof window.L.map === 'function') {
+    return Promise.resolve(window.L);
+  }
+
+  if (leafletAssetsPromise) {
+    return leafletAssetsPromise;
+  }
+
+  const ensureLeafletStylesheet = (source) => {
+    if (!source || typeof source !== 'object' || !source.cssHref) {
+      return null;
+    }
+
+    const existing = document.querySelector('link[data-leaflet="css"]');
+    if (existing) {
+      const currentHref = existing.getAttribute('href');
+      if (currentHref === source.cssHref) {
+        return existing;
+      }
+      existing.remove();
+    }
+
+    const stylesheet = document.createElement('link');
+    stylesheet.rel = 'stylesheet';
+    stylesheet.href = source.cssHref;
+    stylesheet.setAttribute('data-leaflet', 'css');
+    if (source.id) {
+      stylesheet.setAttribute('data-leaflet-source', source.id);
+    }
+    if (source.cssIntegrity) {
+      stylesheet.integrity = source.cssIntegrity;
+      stylesheet.crossOrigin = 'anonymous';
+    } else {
+      stylesheet.crossOrigin = 'anonymous';
+    }
+
+    document.head.appendChild(stylesheet);
+    return stylesheet;
+  };
+
+  leafletAssetsPromise = new Promise((resolve, reject) => {
+    const resolveIfReady = () => {
+      if (window.L && typeof window.L.map === 'function') {
+        resolve(window.L);
+        return true;
+      }
+      return false;
+    };
+
+    const trySource = (index) => {
+      if (resolveIfReady()) {
+        return;
+      }
+
+      if (index >= LEAFLET_ASSET_SOURCES.length) {
+        leafletAssetsPromise = null;
+        reject(new Error('The map library could not be loaded from any source. Check your connection or firewall and try again.'));
+        return;
+      }
+
+      const source = LEAFLET_ASSET_SOURCES[index];
+      ensureLeafletStylesheet(source);
+
+      let script = null;
+      const loadNextSource = () => {
+        if (script) {
+          if (typeof script.remove === 'function') {
+            script.remove();
+          } else if (script.parentNode) {
+            script.parentNode.removeChild(script);
+          }
+        }
+        // Defer the next attempt slightly to allow error handlers to settle.
+        setTimeout(() => {
+          trySource(index + 1);
+        }, 0);
+      };
+
+      script = document.createElement('script');
+      script.src = source.jsSrc;
+      script.defer = true;
+      script.setAttribute('data-leaflet', 'js');
+      if (source.id) {
+        script.setAttribute('data-leaflet-source', source.id);
+      }
+      if (source.jsIntegrity) {
+        script.integrity = source.jsIntegrity;
+        script.crossOrigin = 'anonymous';
+      } else {
+        script.crossOrigin = 'anonymous';
+      }
+
+      script.onload = () => {
+        if (!resolveIfReady()) {
+          loadNextSource();
+        }
+      };
+      script.onerror = loadNextSource;
+
+      document.head.appendChild(script);
+    };
+
+    trySource(0);
+  });
+
+  return leafletAssetsPromise;
+}
+
+function setManualLocationStatus(message, { isError = false } = {}) {
+  if (!manualLocationStatusEl) {
+    return;
+  }
+
+  manualLocationStatusEl.textContent = message || '';
+  manualLocationStatusEl.classList.toggle('manual-location__status--error', !!isError);
+  manualLocationStatusEl.toggleAttribute('hidden', !message);
+}
+
+function updateManualLocationCoordinatesDisplay(selection) {
+  if (!manualLocationCoordinatesEl) {
+    return;
+  }
+
+  if (!selection) {
+    manualLocationCoordinatesEl.textContent = 'Click the map to drop the marker.';
+    return;
+  }
+
+  const { lat, lon } = selection;
+  manualLocationCoordinatesEl.textContent = `${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
+}
+
+function updateManualLocationSelection(lat, lon, { fromMarker = false } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    manualLocationSelection = null;
+  } else {
+    manualLocationSelection = { lat, lon };
+    if (manualLocationMarker && !fromMarker) {
+      if (typeof manualLocationMarker.setPosition === 'function') {
+        manualLocationMarker.setPosition({ lat, lng: lon });
+      } else if (typeof manualLocationMarker.setLatLng === 'function') {
+        manualLocationMarker.setLatLng([lat, lon]);
+      }
+    }
+  }
+
+  if (manualLocationConfirmBtn) {
+    manualLocationConfirmBtn.toggleAttribute('disabled', !manualLocationSelection);
+  }
+
+  updateManualLocationCoordinatesDisplay(manualLocationSelection);
+}
+
+function getManualLocationDefaultCenter() {
+  const lat = Number.isFinite(state.receiver?.lat)
+    ? state.receiver.lat
+    : DEFAULT_RECEIVER_LOCATION.lat;
+  const lon = Number.isFinite(state.receiver?.lon)
+    ? state.receiver.lon
+    : DEFAULT_RECEIVER_LOCATION.lon;
+
+  return { lat, lon };
+}
+
+function ensureManualLocationMap(leaflet) {
+  if (!manualLocationMapEl) {
+    return;
+  }
+
+  const center = getManualLocationDefaultCenter();
+  const latLng = [center.lat, center.lon];
+  const zoom = calculateBasemapZoom(
+    RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX],
+  );
+
+  if (!manualLocationMap) {
+    manualLocationMap = leaflet.map(manualLocationMapEl, {
+      center: latLng,
+      zoom,
+      scrollWheelZoom: true,
+    });
+
+    leaflet
+      .tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+      })
+      .addTo(manualLocationMap);
+
+    manualLocationMarker = leaflet
+      .marker(latLng, { draggable: true })
+      .addTo(manualLocationMap);
+
+    manualLocationMarker.on('dragend', (event) => {
+      const position = typeof event?.target?.getLatLng === 'function'
+        ? event.target.getLatLng()
+        : null;
+      if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
+        updateManualLocationSelection(position.lat, position.lng, { fromMarker: true });
+      }
+    });
+
+    manualLocationMap.on('click', (event) => {
+      if (event && event.latlng) {
+        const { lat, lng } = event.latlng;
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          updateManualLocationSelection(lat, lng);
+        }
+      }
+    });
+  } else {
+    manualLocationMap.setView(latLng, zoom);
+    if (manualLocationMarker && typeof manualLocationMarker.setLatLng === 'function') {
+      manualLocationMarker.setLatLng(latLng);
+    }
+  }
+
+  updateManualLocationSelection(center.lat, center.lon, { fromMarker: true });
+
+  // Give the modal a moment to settle before forcing a resize so tiles render correctly.
+  setTimeout(() => {
+    if (manualLocationMap && typeof manualLocationMap.invalidateSize === 'function') {
+      manualLocationMap.invalidateSize();
+      manualLocationMap.setView(latLng, zoom);
+    }
+  }, 150);
+}
+
+async function openManualLocationPicker() {
+  if (!manualLocationModal) {
+    return;
+  }
+
+  manualLocationReturnFocusEl = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  manualLocationModal.removeAttribute('hidden');
+  manualLocationModal.setAttribute('aria-hidden', 'false');
+
+  if (manualLocationConfirmBtn) {
+    manualLocationConfirmBtn.setAttribute('disabled', 'true');
+  }
+
+  updateManualLocationSelection(NaN, NaN);
+  setManualLocationStatus('Loading map…');
+
+  try {
+    const leaflet = await loadLeafletAssets();
+    ensureManualLocationMap(leaflet);
+    setManualLocationStatus('Click the map to drop the marker or drag it into position.');
+    if (manualLocationCancelBtn) {
+      manualLocationCancelBtn.focus();
+    }
+  } catch (error) {
+    const message = error && typeof error === 'object' && typeof error.message === 'string'
+      ? error.message
+      : 'The map could not be loaded. Check your connection or firewall and try again.';
+    setManualLocationStatus(message, { isError: true });
+    if (manualLocationCancelBtn) {
+      manualLocationCancelBtn.focus();
+    }
+  }
+}
+
+function closeManualLocationPicker() {
+  if (!manualLocationModal) {
+    return;
+  }
+
+  manualLocationModal.setAttribute('hidden', 'true');
+  manualLocationModal.setAttribute('aria-hidden', 'true');
+
+  if (manualLocationReturnFocusEl && typeof manualLocationReturnFocusEl.focus === 'function') {
+    manualLocationReturnFocusEl.focus();
+  }
+
+  manualLocationReturnFocusEl = null;
+}
+
+function applyManualLocationSelection() {
+  if (!manualLocationSelection) {
+    return;
+  }
+
+  const { lat, lon } = manualLocationSelection;
+  state.receiver.lat = lat;
+  state.receiver.lon = lon;
+  state.receiver.hasOverride = true;
+  writeCookie('receiverLat', String(lat));
+  writeCookie('receiverLon', String(lon));
+  updateReceiverInfo();
+  updateRangeInfo();
+  rebuildLandMassOutlines({ silent: true });
+  showMessage('Receiver location updated.', { duration: DISPLAY_TIMEOUT_MS * 2 });
+  closeManualLocationPicker();
 }
 
 function formatCoordinate(value) {
