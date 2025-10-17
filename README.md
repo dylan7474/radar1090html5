@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.8.8
+**Current Version:** V1.9.0
 
 ---
 
@@ -30,7 +30,7 @@ from any modern browser.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
 - Sidebar readout that surfaces the receiver latitude/longitude for quick verification.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
-- Faint hashed landmass overlays that help distinguish coastline from open water during scope sweeps.
+- Faint hashed landmass overlays sourced from configurable GeoJSON coastline data so range changes always track real geography.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
 - Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
@@ -86,10 +86,16 @@ latitude/longitude, and radius in kilometers. Tune or expand this list to reflec
 airports you care about monitoring; the radar will automatically highlight any whose
 controlled region falls inside the active range rings.
 
-Landmass silhouettes are described by `LAND_MASS_OUTLINES` in [`config.js`](config.js).
-Provide simple latitude/longitude polygons for any coastlines you want hatched on the
-scope—the renderer automatically clips them to the active range rings and keeps them
-aligned as you rotate the display.
+Landmass silhouettes can be provided in two ways via [`config.js`](config.js):
+
+- `LAND_MASS_SOURCES` lists remote or local GeoJSON feeds (e.g., Natural Earth coastlines).
+  The app fetches the first reachable source, prunes the geometry around the receiver,
+  and keeps it recentered if the receiver coordinates update.
+- `LAND_MASS_OUTLINES` remains as a static fallback polygon list should you prefer to
+  hard-code a small outline or operate offline.
+
+Update either list with data for your airfield and the hashed overlay will redraw under
+the radar rings automatically.
 
 ## Troubleshooting
 
