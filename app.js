@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.0';
+const APP_VERSION = 'V1.9.1';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -2954,7 +2954,6 @@ function drawRadar(deltaTime) {
       const verticalSpacing = fontSize * 0.45;
       const identifierRaw = blip.flight || blip.hex || 'Unknown';
       const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
-      const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
 
       const drawAircraftLabel = (text, anchorX, anchorY, align, baseline) => {
         if (!text) {
@@ -2978,10 +2977,6 @@ function drawRadar(deltaTime) {
         drawAircraftLabel(identifier, blip.x, identifierY, 'center', 'bottom');
       }
 
-      if (altitudeLabel) {
-        const altitudeY = blip.y + markerHeight / 2 + verticalSpacing;
-        drawAircraftLabel(altitudeLabel, blip.x, altitudeY, 'center', 'top');
-      }
     }
   }
 
