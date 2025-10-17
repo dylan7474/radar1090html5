@@ -91,6 +91,18 @@
               </button>
             </div>
           </div>
+          <div class="control-row control-row--single">
+            <div class="control-buttons">
+              <button
+                type="button"
+                class="control-button"
+                id="center-on-location"
+                aria-label="Center radar on your current location"
+              >
+                Use My Location
+              </button>
+            </div>
+          </div>
           <div class="control-row">
             <div class="control-info">
               <span class="control-name">Aircraft Labels</span>
@@ -135,6 +147,46 @@
       <div class="message" id="message"></div>
     </section>
   </main>
+  <div class="modal" id="geolocation-permission-modal" hidden aria-hidden="true">
+    <div class="modal__backdrop" id="geolocation-permission-backdrop" role="presentation"></div>
+    <section
+      class="modal__dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="geolocation-permission-title"
+    >
+      <h2 id="geolocation-permission-title">Enable location access</h2>
+      <p>
+        Location sharing is currently blocked for radar1090. Follow the steps below to allow
+        precise positioning so the radar can center on you automatically.
+      </p>
+      <ul class="modal__list">
+        <li>
+          <strong>Chrome / Edge:</strong>
+          Select the lock icon beside the address bar, open <em>Site settings</em>, set
+          <em>Location</em> to <em>Allow</em>, then reload the page.
+        </li>
+        <li>
+          <strong>Firefox:</strong>
+          Click the shield icon, choose <em>Allow location access</em>, or clear the block under
+          <em>Permissions</em> in Settings → Privacy &amp; Security.
+        </li>
+        <li>
+          <strong>Safari:</strong>
+          Open Settings → Privacy &amp; Security → Location Services, allow Safari (and this site),
+          then reload.
+        </li>
+      </ul>
+      <p class="modal__hint">
+        After updating permissions, reload radar1090 and press “Use My Location” again.
+      </p>
+      <div class="modal__actions">
+        <button type="button" class="control-button primary" id="geolocation-permission-close">
+          Got it
+        </button>
+      </div>
+    </section>
+  </div>
   <script type="module" src="app.js"></script>
 </body>
 </html>
