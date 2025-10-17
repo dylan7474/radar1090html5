@@ -6,6 +6,7 @@ export const DEFAULT_RECEIVER_LOCATION = Object.freeze({
 export const CONTROLLED_AIRSPACES = Object.freeze([
   Object.freeze({
     icao: 'EGNV',
+    shortIdentifier: 'MME',
     name: 'Teesside International',
     lat: 54.5092,
     lon: -1.4294,
@@ -13,6 +14,7 @@ export const CONTROLLED_AIRSPACES = Object.freeze([
   }),
   Object.freeze({
     icao: 'EGNT',
+    shortIdentifier: 'NCL',
     name: 'Newcastle',
     lat: 55.0375,
     lon: -1.6917,
@@ -20,6 +22,7 @@ export const CONTROLLED_AIRSPACES = Object.freeze([
   }),
   Object.freeze({
     icao: 'EGNM',
+    shortIdentifier: 'LBA',
     name: 'Leeds Bradford',
     lat: 53.8659,
     lon: -1.6606,
@@ -27,6 +30,7 @@ export const CONTROLLED_AIRSPACES = Object.freeze([
   }),
   Object.freeze({
     icao: 'EGCN',
+    shortIdentifier: 'DSA',
     name: 'Doncaster Sheffield',
     lat: 53.4806,
     lon: -1.0107,
@@ -34,6 +38,7 @@ export const CONTROLLED_AIRSPACES = Object.freeze([
   }),
   Object.freeze({
     icao: 'EGNJ',
+    shortIdentifier: 'HUY',
     name: 'Humberside',
     lat: 53.5744,
     lon: -0.3508,
