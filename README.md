@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.24
+**Current Version:** V1.10.0
 
 ---
 
@@ -36,6 +36,7 @@ from any modern browser.
 - Range selector now spans 5 km through 400 km to cover both local operations and distant traffic monitoring.
 - Faint hashed landmass overlays sourced from configurable GeoJSON coastline data so range changes always track real geography.
 - Toggleable OpenStreetMap overlay beneath the radar scope for instant geographic context that rotates in sync with the scope when desired.
+- Optional rainfall overlay built on Open-Meteo precipitation tiles so you can correlate nearby weather with traffic flows without leaving the scope.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
 - Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
@@ -58,6 +59,7 @@ from any modern browser.
   Firefox, or Safari).
 - Optional: access to the companion airband audio stream if you want synced radio audio.
 - Optional: temporary Internet access so the manual receiver picker can load OpenStreetMap tiles.
+- Optional: Internet access for the Open-Meteo rainfall overlay when enabled.
   
 
 ## Quick Start

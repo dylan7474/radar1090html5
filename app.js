@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.24';
+const APP_VERSION = 'V1.10.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -33,6 +33,7 @@ const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
 // Retain the legacy storage key so previously stored preferences continue to work.
 const BASEMAP_OVERLAY_STORAGE_KEY = 'googleMapOverlayVisible';
+const WEATHER_OVERLAY_STORAGE_KEY = 'weatherOverlayVisible';
 const LEAFLET_ASSET_SOURCES = Object.freeze([
   {
     id: 'unpkg',
@@ -187,6 +188,9 @@ const openStreetMapOverlayToggleBtn = document.getElementById('openstreetmap-ove
 const openStreetMapOverlayStateEl = document.getElementById('openstreetmap-overlay-state');
 const openStreetMapOverlayEl = document.getElementById('openstreetmap-overlay');
 const openStreetMapFrameEl = document.getElementById('openstreetmap-frame');
+const weatherOverlayToggleBtn = document.getElementById('weather-overlay-toggle');
+const weatherOverlayStateEl = document.getElementById('weather-overlay-state');
+const weatherOverlayEl = document.getElementById('weather-overlay');
 const manualLocationModal = document.getElementById('manual-location-modal');
 const manualLocationBackdrop = document.getElementById('manual-location-backdrop');
 const manualLocationMapEl = document.getElementById('manual-location-map');
@@ -232,6 +236,9 @@ let manualLocationSelection = null;
 let manualLocationMap = null;
 let manualLocationMarker = null;
 let leafletAssetsPromise = null;
+let weatherOverlayMap = null;
+let weatherOverlayBaseLayer = null;
+let weatherOverlayPrecipLayer = null;
 
 // First character of the wake turbulence category -> icon key.
 const WTC_ICON_MAP = {
@@ -1043,6 +1050,10 @@ const savedOpenStreetMapOverlayVisible = readBooleanPreference(
   BASEMAP_OVERLAY_STORAGE_KEY,
   false,
 );
+const savedWeatherOverlayVisible = readBooleanPreference(
+  WEATHER_OVERLAY_STORAGE_KEY,
+  false,
+);
 const state = {
   server: {
     protocol: DUMP1090_PROTOCOL,
@@ -1084,6 +1095,7 @@ const state = {
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
   openStreetMapOverlayVisible: savedOpenStreetMapOverlayVisible,
+  weatherOverlayVisible: savedWeatherOverlayVisible,
   alertHistory: new Map(),
   alertHighlights: new Map(),
 };
@@ -1342,6 +1354,7 @@ refreshAircraftDetailsControls();
 refreshPanelVisibility();
 updateOpenStreetMapOverlaySource();
 refreshOpenStreetMapOverlay();
+refreshWeatherOverlay();
 
 if (geolocationPermissionModal) {
   geolocationPermissionModal.setAttribute(
@@ -1415,6 +1428,17 @@ if (openStreetMapOverlayToggleBtn) {
       updateOpenStreetMapOverlaySource();
     }
     refreshOpenStreetMapOverlay();
+  });
+}
+
+if (weatherOverlayToggleBtn) {
+  weatherOverlayToggleBtn.addEventListener('click', () => {
+    state.weatherOverlayVisible = !state.weatherOverlayVisible;
+    writeCookie(
+      WEATHER_OVERLAY_STORAGE_KEY,
+      state.weatherOverlayVisible ? 'true' : 'false',
+    );
+    refreshWeatherOverlay();
   });
 }
 
@@ -2726,6 +2750,7 @@ function updateRangeInfo() {
     .join('');
 
   updateOpenStreetMapOverlaySource();
+  void updateWeatherOverlayView();
 }
 
 function calculateBasemapZoom(rangeKm) {
@@ -2827,6 +2852,142 @@ function refreshOpenStreetMapOverlay() {
   openStreetMapOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
   openStreetMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
   applyOpenStreetMapOverlayRotation();
+}
+
+function applyWeatherOverlayRotation() {
+  if (!weatherOverlayEl) {
+    return;
+  }
+
+  const rotationDeg = getRadarRotationDegrees();
+  weatherOverlayEl.style.setProperty('--radar-rotation', `${rotationDeg}deg`);
+}
+
+async function ensureWeatherOverlayMap() {
+  if (!weatherOverlayEl) {
+    return null;
+  }
+
+  const leaflet = await loadLeafletAssets();
+
+  if (weatherOverlayMap) {
+    return leaflet;
+  }
+
+  weatherOverlayMap = leaflet.map(weatherOverlayEl, {
+    attributionControl: false,
+    zoomControl: false,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    touchZoom: false,
+    tap: false,
+  });
+
+  weatherOverlayBaseLayer = leaflet
+    .tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
+    })
+    .addTo(weatherOverlayMap);
+
+  weatherOverlayPrecipLayer = leaflet
+    .tileLayer('https://maps.open-meteo.com/v1/precipitation/{z}/{x}/{y}.png?opacity=0.7', {
+      maxZoom: 12,
+      attribution: 'Precipitation &copy; Open-Meteo',
+    })
+    .addTo(weatherOverlayMap);
+
+  applyWeatherOverlayRotation();
+  return leaflet;
+}
+
+async function updateWeatherOverlayView() {
+  if (!weatherOverlayEl || !state.weatherOverlayVisible) {
+    return;
+  }
+
+  const { lat, lon } = state.receiver;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return;
+  }
+
+  try {
+    await ensureWeatherOverlayMap();
+  } catch (error) {
+    console.warn('Unable to load rainfall overlay', error);
+    if (weatherOverlayStateEl) {
+      weatherOverlayStateEl.textContent = 'Unavailable';
+    }
+    state.weatherOverlayVisible = false;
+    writeCookie(WEATHER_OVERLAY_STORAGE_KEY, 'false');
+    refreshWeatherOverlay();
+    if (weatherOverlayStateEl) {
+      weatherOverlayStateEl.textContent = 'Unavailable';
+    }
+    showMessage('Unable to load rainfall overlay. Check your connection and try again.', {
+      duration: DISPLAY_TIMEOUT_MS * 2,
+    });
+    return;
+  }
+
+  if (!weatherOverlayMap) {
+    return;
+  }
+
+  const rangeKm = RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX];
+  const zoom = calculateBasemapZoom(rangeKm);
+  const target = [lat, lon];
+
+  weatherOverlayMap.setView(target, zoom, { animate: false });
+
+  setTimeout(() => {
+    if (!weatherOverlayMap) {
+      return;
+    }
+    if (typeof weatherOverlayMap.invalidateSize === 'function') {
+      weatherOverlayMap.invalidateSize();
+      weatherOverlayMap.setView(target, zoom, { animate: false });
+    }
+  }, 150);
+
+  if (weatherOverlayStateEl) {
+    weatherOverlayStateEl.textContent = 'Visible';
+  }
+}
+
+function refreshWeatherOverlay() {
+  if (!weatherOverlayToggleBtn || !weatherOverlayEl) {
+    return;
+  }
+
+  const overlayEnabled = !!state.weatherOverlayVisible;
+  const hasReceiverFix = Number.isFinite(state.receiver?.lat) && Number.isFinite(state.receiver?.lon);
+  const shouldShowOverlay = overlayEnabled && hasReceiverFix;
+
+  weatherOverlayToggleBtn.textContent = overlayEnabled ? 'Hide' : 'Show';
+  weatherOverlayToggleBtn.setAttribute('aria-pressed', overlayEnabled ? 'true' : 'false');
+  weatherOverlayToggleBtn.classList.toggle('primary', overlayEnabled);
+  weatherOverlayToggleBtn.toggleAttribute('disabled', !hasReceiverFix);
+
+  if (weatherOverlayStateEl) {
+    if (!hasReceiverFix) {
+      weatherOverlayStateEl.textContent = 'Unavailable';
+    } else {
+      weatherOverlayStateEl.textContent = overlayEnabled ? 'Visible' : 'Hidden';
+    }
+  }
+
+  weatherOverlayEl.classList.toggle('weather-overlay--visible', shouldShowOverlay);
+  weatherOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
+  weatherOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
+
+  if (shouldShowOverlay) {
+    applyWeatherOverlayRotation();
+    void updateWeatherOverlayView();
+  }
 }
 
 function loadLeafletAssets() {
@@ -3199,6 +3360,7 @@ function updateReceiverInfo() {
 
   updateOpenStreetMapOverlaySource();
   refreshOpenStreetMapOverlay();
+  refreshWeatherOverlay();
 }
 
 function supportsGeolocation() {
@@ -3600,6 +3762,10 @@ function rotateRadarClockwise() {
   state.radarRotationQuarterTurns = (state.radarRotationQuarterTurns + 1) % 4;
   writeCookie(RADAR_ORIENTATION_STORAGE_KEY, state.radarRotationQuarterTurns);
   applyOpenStreetMapOverlayRotation();
+  applyWeatherOverlayRotation();
+  if (state.weatherOverlayVisible) {
+    void updateWeatherOverlayView();
+  }
 }
 
 function handleRadarTap(event) {
