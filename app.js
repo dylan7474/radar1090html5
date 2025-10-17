@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.22';
+const APP_VERSION = 'V1.9.23';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -31,7 +31,8 @@ const ALERT_RANGE_STORAGE_KEY = 'baseAlertDistanceKm';
 const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
-const GOOGLE_MAP_OVERLAY_STORAGE_KEY = 'googleMapOverlayVisible';
+// Retain the legacy storage key so previously stored preferences continue to work.
+const BASEMAP_OVERLAY_STORAGE_KEY = 'googleMapOverlayVisible';
 const LEAFLET_ASSET_SOURCES = Object.freeze([
   {
     id: 'unpkg',
@@ -182,10 +183,10 @@ const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
 const aircraftDetailsToggleBtn = document.getElementById('aircraft-details-toggle');
 const aircraftDetailsStateEl = document.getElementById('aircraft-details-state');
-const googleMapOverlayToggleBtn = document.getElementById('google-map-overlay-toggle');
-const googleMapOverlayStateEl = document.getElementById('google-map-overlay-state');
-const googleMapOverlayEl = document.getElementById('google-map-overlay');
-const googleMapFrameEl = document.getElementById('google-map-frame');
+const openStreetMapOverlayToggleBtn = document.getElementById('openstreetmap-overlay-toggle');
+const openStreetMapOverlayStateEl = document.getElementById('openstreetmap-overlay-state');
+const openStreetMapOverlayEl = document.getElementById('openstreetmap-overlay');
+const openStreetMapFrameEl = document.getElementById('openstreetmap-frame');
 const manualLocationModal = document.getElementById('manual-location-modal');
 const manualLocationBackdrop = document.getElementById('manual-location-backdrop');
 const manualLocationMapEl = document.getElementById('manual-location-map');
@@ -1038,8 +1039,8 @@ const savedDataPanelVisible = readBooleanPreference(
   DATA_PANEL_VISIBLE_STORAGE_KEY,
   true,
 );
-const savedGoogleMapOverlayVisible = readBooleanPreference(
-  GOOGLE_MAP_OVERLAY_STORAGE_KEY,
+const savedOpenStreetMapOverlayVisible = readBooleanPreference(
+  BASEMAP_OVERLAY_STORAGE_KEY,
   false,
 );
 const state = {
@@ -1082,7 +1083,7 @@ const state = {
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
-  googleMapOverlayVisible: savedGoogleMapOverlayVisible,
+  openStreetMapOverlayVisible: savedOpenStreetMapOverlayVisible,
   alertHistory: new Map(),
   alertHighlights: new Map(),
 };
@@ -1339,8 +1340,8 @@ if (versionEl) {
 
 refreshAircraftDetailsControls();
 refreshPanelVisibility();
-updateGoogleMapOverlaySource();
-refreshGoogleMapOverlay();
+updateOpenStreetMapOverlaySource();
+refreshOpenStreetMapOverlay();
 
 if (geolocationPermissionModal) {
   geolocationPermissionModal.setAttribute(
@@ -1403,17 +1404,17 @@ if (aircraftDetailsToggleBtn) {
   });
 }
 
-if (googleMapOverlayToggleBtn) {
-  googleMapOverlayToggleBtn.addEventListener('click', () => {
-    state.googleMapOverlayVisible = !state.googleMapOverlayVisible;
+if (openStreetMapOverlayToggleBtn) {
+  openStreetMapOverlayToggleBtn.addEventListener('click', () => {
+    state.openStreetMapOverlayVisible = !state.openStreetMapOverlayVisible;
     writeCookie(
-      GOOGLE_MAP_OVERLAY_STORAGE_KEY,
-      state.googleMapOverlayVisible ? 'true' : 'false',
+      BASEMAP_OVERLAY_STORAGE_KEY,
+      state.openStreetMapOverlayVisible ? 'true' : 'false',
     );
-    if (state.googleMapOverlayVisible) {
-      updateGoogleMapOverlaySource();
+    if (state.openStreetMapOverlayVisible) {
+      updateOpenStreetMapOverlaySource();
     }
-    refreshGoogleMapOverlay();
+    refreshOpenStreetMapOverlay();
   });
 }
 
@@ -2724,7 +2725,7 @@ function updateRangeInfo() {
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
     .join('');
 
-  updateGoogleMapOverlaySource();
+  updateOpenStreetMapOverlaySource();
 }
 
 function calculateBasemapZoom(rangeKm) {
@@ -2741,20 +2742,30 @@ function calculateBasemapZoom(rangeKm) {
   return 6;
 }
 
-function buildGoogleMapEmbedUrl(lat, lon, zoom) {
+function buildOpenStreetMapEmbedUrl(lat, lon, rangeKm) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return null;
   }
 
-  const safeZoom = Number.isFinite(zoom) ? Math.max(1, Math.min(21, Math.round(zoom))) : 9;
-  const formattedLat = lat.toFixed(6);
-  const formattedLon = lon.toFixed(6);
-  const encodedQuery = encodeURIComponent(`${formattedLat},${formattedLon}`);
-  return `https://maps.google.com/maps?q=${encodedQuery}&t=m&z=${safeZoom}&output=embed`;
+  const safeRangeKm = Number.isFinite(rangeKm) ? Math.max(1, rangeKm) : 50;
+  const latDelta = safeRangeKm / 111;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  const lonScale = Math.max(Math.abs(cosLat), 0.01) * 111;
+  const lonDelta = safeRangeKm / lonScale;
+
+  const minLat = Math.max(-90, lat - latDelta);
+  const maxLat = Math.min(90, lat + latDelta);
+  const minLon = Math.max(-180, lon - lonDelta);
+  const maxLon = Math.min(180, lon + lonDelta);
+
+  const toFixed = (value) => value.toFixed(6);
+  const bbox = `${toFixed(minLon)},${toFixed(minLat)},${toFixed(maxLon)},${toFixed(maxLat)}`;
+  const marker = `${toFixed(lat)},${toFixed(lon)}`;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`;
 }
 
-function updateGoogleMapOverlaySource() {
-  if (!googleMapFrameEl) {
+function updateOpenStreetMapOverlaySource() {
+  if (!openStreetMapFrameEl) {
     return;
   }
 
@@ -2764,39 +2775,38 @@ function updateGoogleMapOverlaySource() {
   }
 
   const rangeKm = RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX];
-  const zoom = calculateBasemapZoom(rangeKm);
-  const url = buildGoogleMapEmbedUrl(lat, lon, zoom);
+  const url = buildOpenStreetMapEmbedUrl(lat, lon, rangeKm);
 
-  if (url && googleMapFrameEl.getAttribute('src') !== url) {
-    googleMapFrameEl.setAttribute('src', url);
+  if (url && openStreetMapFrameEl.getAttribute('src') !== url) {
+    openStreetMapFrameEl.setAttribute('src', url);
   }
 }
 
-function refreshGoogleMapOverlay() {
-  if (!googleMapOverlayToggleBtn || !googleMapOverlayEl) {
+function refreshOpenStreetMapOverlay() {
+  if (!openStreetMapOverlayToggleBtn || !openStreetMapOverlayEl) {
     return;
   }
 
-  const overlayEnabled = !!state.googleMapOverlayVisible;
+  const overlayEnabled = !!state.openStreetMapOverlayVisible;
   const hasReceiverFix = Number.isFinite(state.receiver?.lat) && Number.isFinite(state.receiver?.lon);
   const shouldShowOverlay = overlayEnabled && hasReceiverFix;
 
-  googleMapOverlayToggleBtn.textContent = overlayEnabled ? 'Hide' : 'Show';
-  googleMapOverlayToggleBtn.setAttribute('aria-pressed', overlayEnabled ? 'true' : 'false');
-  googleMapOverlayToggleBtn.classList.toggle('primary', overlayEnabled);
-  googleMapOverlayToggleBtn.toggleAttribute('disabled', !hasReceiverFix);
+  openStreetMapOverlayToggleBtn.textContent = overlayEnabled ? 'Hide' : 'Show';
+  openStreetMapOverlayToggleBtn.setAttribute('aria-pressed', overlayEnabled ? 'true' : 'false');
+  openStreetMapOverlayToggleBtn.classList.toggle('primary', overlayEnabled);
+  openStreetMapOverlayToggleBtn.toggleAttribute('disabled', !hasReceiverFix);
 
-  if (googleMapOverlayStateEl) {
+  if (openStreetMapOverlayStateEl) {
     if (!hasReceiverFix) {
-      googleMapOverlayStateEl.textContent = 'Unavailable';
+      openStreetMapOverlayStateEl.textContent = 'Unavailable';
     } else {
-      googleMapOverlayStateEl.textContent = overlayEnabled ? 'Visible' : 'Hidden';
+      openStreetMapOverlayStateEl.textContent = overlayEnabled ? 'Visible' : 'Hidden';
     }
   }
 
-  googleMapOverlayEl.classList.toggle('google-map-overlay--visible', shouldShowOverlay);
-  googleMapOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
-  googleMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
+  openStreetMapOverlayEl.classList.toggle('openstreetmap-overlay--visible', shouldShowOverlay);
+  openStreetMapOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
+  openStreetMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
 }
 
 function loadLeafletAssets() {
@@ -3167,8 +3177,8 @@ function updateReceiverInfo() {
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
     .join('');
 
-  updateGoogleMapOverlaySource();
-  refreshGoogleMapOverlay();
+  updateOpenStreetMapOverlaySource();
+  refreshOpenStreetMapOverlay();
 }
 
 function supportsGeolocation() {
