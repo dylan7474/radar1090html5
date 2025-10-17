@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.15';
+const APP_VERSION = 'V1.9.16';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -60,6 +60,7 @@ const ALERT_HIGHLIGHT_DURATION_MS = 30 * 1000;
 const DUMP1090_PROTOCOL = 'https';
 const DUMP1090_HOST = 'dump1090.dylanjones.org';
 const DUMP1090_PORT = 443;
+const GEOLOCATION_TIMEOUT_MS = 15000;
 // Persist user preferences in cookies so they survive reloads and browser restarts.
 const COOKIE_MAX_AGE_DAYS = 365;
 
@@ -151,6 +152,7 @@ const alertRangeValueEl = document.getElementById('alert-range-value');
 const alertRangeDecreaseBtn = document.getElementById('alert-range-decrease');
 const alertRangeIncreaseBtn = document.getElementById('alert-range-increase');
 const radarRotateBtn = document.getElementById('radar-rotate');
+const centerOnLocationBtn = document.getElementById('center-on-location');
 const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
@@ -222,6 +224,7 @@ const SPECIES_ICON_MAP = {
 let cachedLandMassPattern = null;
 let landMassGeoJsonCache = null;
 let activeLandMassSettings = null;
+let pendingUserLocationRequest = false;
 
 function resolveIconKeyFromWtc(entry) {
   const raw = typeof entry.wtc === 'string' ? entry.wtc.trim().toUpperCase() : '';
@@ -1289,10 +1292,15 @@ if (versionEl) {
 refreshAircraftDetailsControls();
 refreshPanelVisibility();
 
+if (centerOnLocationBtn && !supportsGeolocation()) {
+  centerOnLocationBtn.setAttribute('disabled', 'true');
+  centerOnLocationBtn.setAttribute('title', 'Geolocation is unavailable in this browser.');
+}
+
 if (aircraftDetailsToggleBtn) {
   aircraftDetailsToggleBtn.addEventListener('click', () => {
     state.showAircraftDetails = !state.showAircraftDetails;
-    writeCookie(
+    writeCookie(
       AIRCRAFT_DETAILS_STORAGE_KEY,
       state.showAircraftDetails ? 'true' : 'false',
     );
@@ -1406,6 +1414,9 @@ rangeIncreaseBtn?.addEventListener('click', () => adjustRange(1));
 alertRangeDecreaseBtn?.addEventListener('click', () => adjustBaseAlertRange(-BASE_ALERT_RANGE_STEP_KM));
 alertRangeIncreaseBtn?.addEventListener('click', () => adjustBaseAlertRange(BASE_ALERT_RANGE_STEP_KM));
 radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
+centerOnLocationBtn?.addEventListener('click', () => {
+  centerRadarOnUserLocation();
+});
 canvas?.addEventListener('click', handleRadarTap);
 
 controlsPanelToggleBtn?.addEventListener('click', () => {
@@ -2641,9 +2652,9 @@ function findAirspacesInRange(rangeKm) {
 }
 
 function updateReceiverInfo() {
-  if (!receiverInfoEl) {
-    return;
-  }
+  if (!receiverInfoEl) {
+    return;
+  }
 
   const { lat, lon } = state.receiver;
   const lines = [
@@ -2651,15 +2662,98 @@ function updateReceiverInfo() {
     { label: 'Longitude', value: formatCoordinate(lon) },
   ];
 
-  receiverInfoEl.innerHTML = lines
-    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
-    .join('');
+  receiverInfoEl.innerHTML = lines
+    .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
+    .join('');
+}
+
+const supportsGeolocation = () =>
+  typeof navigator !== 'undefined' &&
+  !!navigator.geolocation &&
+  typeof navigator.geolocation.getCurrentPosition === 'function';
+
+function setCenterOnLocationBusy(busy) {
+  if (!centerOnLocationBtn) {
+    return;
+  }
+
+  if (busy) {
+    centerOnLocationBtn.setAttribute('disabled', 'true');
+    centerOnLocationBtn.setAttribute('aria-busy', 'true');
+  } else {
+    centerOnLocationBtn.removeAttribute('disabled');
+    centerOnLocationBtn.removeAttribute('aria-busy');
+  }
+}
+
+async function centerRadarOnUserLocation() {
+  if (pendingUserLocationRequest) {
+    return;
+  }
+
+  if (!supportsGeolocation()) {
+    showMessage('Geolocation is not supported by this browser.', { duration: DISPLAY_TIMEOUT_MS * 2 });
+    return;
+  }
+
+  pendingUserLocationRequest = true;
+  setCenterOnLocationBusy(true);
+  showMessage('Locating your position…', { duration: DISPLAY_TIMEOUT_MS * 2 });
+
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: GEOLOCATION_TIMEOUT_MS,
+        maximumAge: 0,
+      });
+    });
+
+    const lat = Number(position?.coords?.latitude);
+    const lon = Number(position?.coords?.longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      throw new Error('Received invalid coordinates from geolocation.');
+    }
+
+    state.receiver.lat = lat;
+    state.receiver.lon = lon;
+    state.receiver.hasOverride = true;
+    writeCookie('receiverLat', String(lat));
+    writeCookie('receiverLon', String(lon));
+    updateReceiverInfo();
+    updateRangeInfo();
+    rebuildLandMassOutlines({ silent: true });
+    showMessage('Radar centered on your location.', { duration: DISPLAY_TIMEOUT_MS * 2 });
+  } catch (error) {
+    let message = 'Unable to access your location. Check browser permissions and try again.';
+    if (error && typeof error === 'object' && 'code' in error) {
+      switch (error.code) {
+        case 1:
+          message = 'Location request denied. Update browser permissions to re-enable.';
+          break;
+        case 2:
+          message = 'Location information is unavailable right now.';
+          break;
+        case 3:
+          message = 'Location request timed out before a fix was received.';
+          break;
+        default:
+          break;
+      }
+    }
+    console.warn('Failed to center on user location', error);
+    showMessage(message, { duration: DISPLAY_TIMEOUT_MS * 2 });
+  } finally {
+    pendingUserLocationRequest = false;
+    setCenterOnLocationBusy(false);
+  }
 }
 
 function adjustVolume(delta) {
-  const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
-  if (nextVolume !== state.beepVolume) {
-    state.beepVolume = nextVolume;
+  const nextVolume = Math.min(20, Math.max(0, state.beepVolume + delta));
+  if (nextVolume !== state.beepVolume) {
+    state.beepVolume = nextVolume;
     showMessage(`Volume: ${state.beepVolume}`);
     writeCookie(BEEP_VOLUME_STORAGE_KEY, String(state.beepVolume));
     updateRangeInfo();
