@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.4';
+const APP_VERSION = 'V1.9.5';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -3205,6 +3205,7 @@ function drawRadar(deltaTime) {
   const labelPlacements = [];
   const iconCollisionBounds = [];
   const blipMarkerDimensions = new Map();
+  const latestBlipByAircraft = showAircraftDetails ? new Map() : null;
 
   if (showAircraftDetails) {
     state.activeBlips.forEach((blip) => {
@@ -3217,6 +3218,18 @@ function drawRadar(deltaTime) {
         blip,
         bounds: expandBounds(baseBounds, padding),
       });
+
+      if (latestBlipByAircraft) {
+        const labelKey = blip.key || blip.hex || blip.flight || null;
+        if (!labelKey) {
+          return;
+        }
+
+        const currentLatest = latestBlipByAircraft.get(labelKey);
+        if (!currentLatest || blip.spawn > currentLatest.spawn) {
+          latestBlipByAircraft.set(labelKey, blip);
+        }
+      }
     });
   }
 
@@ -3253,6 +3266,11 @@ function drawRadar(deltaTime) {
       const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
 
       if (identifier) {
+        const labelKey = blip.key || blip.hex || blip.flight || null;
+        if (labelKey && latestBlipByAircraft && latestBlipByAircraft.get(labelKey) !== blip) {
+          continue;
+        }
+
         const placement = computeCalloutPlacement({
           text: identifier,
           blip,
