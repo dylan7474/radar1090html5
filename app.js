@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.6';
+const APP_VERSION = 'V1.9.7';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -458,6 +458,69 @@ function clampCalloutWithinViewport({
   return { boxX: clampedX, boxY: clampedY };
 }
 
+function createCalloutDirectionCandidates() {
+  const prioritizedAngles = [
+    -Math.PI / 4,
+    Math.PI / 4,
+    -((3 * Math.PI) / 4),
+    (3 * Math.PI) / 4,
+    -Math.PI / 6,
+    Math.PI / 6,
+    -((5 * Math.PI) / 6),
+    (5 * Math.PI) / 6,
+    -Math.PI / 3,
+    Math.PI / 3,
+    -((2 * Math.PI) / 3),
+    (2 * Math.PI) / 3,
+    0,
+    Math.PI,
+    -Math.PI / 2,
+    Math.PI / 2,
+  ];
+
+  const evenlySpacedAngles = [];
+  const segments = 16;
+  for (let i = 0; i < segments; i += 1) {
+    evenlySpacedAngles.push((i / segments) * Math.PI * 2);
+  }
+
+  const seen = new Set();
+  const candidates = [];
+  const recordAngle = (angle) => {
+    const dx = Math.cos(angle);
+    const dy = -Math.sin(angle);
+    const magnitude = Math.hypot(dx, dy);
+    if (magnitude < 1e-6) {
+      return;
+    }
+
+    const unitDx = dx / magnitude;
+    const unitDy = dy / magnitude;
+    const key = `${unitDx.toFixed(4)}:${unitDy.toFixed(4)}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+
+    let align = 'center';
+    if (unitDx >= 0.3) {
+      align = 'left';
+    } else if (unitDx <= -0.3) {
+      align = 'right';
+    }
+
+    candidates.push({ dx: unitDx, dy: unitDy, align });
+  };
+
+  [...prioritizedAngles, ...evenlySpacedAngles].forEach(recordAngle);
+
+  return candidates;
+}
+
+// Precompute a pool of direction vectors that cover the full 360° around a blip
+// while prioritizing the diagonals and cardinal directions for readability.
+const CALLOUT_DIRECTION_CANDIDATES = createCalloutDirectionCandidates();
+
 function computeCalloutPlacement({
   text,
   blip,
@@ -477,9 +540,11 @@ function computeCalloutPlacement({
   const textWidth = dimensions.width;
   const textHeight = dimensions.height;
   const margin = fontSize * 0.35;
-  const baseDistance = Math.max(markerWidth, markerHeight) * 0.65 + fontSize * 1.25;
-  const stepDistance = fontSize * 1.05;
-  const maxAttempts = 10;
+  const planeRadius = Math.max(markerWidth, markerHeight) * 0.5 + margin;
+  const labelSlack = Math.max(fontSize * 0.2, Math.min(textWidth, textHeight) * 0.15);
+  const baseDistance = planeRadius + labelSlack;
+  const stepDistance = Math.max(fontSize * 0.55, Math.min(textWidth, textHeight) * 0.25);
+  const maxAttempts = 16;
 
   const planeBounds = expandBounds(
     {
@@ -491,25 +556,9 @@ function computeCalloutPlacement({
     margin,
   );
 
-  // Candidate offsets around the blip prioritized to favor quadrant callouts first.
-  const directions = [
-    { dx: 1, dy: -0.55, align: 'left' },
-    { dx: 1, dy: 0.55, align: 'left' },
-    { dx: -1, dy: -0.55, align: 'right' },
-    { dx: -1, dy: 0.55, align: 'right' },
-    { dx: 0, dy: -1, align: 'center' },
-    { dx: 0, dy: 1, align: 'center' },
-    { dx: 0.85, dy: -1, align: 'left' },
-    { dx: 0.85, dy: 1, align: 'left' },
-    { dx: -0.85, dy: -1, align: 'right' },
-    { dx: -0.85, dy: 1, align: 'right' },
-    { dx: 1, dy: 0, align: 'left' },
-    { dx: -1, dy: 0, align: 'right' },
-  ];
-
   // Walk each candidate direction and progressively increase the distance
   // until we find a placement that clears the icon and existing callouts.
-  for (const direction of directions) {
+  for (const direction of CALLOUT_DIRECTION_CANDIDATES) {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const distance = baseDistance + attempt * stepDistance;
       let anchorX = blip.x + direction.dx * distance;
