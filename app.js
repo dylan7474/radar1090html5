@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.5';
+const APP_VERSION = 'V1.9.9';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -458,6 +458,69 @@ function clampCalloutWithinViewport({
   return { boxX: clampedX, boxY: clampedY };
 }
 
+function createCalloutDirectionCandidates() {
+  const prioritizedAngles = [
+    -Math.PI / 4,
+    Math.PI / 4,
+    -((3 * Math.PI) / 4),
+    (3 * Math.PI) / 4,
+    -Math.PI / 6,
+    Math.PI / 6,
+    -((5 * Math.PI) / 6),
+    (5 * Math.PI) / 6,
+    -Math.PI / 3,
+    Math.PI / 3,
+    -((2 * Math.PI) / 3),
+    (2 * Math.PI) / 3,
+    0,
+    Math.PI,
+    -Math.PI / 2,
+    Math.PI / 2,
+  ];
+
+  const evenlySpacedAngles = [];
+  const segments = 16;
+  for (let i = 0; i < segments; i += 1) {
+    evenlySpacedAngles.push((i / segments) * Math.PI * 2);
+  }
+
+  const seen = new Set();
+  const candidates = [];
+  const recordAngle = (angle) => {
+    const dx = Math.cos(angle);
+    const dy = -Math.sin(angle);
+    const magnitude = Math.hypot(dx, dy);
+    if (magnitude < 1e-6) {
+      return;
+    }
+
+    const unitDx = dx / magnitude;
+    const unitDy = dy / magnitude;
+    const key = `${unitDx.toFixed(4)}:${unitDy.toFixed(4)}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+
+    let align = 'center';
+    if (unitDx >= 0.3) {
+      align = 'left';
+    } else if (unitDx <= -0.3) {
+      align = 'right';
+    }
+
+    candidates.push({ dx: unitDx, dy: unitDy, align });
+  };
+
+  [...prioritizedAngles, ...evenlySpacedAngles].forEach(recordAngle);
+
+  return candidates;
+}
+
+// Precompute a pool of direction vectors that cover the full 360° around a blip
+// while prioritizing the diagonals and cardinal directions for readability.
+const CALLOUT_DIRECTION_CANDIDATES = createCalloutDirectionCandidates();
+
 function computeCalloutPlacement({
   text,
   blip,
@@ -477,9 +540,12 @@ function computeCalloutPlacement({
   const textWidth = dimensions.width;
   const textHeight = dimensions.height;
   const margin = fontSize * 0.35;
-  const baseDistance = Math.max(markerWidth, markerHeight) * 0.65 + fontSize * 1.25;
-  const stepDistance = fontSize * 1.05;
-  const maxAttempts = 10;
+  const planeRadius = Math.max(markerWidth, markerHeight) * 0.5 + margin;
+  const labelSlack = Math.max(fontSize * 0.15, Math.min(textWidth, textHeight) * 0.12);
+  const baseDistance = planeRadius + labelSlack;
+  const stepDistance = Math.max(fontSize * 0.5, Math.min(textWidth, textHeight) * 0.22);
+  const maxAttempts = 16;
+  const distanceTolerance = Math.max(0.75, fontSize * 0.04);
 
   const planeBounds = expandBounds(
     {
@@ -491,25 +557,26 @@ function computeCalloutPlacement({
     margin,
   );
 
-  // Candidate offsets around the blip prioritized to favor quadrant callouts first.
-  const directions = [
-    { dx: 1, dy: -0.55, align: 'left' },
-    { dx: 1, dy: 0.55, align: 'left' },
-    { dx: -1, dy: -0.55, align: 'right' },
-    { dx: -1, dy: 0.55, align: 'right' },
-    { dx: 0, dy: -1, align: 'center' },
-    { dx: 0, dy: 1, align: 'center' },
-    { dx: 0.85, dy: -1, align: 'left' },
-    { dx: 0.85, dy: 1, align: 'left' },
-    { dx: -0.85, dy: -1, align: 'right' },
-    { dx: -0.85, dy: 1, align: 'right' },
-    { dx: 1, dy: 0, align: 'left' },
-    { dx: -1, dy: 0, align: 'right' },
-  ];
+  let bestPlacement = null;
+  let bestScore = Infinity;
+  let bestAttempt = Infinity;
+  let bestAlignmentRank = Infinity;
+
+  const getAlignmentRank = (align) => {
+    if (align === 'center') {
+      return 0;
+    }
+    if (align === 'left') {
+      return 1;
+    }
+    return 2;
+  };
 
   // Walk each candidate direction and progressively increase the distance
   // until we find a placement that clears the icon and existing callouts.
-  for (const direction of directions) {
+  for (const direction of CALLOUT_DIRECTION_CANDIDATES) {
+    const alignmentRank = getAlignmentRank(direction.align);
+
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const distance = baseDistance + attempt * stepDistance;
       let anchorX = blip.x + direction.dx * distance;
@@ -596,7 +663,8 @@ function computeCalloutPlacement({
 
       const pointerVecX = anchorX - blip.x;
       const pointerVecY = anchorY - blip.y;
-      const pointerVecLength = Math.hypot(pointerVecX, pointerVecY) || 1;
+      const pointerDistance = Math.hypot(pointerVecX, pointerVecY);
+      const pointerVecLength = pointerDistance || 1;
       const pointerStart = {
         x: blip.x + (pointerVecX / pointerVecLength) * markerWidth * 0.45,
         y: blip.y + (pointerVecY / pointerVecLength) * markerHeight * 0.45,
@@ -616,21 +684,36 @@ function computeCalloutPlacement({
         y: midY + normalY,
       };
 
-      return {
-        anchorX,
-        anchorY,
-        textAlign: direction.align,
-        textBaseline: 'middle',
-        bounds,
-        expandedBounds,
-        pointerStart,
-        pointerEnd,
-        pointerControl,
-      };
+      if (
+        bestPlacement === null ||
+        pointerDistance + distanceTolerance < bestScore ||
+        (Math.abs(pointerDistance - bestScore) <= distanceTolerance &&
+          (attempt < bestAttempt ||
+            (attempt === bestAttempt && alignmentRank < bestAlignmentRank)))
+      ) {
+        bestPlacement = {
+          anchorX,
+          anchorY,
+          textAlign: direction.align,
+          textBaseline: 'middle',
+          bounds,
+          expandedBounds,
+          pointerStart,
+          pointerEnd,
+          pointerControl,
+        };
+        bestScore = pointerDistance;
+        bestAttempt = attempt;
+        bestAlignmentRank = alignmentRank;
+
+        if (pointerDistance <= baseDistance + distanceTolerance && attempt === 0) {
+          return bestPlacement;
+        }
+      }
     }
   }
 
-  return null;
+  return bestPlacement;
 }
 
 function createTransparentIconCanvas(image) {
@@ -2961,70 +3044,95 @@ function drawBlipMarker(blip, radarRadius, alpha) {
 }
 
 function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm, drawUprightTextAt) {
-  if (!airspaces || airspaces.length === 0) {
-    return;
-  }
+  if (!airspaces || airspaces.length === 0) {
+    return [];
+  }
 
-  ctx.save();
-  ctx.lineWidth = Math.max(1, radarRadius * 0.002);
-  const fontSize = Math.max(12, Math.round(radarRadius * 0.045));
-  const labelOffset = fontSize * 0.35;
+  ctx.save();
+  ctx.lineWidth = Math.max(1, radarRadius * 0.002);
+  const fontSize = Math.max(12, Math.round(radarRadius * 0.045));
+  const labelOffset = fontSize * 0.35;
+  const labelMargin = fontSize * 0.4;
+  const reservedPlacements = [];
 
-  const drawLabel = (text, anchorX, anchorY, baseline) => {
-    if (!text) {
-      return;
-    }
+  const drawLabel = (text, anchorX, anchorY, baseline) => {
+    if (!text) {
+      return;
+    }
 
-    const renderLabel = () => {
-      ctx.save();
-      ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-      ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = baseline;
-      ctx.fillText(text, anchorX, anchorY);
-      ctx.restore();
-    };
+    const dimensions = measureLabelDimensions(text, fontSize);
+    if (!dimensions) {
+      return;
+    }
 
-    if (typeof drawUprightTextAt === 'function') {
-      drawUprightTextAt(anchorX, anchorY, renderLabel);
-    } else {
-      renderLabel();
-    }
-  };
+    const boxX = anchorX - dimensions.width / 2;
+    let boxY;
+    switch (baseline) {
+      case 'bottom':
+        boxY = anchorY - dimensions.height;
+        break;
+      case 'top':
+        boxY = anchorY;
+        break;
+      default:
+        boxY = anchorY - dimensions.height / 2;
+        break;
+    }
 
-  for (const space of airspaces) {
-    if (!Number.isFinite(space.distanceKm) || space.distanceKm > radarRangeKm) {
-      continue;
-    }
+    const bounds = { x: boxX, y: boxY, width: dimensions.width, height: dimensions.height };
+    reservedPlacements.push({ bounds, expandedBounds: expandBounds(bounds, labelMargin) });
 
-    const distanceRatio = Math.min(space.distanceKm / radarRangeKm, 1);
-    const radiusRatio = Math.min(space.radiusKm / radarRangeKm, 1);
-    const displayRadius = Math.max(radarRadius * 0.02, radiusRatio * radarRadius);
-    const angleRad = deg2rad(space.bearing);
-    const centerOffset = distanceRatio * radarRadius;
-    const x = centerX + Math.sin(angleRad) * centerOffset;
-    const y = centerY - Math.cos(angleRad) * centerOffset;
+    const renderLabel = () => {
+      ctx.save();
+      ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+      ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = baseline;
+      ctx.fillText(text, anchorX, anchorY);
+      ctx.restore();
+    };
 
-    const gradient = ctx.createRadialGradient(x, y, displayRadius * 0.35, x, y, displayRadius);
-    gradient.addColorStop(0, 'rgba(64, 196, 255, 0.25)');
-    gradient.addColorStop(1, 'rgba(64, 196, 255, 0.05)');
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
-    ctx.fill();
+    if (typeof drawUprightTextAt === 'function') {
+      drawUprightTextAt(anchorX, anchorY, renderLabel);
+    } else {
+      renderLabel();
+    }
+  };
 
-    ctx.strokeStyle = 'rgba(64, 196, 255, 0.55)';
-    ctx.beginPath();
-    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
-    ctx.stroke();
+  for (const space of airspaces) {
+    if (!Number.isFinite(space.distanceKm) || space.distanceKm > radarRangeKm) {
+      continue;
+    }
 
-    drawLabel(space.name, x, y - displayRadius - labelOffset, 'bottom');
+    const distanceRatio = Math.min(space.distanceKm / radarRangeKm, 1);
+    const radiusRatio = Math.min(space.radiusKm / radarRangeKm, 1);
+    const displayRadius = Math.max(radarRadius * 0.02, radiusRatio * radarRadius);
+    const angleRad = deg2rad(space.bearing);
+    const centerOffset = distanceRatio * radarRadius;
+    const x = centerX + Math.sin(angleRad) * centerOffset;
+    const y = centerY - Math.cos(angleRad) * centerOffset;
 
-    const distanceLabel = `${Math.round(space.distanceKm)} km`;
-    drawLabel(distanceLabel, x, y + displayRadius + labelOffset, 'top');
-  }
+    const gradient = ctx.createRadialGradient(x, y, displayRadius * 0.35, x, y, displayRadius);
+    gradient.addColorStop(0, 'rgba(64, 196, 255, 0.25)');
+    gradient.addColorStop(1, 'rgba(64, 196, 255, 0.05)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
+    ctx.fill();
 
-  ctx.restore();
+    ctx.strokeStyle = 'rgba(64, 196, 255, 0.55)';
+    ctx.beginPath();
+    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    drawLabel(space.name, x, y - displayRadius - labelOffset, 'bottom');
+
+    const distanceLabel = `${Math.round(space.distanceKm)} km`;
+    drawLabel(distanceLabel, x, y + displayRadius + labelOffset, 'top');
+  }
+
+  ctx.restore();
+  return reservedPlacements;
 }
 
 function drawRadar(deltaTime) {
@@ -3100,7 +3208,8 @@ function drawRadar(deltaTime) {
   }
   ctx.restore();
 
-  drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt);
+  const reservedLabelPlacements =
+    drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt) || [];
 
   // sweep update
   const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;
@@ -3202,7 +3311,7 @@ function drawRadar(deltaTime) {
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
   const showAircraftDetails = state.showAircraftDetails;
-  const labelPlacements = [];
+  const labelPlacements = [...reservedLabelPlacements];
   const iconCollisionBounds = [];
   const blipMarkerDimensions = new Map();
   const latestBlipByAircraft = showAircraftDetails ? new Map() : null;
@@ -3284,33 +3393,33 @@ function drawRadar(deltaTime) {
         });
 
         if (placement) {
-          drawUpright(() => {
-            // Draw a short curved leader that links the callout back to the aircraft blip.
-            ctx.save();
-            ctx.globalAlpha = labelAlpha;
-            ctx.strokeStyle = 'rgba(82, 255, 194, 0.8)';
-            ctx.lineWidth = Math.max(1.1, fontSize * 0.075);
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(placement.pointerStart.x, placement.pointerStart.y);
-            ctx.quadraticCurveTo(
-              placement.pointerControl.x,
-              placement.pointerControl.y,
-              placement.pointerEnd.x,
-              placement.pointerEnd.y,
-            );
-            ctx.stroke();
-            ctx.restore();
+          // Draw a short curved leader that links the callout back to the aircraft blip.
+          ctx.save();
+          ctx.globalAlpha = labelAlpha;
+          ctx.strokeStyle = 'rgba(82, 255, 194, 0.8)';
+          ctx.lineWidth = Math.max(1.1, fontSize * 0.075);
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(placement.pointerStart.x, placement.pointerStart.y);
+          ctx.quadraticCurveTo(
+            placement.pointerControl.x,
+            placement.pointerControl.y,
+            placement.pointerEnd.x,
+            placement.pointerEnd.y,
+          );
+          ctx.stroke();
+          ctx.restore();
 
-            ctx.save();
-            ctx.globalAlpha = labelAlpha;
-            ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-            ctx.textAlign = placement.textAlign;
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = 'rgba(255,255,255,0.88)';
-            ctx.fillText(identifier, placement.anchorX, placement.anchorY);
-            ctx.restore();
-          });
+          ctx.save();
+          ctx.translate(placement.anchorX, placement.anchorY);
+          ctx.rotate(-rotationRad);
+          ctx.globalAlpha = labelAlpha;
+          ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+          ctx.textAlign = placement.textAlign;
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'rgba(255,255,255,0.88)';
+          ctx.fillText(identifier, 0, 0);
+          ctx.restore();
 
           labelPlacements.push(placement);
         }
