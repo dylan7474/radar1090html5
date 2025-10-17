@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.5';
+const APP_VERSION = 'V1.9.6';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -2961,70 +2961,95 @@ function drawBlipMarker(blip, radarRadius, alpha) {
 }
 
 function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm, drawUprightTextAt) {
-  if (!airspaces || airspaces.length === 0) {
-    return;
-  }
+  if (!airspaces || airspaces.length === 0) {
+    return [];
+  }
 
-  ctx.save();
-  ctx.lineWidth = Math.max(1, radarRadius * 0.002);
-  const fontSize = Math.max(12, Math.round(radarRadius * 0.045));
-  const labelOffset = fontSize * 0.35;
+  ctx.save();
+  ctx.lineWidth = Math.max(1, radarRadius * 0.002);
+  const fontSize = Math.max(12, Math.round(radarRadius * 0.045));
+  const labelOffset = fontSize * 0.35;
+  const labelMargin = fontSize * 0.4;
+  const reservedPlacements = [];
 
-  const drawLabel = (text, anchorX, anchorY, baseline) => {
-    if (!text) {
-      return;
-    }
+  const drawLabel = (text, anchorX, anchorY, baseline) => {
+    if (!text) {
+      return;
+    }
 
-    const renderLabel = () => {
-      ctx.save();
-      ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-      ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = baseline;
-      ctx.fillText(text, anchorX, anchorY);
-      ctx.restore();
-    };
+    const dimensions = measureLabelDimensions(text, fontSize);
+    if (!dimensions) {
+      return;
+    }
 
-    if (typeof drawUprightTextAt === 'function') {
-      drawUprightTextAt(anchorX, anchorY, renderLabel);
-    } else {
-      renderLabel();
-    }
-  };
+    const boxX = anchorX - dimensions.width / 2;
+    let boxY;
+    switch (baseline) {
+      case 'bottom':
+        boxY = anchorY - dimensions.height;
+        break;
+      case 'top':
+        boxY = anchorY;
+        break;
+      default:
+        boxY = anchorY - dimensions.height / 2;
+        break;
+    }
 
-  for (const space of airspaces) {
-    if (!Number.isFinite(space.distanceKm) || space.distanceKm > radarRangeKm) {
-      continue;
-    }
+    const bounds = { x: boxX, y: boxY, width: dimensions.width, height: dimensions.height };
+    reservedPlacements.push({ bounds, expandedBounds: expandBounds(bounds, labelMargin) });
 
-    const distanceRatio = Math.min(space.distanceKm / radarRangeKm, 1);
-    const radiusRatio = Math.min(space.radiusKm / radarRangeKm, 1);
-    const displayRadius = Math.max(radarRadius * 0.02, radiusRatio * radarRadius);
-    const angleRad = deg2rad(space.bearing);
-    const centerOffset = distanceRatio * radarRadius;
-    const x = centerX + Math.sin(angleRad) * centerOffset;
-    const y = centerY - Math.cos(angleRad) * centerOffset;
+    const renderLabel = () => {
+      ctx.save();
+      ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+      ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = baseline;
+      ctx.fillText(text, anchorX, anchorY);
+      ctx.restore();
+    };
 
-    const gradient = ctx.createRadialGradient(x, y, displayRadius * 0.35, x, y, displayRadius);
-    gradient.addColorStop(0, 'rgba(64, 196, 255, 0.25)');
-    gradient.addColorStop(1, 'rgba(64, 196, 255, 0.05)');
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
-    ctx.fill();
+    if (typeof drawUprightTextAt === 'function') {
+      drawUprightTextAt(anchorX, anchorY, renderLabel);
+    } else {
+      renderLabel();
+    }
+  };
 
-    ctx.strokeStyle = 'rgba(64, 196, 255, 0.55)';
-    ctx.beginPath();
-    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
-    ctx.stroke();
+  for (const space of airspaces) {
+    if (!Number.isFinite(space.distanceKm) || space.distanceKm > radarRangeKm) {
+      continue;
+    }
 
-    drawLabel(space.name, x, y - displayRadius - labelOffset, 'bottom');
+    const distanceRatio = Math.min(space.distanceKm / radarRangeKm, 1);
+    const radiusRatio = Math.min(space.radiusKm / radarRangeKm, 1);
+    const displayRadius = Math.max(radarRadius * 0.02, radiusRatio * radarRadius);
+    const angleRad = deg2rad(space.bearing);
+    const centerOffset = distanceRatio * radarRadius;
+    const x = centerX + Math.sin(angleRad) * centerOffset;
+    const y = centerY - Math.cos(angleRad) * centerOffset;
 
-    const distanceLabel = `${Math.round(space.distanceKm)} km`;
-    drawLabel(distanceLabel, x, y + displayRadius + labelOffset, 'top');
-  }
+    const gradient = ctx.createRadialGradient(x, y, displayRadius * 0.35, x, y, displayRadius);
+    gradient.addColorStop(0, 'rgba(64, 196, 255, 0.25)');
+    gradient.addColorStop(1, 'rgba(64, 196, 255, 0.05)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
+    ctx.fill();
 
-  ctx.restore();
+    ctx.strokeStyle = 'rgba(64, 196, 255, 0.55)';
+    ctx.beginPath();
+    ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    drawLabel(space.name, x, y - displayRadius - labelOffset, 'bottom');
+
+    const distanceLabel = `${Math.round(space.distanceKm)} km`;
+    drawLabel(distanceLabel, x, y + displayRadius + labelOffset, 'top');
+  }
+
+  ctx.restore();
+  return reservedPlacements;
 }
 
 function drawRadar(deltaTime) {
@@ -3100,7 +3125,8 @@ function drawRadar(deltaTime) {
   }
   ctx.restore();
 
-  drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt);
+  const reservedLabelPlacements =
+    drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt) || [];
 
   // sweep update
   const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;
@@ -3202,7 +3228,7 @@ function drawRadar(deltaTime) {
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
   const showAircraftDetails = state.showAircraftDetails;
-  const labelPlacements = [];
+  const labelPlacements = [...reservedLabelPlacements];
   const iconCollisionBounds = [];
   const blipMarkerDimensions = new Map();
   const latestBlipByAircraft = showAircraftDetails ? new Map() : null;
