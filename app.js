@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.1';
+const APP_VERSION = 'V1.9.2';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -346,18 +346,218 @@ function getBlipMarkerHeight(blip, radarRadius) {
 }
 
 function getBlipMarkerWidth(blip, radarRadius) {
-  const scale = getBlipIconScale(blip);
-  const iconState = getIconState(blip);
-  if (iconState?.ready) {
-    return radarRadius * 0.14 * scale;
-  }
-  return radarRadius * 0.04 * scale;
+  const scale = getBlipIconScale(blip);
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
+    return radarRadius * 0.14 * scale;
+  }
+  return radarRadius * 0.04 * scale;
+}
+
+function rectanglesOverlap(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+
+function expandBounds(bounds, margin) {
+  return {
+    x: bounds.x - margin,
+    y: bounds.y - margin,
+    width: bounds.width + margin * 2,
+    height: bounds.height + margin * 2,
+  };
+}
+
+function measureLabelDimensions(text, fontSize) {
+  if (!text) {
+    return null;
+  }
+
+  ctx.save();
+  ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+  const metrics = ctx.measureText(text);
+  ctx.restore();
+
+  const ascent = Number.isFinite(metrics.actualBoundingBoxAscent)
+    ? metrics.actualBoundingBoxAscent
+    : fontSize * 0.78;
+  const descent = Number.isFinite(metrics.actualBoundingBoxDescent)
+    ? metrics.actualBoundingBoxDescent
+    : fontSize * 0.22;
+
+  return {
+    width: metrics.width,
+    height: Math.max(fontSize * 0.9, ascent + descent),
+  };
+}
+
+function computeCalloutPlacement({
+  text,
+  blip,
+  fontSize,
+  markerWidth,
+  markerHeight,
+  existingPlacements,
+}) {
+  const dimensions = measureLabelDimensions(text, fontSize);
+  if (!dimensions) {
+    return null;
+  }
+
+  const textWidth = dimensions.width;
+  const textHeight = dimensions.height;
+  const margin = fontSize * 0.35;
+  const baseDistance = Math.max(markerWidth, markerHeight) * 0.65 + fontSize * 1.25;
+  const stepDistance = fontSize * 0.9;
+  const maxAttempts = 6;
+
+  const planeBounds = expandBounds(
+    {
+      x: blip.x - markerWidth / 2,
+      y: blip.y - markerHeight / 2,
+      width: markerWidth,
+      height: markerHeight,
+    },
+    margin,
+  );
+
+  // Candidate offsets around the blip prioritized to favor quadrant callouts first.
+  const directions = [
+    { dx: 1, dy: -0.55, align: 'left' },
+    { dx: 1, dy: 0.55, align: 'left' },
+    { dx: -1, dy: -0.55, align: 'right' },
+    { dx: -1, dy: 0.55, align: 'right' },
+    { dx: 0, dy: -1, align: 'center' },
+    { dx: 0, dy: 1, align: 'center' },
+  ];
+
+  let fallbackPlacement = null;
+
+  // Walk each candidate direction and progressively increase the distance
+  // until we find a placement that clears the icon and existing callouts.
+  for (const direction of directions) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const distance = baseDistance + attempt * stepDistance;
+      const anchorX = blip.x + direction.dx * distance;
+      const anchorY = blip.y + direction.dy * distance;
+
+      let boxX = anchorX;
+      if (direction.align === 'right') {
+        boxX = anchorX - textWidth;
+      } else if (direction.align === 'center') {
+        boxX = anchorX - textWidth / 2;
+      }
+      const boxY = anchorY - textHeight / 2;
+
+      const bounds = { x: boxX, y: boxY, width: textWidth, height: textHeight };
+      const expandedBounds = expandBounds(bounds, margin);
+
+      if (rectanglesOverlap(expandedBounds, planeBounds)) {
+        continue;
+      }
+
+      const overlapsExisting = existingPlacements.some((placement) =>
+        rectanglesOverlap(expandedBounds, placement.expandedBounds),
+      );
+
+      if (overlapsExisting) {
+        if (!fallbackPlacement) {
+          fallbackPlacement = {
+            anchorX,
+            anchorY,
+            textAlign: direction.align,
+            textBaseline: 'middle',
+            bounds,
+            expandedBounds,
+            margin,
+          };
+        }
+        continue;
+      }
+
+      const pointerTargetX =
+        direction.align === 'left'
+          ? boxX - margin * 0.4
+          : direction.align === 'right'
+          ? boxX + textWidth + margin * 0.4
+          : anchorX;
+      const pointerTargetY = anchorY;
+
+      const pointerStart = {
+        x: blip.x + direction.dx * markerWidth * 0.45,
+        y: blip.y + direction.dy * markerHeight * 0.45,
+      };
+      const pointerEnd = { x: pointerTargetX, y: pointerTargetY };
+
+      const vecX = pointerEnd.x - pointerStart.x;
+      const vecY = pointerEnd.y - pointerStart.y;
+      const length = Math.hypot(vecX, vecY) || 1;
+      const midX = (pointerStart.x + pointerEnd.x) / 2;
+      const midY = (pointerStart.y + pointerEnd.y) / 2;
+      const controlOffset = Math.min(fontSize * 1.15, length * 0.35);
+      const normalX = (-vecY / length) * controlOffset;
+      const normalY = (vecX / length) * controlOffset;
+      const pointerControl = {
+        x: midX + normalX,
+        y: midY + normalY,
+      };
+
+      return {
+        anchorX,
+        anchorY,
+        textAlign: direction.align,
+        textBaseline: 'middle',
+        bounds,
+        expandedBounds,
+        pointerStart,
+        pointerEnd,
+        pointerControl,
+      };
+    }
+  }
+
+  // Fallback to the first slot that cleared the aircraft marker even if we
+  // still overlap another tag. The callout will still render farther out so
+  // it never covers the icon itself.
+  if (fallbackPlacement) {
+    const { anchorX, anchorY, textAlign, bounds, expandedBounds } = fallbackPlacement;
+    const pointerStart = { x: blip.x, y: blip.y - markerHeight * 0.45 };
+    const pointerEnd = { x: anchorX, y: anchorY };
+    const vecX = pointerEnd.x - pointerStart.x;
+    const vecY = pointerEnd.y - pointerStart.y;
+    const length = Math.hypot(vecX, vecY) || 1;
+    const midX = (pointerStart.x + pointerEnd.x) / 2;
+    const midY = (pointerStart.y + pointerEnd.y) / 2;
+    const controlOffset = Math.min(fontSize * 1.15, length * 0.35);
+    const pointerControl = {
+      x: midX - (vecY / length) * controlOffset,
+      y: midY + (vecX / length) * controlOffset,
+    };
+
+    return {
+      anchorX,
+      anchorY,
+      textAlign,
+      textBaseline: 'middle',
+      bounds,
+      expandedBounds,
+      pointerStart,
+      pointerEnd,
+      pointerControl,
+    };
+  }
+
+  return null;
 }
 
 function createTransparentIconCanvas(image) {
-  const width = image.naturalWidth || image.width;
-  const height = image.naturalHeight || image.height;
-  if (!width || !height) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) {
     throw new Error('Icon has invalid dimensions');
   }
 
@@ -2922,7 +3122,9 @@ function drawRadar(deltaTime) {
   const rotationPeriod = state.rotationPeriodMs || (360 / sweepSpeed) * 1000;
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
-  // draw blips
+  const labelPlacements = [];
+
+  // draw blips
   for (const blip of state.activeBlips) {
     const age = (now - blip.spawn) / rotationPeriod;
     const alpha = Math.max(0, 1 - age);
@@ -2948,35 +3150,55 @@ function drawRadar(deltaTime) {
 
     const showAircraftDetails = state.showAircraftDetails;
 
-    if (showAircraftDetails) {
-      const fontSize = Math.round(radarRadius * 0.055);
+    if (showAircraftDetails) {
+      const fontSize = Math.max(10, Math.round(radarRadius * 0.045));
       const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-      const verticalSpacing = fontSize * 0.45;
+      const markerWidth = getBlipMarkerWidth(blip, radarRadius);
       const identifierRaw = blip.flight || blip.hex || 'Unknown';
       const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
 
-      const drawAircraftLabel = (text, anchorX, anchorY, align, baseline) => {
-        if (!text) {
-          return;
+      if (identifier) {
+        const placement = computeCalloutPlacement({
+          text: identifier,
+          blip,
+          fontSize,
+          markerWidth,
+          markerHeight,
+          existingPlacements: labelPlacements,
+        });
+
+        if (placement) {
+          drawUpright(() => {
+            // Draw a short curved leader that links the callout back to the aircraft blip.
+            ctx.save();
+            ctx.globalAlpha = labelAlpha;
+            ctx.strokeStyle = 'rgba(82, 255, 194, 0.8)';
+            ctx.lineWidth = Math.max(1.1, fontSize * 0.075);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(placement.pointerStart.x, placement.pointerStart.y);
+            ctx.quadraticCurveTo(
+              placement.pointerControl.x,
+              placement.pointerControl.y,
+              placement.pointerEnd.x,
+              placement.pointerEnd.y,
+            );
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.save();
+            ctx.globalAlpha = labelAlpha;
+            ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+            ctx.textAlign = placement.textAlign;
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(255,255,255,0.88)';
+            ctx.fillText(identifier, placement.anchorX, placement.anchorY);
+            ctx.restore();
+          });
+
+          labelPlacements.push(placement);
         }
-
-        drawUprightAt(anchorX, anchorY, () => {
-          ctx.save();
-          ctx.globalAlpha = labelAlpha;
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-          ctx.textAlign = align;
-          ctx.textBaseline = baseline;
-          ctx.fillText(text, anchorX, anchorY);
-          ctx.restore();
-        });
-      };
-
-      if (identifier) {
-        const identifierY = blip.y - markerHeight / 2 - verticalSpacing;
-        drawAircraftLabel(identifier, blip.x, identifierY, 'center', 'bottom');
-      }
-
+      }
     }
   }
 
