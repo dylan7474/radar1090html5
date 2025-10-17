@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.18';
+const APP_VERSION = 'V1.9.19';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -31,6 +31,7 @@ const ALERT_RANGE_STORAGE_KEY = 'baseAlertDistanceKm';
 const RADAR_ORIENTATION_STORAGE_KEY = 'radarOrientationQuarterTurns';
 const CONTROLS_PANEL_VISIBLE_STORAGE_KEY = 'controlsPanelVisible';
 const DATA_PANEL_VISIBLE_STORAGE_KEY = 'dataPanelVisible';
+const GOOGLE_MAP_OVERLAY_STORAGE_KEY = 'googleMapOverlayVisible';
 const EMERGENCY_SQUAWK_CODES = Object.freeze({
   '7500': 'Possible hijacking',
   '7600': 'Lost communications',
@@ -161,6 +162,10 @@ const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
 const aircraftDetailsToggleBtn = document.getElementById('aircraft-details-toggle');
 const aircraftDetailsStateEl = document.getElementById('aircraft-details-state');
+const googleMapOverlayToggleBtn = document.getElementById('google-map-overlay-toggle');
+const googleMapOverlayStateEl = document.getElementById('google-map-overlay-state');
+const googleMapOverlayEl = document.getElementById('google-map-overlay');
+const googleMapFrameEl = document.getElementById('google-map-frame');
 const mainAppEl = document.querySelector('main.app');
 const controlsPanelEl = document.getElementById('controls-panel');
 const dataPanelEl = document.getElementById('data-panel');
@@ -1000,6 +1005,10 @@ const savedDataPanelVisible = readBooleanPreference(
   DATA_PANEL_VISIBLE_STORAGE_KEY,
   true,
 );
+const savedGoogleMapOverlayVisible = readBooleanPreference(
+  GOOGLE_MAP_OVERLAY_STORAGE_KEY,
+  false,
+);
 const state = {
   server: {
     protocol: DUMP1090_PROTOCOL,
@@ -1040,6 +1049,7 @@ const state = {
   showAircraftDetails: savedAircraftDetailsSetting === 'true',
   controlsPanelVisible: savedControlsPanelVisible,
   dataPanelVisible: savedDataPanelVisible,
+  googleMapOverlayVisible: savedGoogleMapOverlayVisible,
   alertHistory: new Map(),
   alertHighlights: new Map(),
 };
@@ -1296,6 +1306,8 @@ if (versionEl) {
 
 refreshAircraftDetailsControls();
 refreshPanelVisibility();
+updateGoogleMapOverlaySource();
+refreshGoogleMapOverlay();
 
 if (geolocationPermissionModal) {
   geolocationPermissionModal.setAttribute(
@@ -1318,11 +1330,25 @@ if (aircraftDetailsToggleBtn) {
   aircraftDetailsToggleBtn.addEventListener('click', () => {
     state.showAircraftDetails = !state.showAircraftDetails;
     writeCookie(
-      AIRCRAFT_DETAILS_STORAGE_KEY,
-      state.showAircraftDetails ? 'true' : 'false',
-    );
-    refreshAircraftDetailsControls();
-  });
+      AIRCRAFT_DETAILS_STORAGE_KEY,
+      state.showAircraftDetails ? 'true' : 'false',
+    );
+    refreshAircraftDetailsControls();
+  });
+}
+
+if (googleMapOverlayToggleBtn) {
+  googleMapOverlayToggleBtn.addEventListener('click', () => {
+    state.googleMapOverlayVisible = !state.googleMapOverlayVisible;
+    writeCookie(
+      GOOGLE_MAP_OVERLAY_STORAGE_KEY,
+      state.googleMapOverlayVisible ? 'true' : 'false',
+    );
+    if (state.googleMapOverlayVisible) {
+      updateGoogleMapOverlaySource();
+    }
+    refreshGoogleMapOverlay();
+  });
 }
 
 if (audioStreamEl) {
@@ -2631,6 +2657,80 @@ function updateRangeInfo() {
   rangeInfoEl.innerHTML = infoLines
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
     .join('');
+
+  updateGoogleMapOverlaySource();
+}
+
+function calculateGoogleMapZoom(rangeKm) {
+  if (!Number.isFinite(rangeKm)) {
+    return 9;
+  }
+
+  if (rangeKm <= 10) return 12;
+  if (rangeKm <= 25) return 11;
+  if (rangeKm <= 50) return 10;
+  if (rangeKm <= 100) return 9;
+  if (rangeKm <= 200) return 8;
+  if (rangeKm <= 300) return 7;
+  return 6;
+}
+
+function buildGoogleMapEmbedUrl(lat, lon, zoom) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+
+  const safeZoom = Number.isFinite(zoom) ? Math.max(1, Math.min(21, Math.round(zoom))) : 9;
+  const formattedLat = lat.toFixed(6);
+  const formattedLon = lon.toFixed(6);
+  const encodedQuery = encodeURIComponent(`${formattedLat},${formattedLon}`);
+  return `https://maps.google.com/maps?q=${encodedQuery}&t=m&z=${safeZoom}&output=embed`;
+}
+
+function updateGoogleMapOverlaySource() {
+  if (!googleMapFrameEl) {
+    return;
+  }
+
+  const { lat, lon } = state.receiver;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return;
+  }
+
+  const rangeKm = RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX];
+  const zoom = calculateGoogleMapZoom(rangeKm);
+  const url = buildGoogleMapEmbedUrl(lat, lon, zoom);
+
+  if (url && googleMapFrameEl.getAttribute('src') !== url) {
+    googleMapFrameEl.setAttribute('src', url);
+  }
+}
+
+function refreshGoogleMapOverlay() {
+  if (!googleMapOverlayToggleBtn || !googleMapOverlayEl) {
+    return;
+  }
+
+  const overlayEnabled = !!state.googleMapOverlayVisible;
+  const hasReceiverFix = Number.isFinite(state.receiver?.lat) && Number.isFinite(state.receiver?.lon);
+  const shouldShowOverlay = overlayEnabled && hasReceiverFix;
+
+  googleMapOverlayToggleBtn.textContent = overlayEnabled ? 'Hide' : 'Show';
+  googleMapOverlayToggleBtn.setAttribute('aria-pressed', overlayEnabled ? 'true' : 'false');
+  googleMapOverlayToggleBtn.classList.toggle('primary', overlayEnabled);
+  googleMapOverlayToggleBtn.toggleAttribute('disabled', !hasReceiverFix);
+
+  if (googleMapOverlayStateEl) {
+    if (!hasReceiverFix) {
+      googleMapOverlayStateEl.textContent = 'Unavailable';
+    } else {
+      googleMapOverlayStateEl.textContent = overlayEnabled ? 'Visible' : 'Hidden';
+    }
+  }
+
+  googleMapOverlayEl.classList.toggle('google-map-overlay--visible', shouldShowOverlay);
+  googleMapOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
+  googleMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
 }
 
 function formatCoordinate(value) {
@@ -2697,6 +2797,9 @@ function updateReceiverInfo() {
   receiverInfoEl.innerHTML = lines
     .map(({ label, value }) => `<div class="info-line"><span>${label}</span><strong>${value}</strong></div>`)
     .join('');
+
+  updateGoogleMapOverlaySource();
+  refreshGoogleMapOverlay();
 }
 
 function supportsGeolocation() {
