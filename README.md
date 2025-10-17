@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.11
+**Current Version:** V1.9.12
 
 ---
 
@@ -30,6 +30,7 @@ from any modern browser.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
 - Sidebar readout that surfaces the receiver latitude/longitude for quick verification.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.
+- Range selector now spans 5 km through 400 km to cover both local operations and distant traffic monitoring.
 - Faint hashed landmass overlays sourced from configurable GeoJSON coastline data so range changes always track real geography.
 - Aircraft markers that scale with known wake turbulence or emitter category data, making heavy jets stand out at a glance.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
