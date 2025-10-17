@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.9';
+const APP_VERSION = 'V1.9.10';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -701,6 +701,8 @@ function computeCalloutPlacement({
           pointerStart,
           pointerEnd,
           pointerControl,
+          textWidth,
+          textHeight,
         };
         bestScore = pointerDistance;
         bestAttempt = attempt;
@@ -714,6 +716,106 @@ function computeCalloutPlacement({
   }
 
   return bestPlacement;
+}
+
+function createPersistedCalloutPlacement(placement, blip, fontSize) {
+  if (!placement) {
+    return null;
+  }
+
+  return {
+    anchorOffsetX: placement.anchorX - blip.x,
+    anchorOffsetY: placement.anchorY - blip.y,
+    textAlign: placement.textAlign,
+    fontSize,
+    textWidth: placement.textWidth,
+    textHeight: placement.textHeight,
+  };
+}
+
+function restorePersistedCalloutPlacement({
+  persisted,
+  blip,
+  fontSize,
+  markerWidth,
+  markerHeight,
+}) {
+  if (!persisted) {
+    return null;
+  }
+
+  if (!Number.isFinite(fontSize) || Math.abs(persisted.fontSize - fontSize) > 0.5) {
+    return null;
+  }
+
+  const { anchorOffsetX, anchorOffsetY, textAlign, textWidth, textHeight } = persisted;
+  if (
+    !Number.isFinite(anchorOffsetX) ||
+    !Number.isFinite(anchorOffsetY) ||
+    !Number.isFinite(textWidth) ||
+    !Number.isFinite(textHeight)
+  ) {
+    return null;
+  }
+
+  const anchorX = blip.x + anchorOffsetX;
+  const anchorY = blip.y + anchorOffsetY;
+  const margin = fontSize * 0.35;
+
+  let boxX = anchorX;
+  if (textAlign === 'right') {
+    boxX = anchorX - textWidth;
+  } else if (textAlign === 'center') {
+    boxX = anchorX - textWidth / 2;
+  }
+
+  const boxY = anchorY - textHeight / 2;
+  const bounds = { x: boxX, y: boxY, width: textWidth, height: textHeight };
+  const expandedBounds = expandBounds(bounds, margin);
+
+  const pointerTargetX =
+    textAlign === 'left'
+      ? boxX - margin * 0.4
+      : textAlign === 'right'
+      ? boxX + textWidth + margin * 0.4
+      : anchorX;
+  const pointerTargetY = anchorY;
+
+  const pointerVecX = anchorX - blip.x;
+  const pointerVecY = anchorY - blip.y;
+  const pointerVecLength = Math.hypot(pointerVecX, pointerVecY) || 1;
+  const pointerStart = {
+    x: blip.x + (pointerVecX / pointerVecLength) * markerWidth * 0.45,
+    y: blip.y + (pointerVecY / pointerVecLength) * markerHeight * 0.45,
+  };
+
+  const pointerEnd = { x: pointerTargetX, y: pointerTargetY };
+  const vecX = pointerEnd.x - pointerStart.x;
+  const vecY = pointerEnd.y - pointerStart.y;
+  const length = Math.hypot(vecX, vecY) || 1;
+  const midX = (pointerStart.x + pointerEnd.x) / 2;
+  const midY = (pointerStart.y + pointerEnd.y) / 2;
+  const controlOffset = Math.min(fontSize * 1.15, length * 0.35);
+  const normalX = (-vecY / length) * controlOffset;
+  const normalY = (vecX / length) * controlOffset;
+  const pointerControl = {
+    x: midX + normalX,
+    y: midY + normalY,
+  };
+
+  return {
+    anchorX,
+    anchorY,
+    textAlign,
+    textBaseline: 'middle',
+    bounds,
+    expandedBounds,
+    pointerStart,
+    pointerEnd,
+    pointerControl,
+    textWidth,
+    textHeight,
+  };
 }
 
 function createTransparentIconCanvas(image) {
@@ -835,6 +937,7 @@ const state = {
   paintedRotation: new Map(),
   currentSweepId: 0,
   activeBlips: [],
+  calloutPlacements: new Map(),
   airspacesInRange: [],
   landMasses: LAND_MASS_OUTLINES,
   landMassSourceId: null,
@@ -3342,6 +3445,17 @@ function drawRadar(deltaTime) {
     });
   }
 
+  if (!showAircraftDetails) {
+    state.calloutPlacements.clear();
+  } else if (latestBlipByAircraft) {
+    const activeLabelKeys = new Set(latestBlipByAircraft.keys());
+    for (const key of [...state.calloutPlacements.keys()]) {
+      if (!activeLabelKeys.has(key)) {
+        state.calloutPlacements.delete(key);
+      }
+    }
+  }
+
   // draw blips
   for (const blip of state.activeBlips) {
     const age = (now - blip.spawn) / rotationPeriod;
@@ -3380,17 +3494,44 @@ function drawRadar(deltaTime) {
           continue;
         }
 
-        const placement = computeCalloutPlacement({
-          text: identifier,
-          blip,
-          fontSize,
-          markerWidth,
-          markerHeight,
-          existingPlacements: labelPlacements,
-          iconBounds: iconCollisionBounds,
-          viewportWidth: canvas.width,
-          viewportHeight: canvas.height,
-        });
+        let placement = null;
+        if (labelKey) {
+          const persisted = state.calloutPlacements.get(labelKey);
+          if (persisted) {
+            placement = restorePersistedCalloutPlacement({
+              persisted,
+              blip,
+              fontSize,
+              markerWidth,
+              markerHeight,
+            });
+
+            if (!placement) {
+              state.calloutPlacements.delete(labelKey);
+            }
+          }
+        }
+
+        if (!placement) {
+          placement = computeCalloutPlacement({
+            text: identifier,
+            blip,
+            fontSize,
+            markerWidth,
+            markerHeight,
+            existingPlacements: labelPlacements,
+            iconBounds: iconCollisionBounds,
+            viewportWidth: canvas.width,
+            viewportHeight: canvas.height,
+          });
+
+          if (placement && labelKey) {
+            const persisted = createPersistedCalloutPlacement(placement, blip, fontSize);
+            if (persisted) {
+              state.calloutPlacements.set(labelKey, persisted);
+            }
+          }
+        }
 
         if (placement) {
           // Draw a short curved leader that links the callout back to the aircraft blip.
