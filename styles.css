@@ -471,6 +471,8 @@ canvas#radar {
   transition: opacity 200ms ease-in-out;
   z-index: 0;
   background: rgba(0, 0, 0, 0.1);
+  transform: rotate(var(--radar-rotation, 0deg));
+  transform-origin: center;
 }
 
 .openstreetmap-overlay--visible {
