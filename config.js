@@ -40,3 +40,15 @@ export const CONTROLLED_AIRSPACES = Object.freeze([
     radiusKm: 17,
   }),
 ]);
+
+export const LAND_MASS_OUTLINES = Object.freeze([]);
+
+export const LAND_MASS_SOURCES = Object.freeze([
+  Object.freeze({
+    id: 'natural-earth-land-110m',
+    name: 'Natural Earth Land (110m)',
+    url: 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_land.geojson',
+    maxDistanceKm: 500,
+    minVertexSpacingKm: 1.2,
+  }),
+]);

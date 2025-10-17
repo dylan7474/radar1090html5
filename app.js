@@ -1,13 +1,21 @@
-import { CONTROLLED_AIRSPACES, DEFAULT_RECEIVER_LOCATION } from './config.js';
+import {
+  CONTROLLED_AIRSPACES,
+  DEFAULT_RECEIVER_LOCATION,
+  LAND_MASS_OUTLINES,
+  LAND_MASS_SOURCES,
+} from './config.js';
 
 const REFRESH_INTERVAL_MS = 5000;
 const AUDIO_RETRY_INTERVAL_MS = 8000;
 const DISPLAY_TIMEOUT_MS = 1500;
 const RANGE_STEPS = [5, 10, 25, 50, 100, 150, 200, 300];
 const DEFAULT_RANGE_STEP_INDEX = Math.max(0, Math.min(3, RANGE_STEPS.length - 1));
+const MAX_CONFIGURED_RANGE_KM = RANGE_STEPS[RANGE_STEPS.length - 1];
+const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
+const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.8.7';
+const APP_VERSION = 'V1.9.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -206,10 +214,14 @@ const CATEGORY_ICON_MAP = {
 };
 
 const SPECIES_ICON_MAP = {
-  4: 'rotor',
-  5: 'rotor',
-  6: 'rotor',
+  4: 'rotor',
+  5: 'rotor',
+  6: 'rotor',
 };
+
+let cachedLandMassPattern = null;
+let landMassGeoJsonCache = null;
+let activeLandMassSettings = null;
 
 function resolveIconKeyFromWtc(entry) {
   const raw = typeof entry.wtc === 'string' ? entry.wtc.trim().toUpperCase() : '';
@@ -459,9 +471,12 @@ const state = {
   previousPositions: new Map(),
   previousAltitudeSamples: new Map(),
   paintedRotation: new Map(),
-  currentSweepId: 0,
-  activeBlips: [],
-  airspacesInRange: [],
+  currentSweepId: 0,
+  activeBlips: [],
+  airspacesInRange: [],
+  landMasses: LAND_MASS_OUTLINES,
+  landMassSourceId: null,
+  landMassSourceName: null,
   lastPingedAircraft: null,
   selectedAircraftKey: null,
   displayOnlySelected: false,
@@ -910,6 +925,394 @@ function projectOffsetsKm(originLat, originLon, targetLat, targetLon) {
   const eastKm = EARTH_RADIUS_KM * dLonRad * Math.cos(meanLatRad);
   const northKm = EARTH_RADIUS_KM * dLatRad;
   return { eastKm, northKm };
+}
+
+function simplifyOutlinePoints(points, minSpacingKm = LAND_MASS_MIN_VERTEX_SPACING_KM) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return [];
+  }
+
+  const validPoints = [];
+  for (const point of points) {
+    if (!point) {
+      continue;
+    }
+
+    const lat = Number(point.lat);
+    const lon = Number(point.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      continue;
+    }
+
+    validPoints.push({ lat, lon });
+  }
+
+  if (validPoints.length < 3) {
+    return validPoints;
+  }
+
+  const simplified = [];
+  let previousKept = null;
+
+  for (let index = 0; index < validPoints.length; index += 1) {
+    const point = validPoints[index];
+    if (!previousKept) {
+      previousKept = point;
+      simplified.push(point);
+      continue;
+    }
+
+    const isLastPoint = index === validPoints.length - 1;
+    const spacingKm = haversine(previousKept.lat, previousKept.lon, point.lat, point.lon);
+    if (isLastPoint || !Number.isFinite(spacingKm) || spacingKm >= minSpacingKm) {
+      previousKept = point;
+      simplified.push(point);
+    }
+  }
+
+  return simplified.length >= 3 ? simplified : validPoints;
+}
+
+function convertGeoJsonToOutlines(geoJson, options = {}) {
+  if (!geoJson) {
+    return [];
+  }
+
+  const receiverLat = Number(state.receiver?.lat);
+  const receiverLon = Number(state.receiver?.lon);
+  const receiverReady = Number.isFinite(receiverLat) && Number.isFinite(receiverLon);
+
+  const {
+    maxDistanceKm = LAND_MASS_MAX_DISTANCE_KM,
+    minVertexSpacingKm = LAND_MASS_MIN_VERTEX_SPACING_KM,
+  } = options;
+
+  const features = [];
+  if (geoJson.type === 'FeatureCollection' && Array.isArray(geoJson.features)) {
+    features.push(...geoJson.features);
+  } else if (geoJson.type === 'Feature') {
+    features.push(geoJson);
+  } else if (geoJson.type === 'Polygon' || geoJson.type === 'MultiPolygon') {
+    features.push({ type: 'Feature', geometry: geoJson });
+  } else {
+    return [];
+  }
+
+  const outlines = [];
+
+  for (const feature of features) {
+    const geometry = feature?.geometry || feature;
+    if (!geometry) {
+      continue;
+    }
+
+    const polygons = [];
+    if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates)) {
+      polygons.push(geometry.coordinates);
+    } else if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+      polygons.push(...geometry.coordinates);
+    } else {
+      continue;
+    }
+
+    const rawName =
+      typeof feature?.properties?.name === 'string'
+        ? feature.properties.name
+        : typeof feature?.properties?.NAME === 'string'
+          ? feature.properties.NAME
+          : null;
+    const trimmedName = rawName ? rawName.trim() : '';
+
+    for (const polygon of polygons) {
+      const outerRing = Array.isArray(polygon?.[0]) ? polygon[0] : null;
+      if (!outerRing || outerRing.length < 4) {
+        continue;
+      }
+
+      const outlinePoints = [];
+      let minDistance = Infinity;
+
+      for (const coordinate of outerRing) {
+        if (!Array.isArray(coordinate) || coordinate.length < 2) {
+          continue;
+        }
+
+        const lon = Number(coordinate[0]);
+        const lat = Number(coordinate[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          continue;
+        }
+
+        outlinePoints.push({ lat, lon });
+
+        if (receiverReady && Number.isFinite(maxDistanceKm)) {
+          const { eastKm, northKm } = projectOffsetsKm(receiverLat, receiverLon, lat, lon);
+          const distanceKm = Math.sqrt(eastKm * eastKm + northKm * northKm);
+          if (Number.isFinite(distanceKm)) {
+            minDistance = Math.min(minDistance, distanceKm);
+          }
+        }
+      }
+
+      if (outlinePoints.length < 3) {
+        continue;
+      }
+
+      const first = outlinePoints[0];
+      const last = outlinePoints[outlinePoints.length - 1];
+      if (first && last && Math.abs(first.lat - last.lat) < 1e-6 && Math.abs(first.lon - last.lon) < 1e-6) {
+        outlinePoints.pop();
+      }
+
+      const simplified = simplifyOutlinePoints(outlinePoints, minVertexSpacingKm);
+      if (simplified.length < 3) {
+        continue;
+      }
+
+      if (
+        receiverReady
+        && Number.isFinite(maxDistanceKm)
+        && minDistance !== Infinity
+        && minDistance > maxDistanceKm
+      ) {
+        continue;
+      }
+
+      const points = simplified.map((point) => Object.freeze({ lat: point.lat, lon: point.lon }));
+      outlines.push(
+        Object.freeze({
+          id: feature?.id || null,
+          name: trimmedName || null,
+          points: Object.freeze(points),
+        }),
+      );
+    }
+  }
+
+  return outlines;
+}
+
+function getLandMassPattern(context) {
+  if (!context) {
+    return null;
+  }
+
+  if (cachedLandMassPattern) {
+    return cachedLandMassPattern;
+  }
+
+  const size = 16;
+  const spacing = 6;
+  const patternCanvas = document.createElement('canvas');
+  patternCanvas.width = size;
+  patternCanvas.height = size;
+
+  const patternCtx = patternCanvas.getContext('2d');
+  if (!patternCtx) {
+    return null;
+  }
+
+  patternCtx.clearRect(0, 0, size, size);
+  patternCtx.fillStyle = 'rgba(64, 196, 255, 0.035)';
+  patternCtx.fillRect(0, 0, size, size);
+  patternCtx.strokeStyle = 'rgba(64, 196, 255, 0.12)';
+  patternCtx.lineWidth = 1;
+
+  for (let offset = -size; offset <= size; offset += spacing) {
+    patternCtx.beginPath();
+    patternCtx.moveTo(offset, size);
+    patternCtx.lineTo(offset + size, 0);
+    patternCtx.stroke();
+  }
+
+  cachedLandMassPattern = context.createPattern(patternCanvas, 'repeat');
+  return cachedLandMassPattern;
+}
+
+function projectRadarPoint(lat, lon, centerX, centerY, radarRadius, radarRangeKm) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+
+  if (!Number.isFinite(radarRangeKm) || radarRangeKm <= 0) {
+    return null;
+  }
+
+  const { eastKm, northKm } = projectOffsetsKm(
+    state.receiver.lat,
+    state.receiver.lon,
+    lat,
+    lon,
+  );
+
+  const distanceKm = Math.sqrt(eastKm * eastKm + northKm * northKm);
+  if (!Number.isFinite(distanceKm)) {
+    return null;
+  }
+
+  const angleRad = Math.atan2(eastKm, northKm);
+  const clampedDistanceKm = Math.min(distanceKm, radarRangeKm);
+  const radius = (clampedDistanceKm / radarRangeKm) * radarRadius;
+
+  return {
+    x: centerX + Math.sin(angleRad) * radius,
+    y: centerY - Math.cos(angleRad) * radius,
+    distanceKm,
+  };
+}
+
+function drawLandMasses(centerX, centerY, radarRadius, radarRangeKm) {
+  const outlines = state.landMasses;
+  if (!Array.isArray(outlines) || outlines.length === 0) {
+    return;
+  }
+
+  if (!Number.isFinite(radarRadius) || radarRadius <= 0) {
+    return;
+  }
+
+  if (!Number.isFinite(radarRangeKm) || radarRangeKm <= 0) {
+    return;
+  }
+
+  const pattern = getLandMassPattern(ctx);
+  const fallbackFill = 'rgba(64, 196, 255, 0.05)';
+  const outlineColor = 'rgba(64, 196, 255, 0.2)';
+  const outlineWidth = Math.max(1, radarRadius * 0.0015);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
+  ctx.clip();
+
+  for (const outline of outlines) {
+    const points = Array.isArray(outline?.points) ? outline.points : null;
+    if (!points || points.length < 3) {
+      continue;
+    }
+
+    const projected = [];
+    for (const point of points) {
+      const projectedPoint = projectRadarPoint(
+        point?.lat,
+        point?.lon,
+        centerX,
+        centerY,
+        radarRadius,
+        radarRangeKm,
+      );
+
+      if (projectedPoint) {
+        projected.push(projectedPoint);
+      }
+    }
+
+    if (projected.length < 3) {
+      continue;
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(projected[0].x, projected[0].y);
+    for (let i = 1; i < projected.length; i += 1) {
+      ctx.lineTo(projected[i].x, projected[i].y);
+    }
+    ctx.closePath();
+
+    if (pattern) {
+      ctx.fillStyle = pattern;
+      ctx.globalAlpha = 0.6;
+      ctx.fill();
+    } else {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = fallbackFill;
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = outlineWidth;
+    ctx.strokeStyle = outlineColor;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function rebuildLandMassOutlines({ silent = false } = {}) {
+  if (!landMassGeoJsonCache) {
+    return;
+  }
+
+  const options = {
+    maxDistanceKm: activeLandMassSettings?.maxDistanceKm ?? LAND_MASS_MAX_DISTANCE_KM,
+    minVertexSpacingKm: activeLandMassSettings?.minVertexSpacingKm ?? LAND_MASS_MIN_VERTEX_SPACING_KM,
+  };
+
+  const outlines = convertGeoJsonToOutlines(landMassGeoJsonCache, options);
+  if (outlines.length === 0) {
+    return;
+  }
+
+  state.landMasses = outlines;
+  if (!silent && state.landMassSourceName) {
+    showMessage(`Coastline recentered for ${state.landMassSourceName}.`, { duration: DISPLAY_TIMEOUT_MS * 2 });
+  }
+}
+
+async function loadLandMassOutlines() {
+  const sources = Array.isArray(LAND_MASS_SOURCES) ? LAND_MASS_SOURCES : [];
+  if (sources.length === 0) {
+    return;
+  }
+
+  for (const source of sources) {
+    if (!source || typeof source.url !== 'string' || !source.url) {
+      continue;
+    }
+
+    const timeoutMs = Number.isFinite(source.timeoutMs) ? source.timeoutMs : 10000;
+    const maxDistanceKm = Number.isFinite(source.maxDistanceKm)
+      ? source.maxDistanceKm
+      : LAND_MASS_MAX_DISTANCE_KM;
+    const minVertexSpacingKm = Number.isFinite(source.minVertexSpacingKm)
+      ? source.minVertexSpacingKm
+      : LAND_MASS_MIN_VERTEX_SPACING_KM;
+
+    try {
+      const geoJson = await fetchJson(source.url, { timeout: timeoutMs });
+      const outlines = convertGeoJsonToOutlines(geoJson, {
+        maxDistanceKm,
+        minVertexSpacingKm,
+      });
+
+      if (outlines.length === 0) {
+        console.warn('Landmass source returned no usable outlines', source);
+        continue;
+      }
+
+      landMassGeoJsonCache = geoJson;
+      activeLandMassSettings = { maxDistanceKm, minVertexSpacingKm };
+      state.landMasses = outlines;
+      state.landMassSourceId = typeof source.id === 'string' ? source.id : null;
+      state.landMassSourceName = typeof source.name === 'string' ? source.name : null;
+
+      const notice = state.landMassSourceName || 'coastline data';
+      showMessage(`Loaded ${notice}.`, { duration: DISPLAY_TIMEOUT_MS * 2 });
+      return;
+    } catch (error) {
+      console.warn('Failed to load landmass outlines', source.url, error);
+    }
+  }
+
+  if (!Array.isArray(state.landMasses) || state.landMasses.length === 0) {
+    state.landMasses = Array.isArray(LAND_MASS_OUTLINES) ? LAND_MASS_OUTLINES : [];
+    if (!state.landMasses.length) {
+      showMessage('Coastline data unavailable. Update LAND_MASS_SOURCES to supply map outlines.', {
+        duration: DISPLAY_TIMEOUT_MS * 2,
+      });
+    }
+  }
 }
 
 // Estimate how close an aircraft's current trajectory will bring it to the
@@ -1797,8 +2200,9 @@ function updateAircraftInfo() {
 }
 
 function updateStatus() {
-  const status = state.dataConnectionOk ? 'Connected' : 'Waiting for data…';
-  statusEl.textContent = status;
+  const status = state.dataConnectionOk ? 'Connected' : 'Waiting for data…';
+  const mapLabel = state.landMassSourceName ? ` • Map: ${state.landMassSourceName}` : '';
+  statusEl.textContent = `${status}${mapLabel}`;
 }
 
 function resizeCanvas() {
@@ -1999,15 +2403,16 @@ async function fetchReceiverLocation() {
     const data = await fetchJson(buildUrl('receiver.json'));
     if (typeof data.lat === 'number' && typeof data.lon === 'number') {
       state.receiver.lat = data.lat;
-      state.receiver.lon = data.lon;
-      state.receiver.hasOverride = true;
-      writeCookie('receiverLat', String(data.lat));
-      writeCookie('receiverLon', String(data.lon));
-      updateReceiverInfo();
-    }
-  } catch (error) {
-    console.warn('Failed to fetch receiver location', error);
-  }
+      state.receiver.lon = data.lon;
+      state.receiver.hasOverride = true;
+      writeCookie('receiverLat', String(data.lat));
+      writeCookie('receiverLon', String(data.lon));
+      updateReceiverInfo();
+      rebuildLandMassOutlines({ silent: true });
+    }
+  } catch (error) {
+    console.warn('Failed to fetch receiver location', error);
+  }
 }
 
 async function pollData() {
@@ -2381,20 +2786,22 @@ function drawRadar(deltaTime) {
   ctx.rotate(rotationRad);
   ctx.translate(-centerX, -centerY);
 
-  // background glow
-  const gradient = ctx.createRadialGradient(centerX, centerY, radarRadius * 0.1, centerX, centerY, radarRadius);
-  gradient.addColorStop(0, 'rgba(53, 255, 153, 0.25)');
-  gradient.addColorStop(1, 'rgba(11, 14, 23, 0)');
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
-  ctx.fill();
+  // background glow
+  const gradient = ctx.createRadialGradient(centerX, centerY, radarRadius * 0.1, centerX, centerY, radarRadius);
+  gradient.addColorStop(0, 'rgba(53, 255, 153, 0.25)');
+  gradient.addColorStop(1, 'rgba(11, 14, 23, 0)');
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
+  ctx.fill();
 
-  ctx.lineWidth = Math.max(1, radarRadius * 0.0025);
-  ctx.strokeStyle = 'rgba(53,255,153,0.35)';
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
-  ctx.stroke();
+  drawLandMasses(centerX, centerY, radarRadius, radarRangeKm);
+
+  ctx.lineWidth = Math.max(1, radarRadius * 0.0025);
+  ctx.strokeStyle = 'rgba(53,255,153,0.35)';
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.beginPath();
   ctx.arc(centerX, centerY, radarRadius * 0.66, 0, Math.PI * 2);
   ctx.stroke();
@@ -2598,6 +3005,9 @@ updateRangeInfo();
 updateReceiverInfo();
 updateAircraftInfo();
 enqueueTickerMessage('Welcome To Radar1090', { key: 'welcome' });
+loadLandMassOutlines().catch((error) => {
+  console.warn('Unable to load coastline data', error);
+});
 fetchReceiverLocation().catch(() => {});
 pollData();
 requestAnimationFrame(loop);
