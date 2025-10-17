@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.0';
+const APP_VERSION = 'V1.9.5';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -346,18 +346,297 @@ function getBlipMarkerHeight(blip, radarRadius) {
 }
 
 function getBlipMarkerWidth(blip, radarRadius) {
-  const scale = getBlipIconScale(blip);
-  const iconState = getIconState(blip);
-  if (iconState?.ready) {
-    return radarRadius * 0.14 * scale;
-  }
-  return radarRadius * 0.04 * scale;
+  const scale = getBlipIconScale(blip);
+  const iconState = getIconState(blip);
+  if (iconState?.ready) {
+    return radarRadius * 0.14 * scale;
+  }
+  return radarRadius * 0.04 * scale;
+}
+
+function getBlipIconBounds(blip, markerWidth, markerHeight) {
+  const headingRad = Number.isFinite(blip?.heading) ? deg2rad(blip.heading) : 0;
+  const halfWidth = markerWidth / 2;
+  const halfHeight = markerHeight / 2;
+  const absCos = Math.abs(Math.cos(headingRad));
+  const absSin = Math.abs(Math.sin(headingRad));
+  const rotatedHalfWidth = halfWidth * absCos + halfHeight * absSin;
+  const rotatedHalfHeight = halfWidth * absSin + halfHeight * absCos;
+
+  return {
+    x: blip.x - rotatedHalfWidth,
+    y: blip.y - rotatedHalfHeight,
+    width: rotatedHalfWidth * 2,
+    height: rotatedHalfHeight * 2,
+  };
+}
+
+function rectanglesOverlap(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+
+function expandBounds(bounds, margin) {
+  return {
+    x: bounds.x - margin,
+    y: bounds.y - margin,
+    width: bounds.width + margin * 2,
+    height: bounds.height + margin * 2,
+  };
+}
+
+function measureLabelDimensions(text, fontSize) {
+  if (!text) {
+    return null;
+  }
+
+  ctx.save();
+  ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+  const metrics = ctx.measureText(text);
+  ctx.restore();
+
+  const ascent = Number.isFinite(metrics.actualBoundingBoxAscent)
+    ? metrics.actualBoundingBoxAscent
+    : fontSize * 0.78;
+  const descent = Number.isFinite(metrics.actualBoundingBoxDescent)
+    ? metrics.actualBoundingBoxDescent
+    : fontSize * 0.22;
+
+  return {
+    width: metrics.width,
+    height: Math.max(fontSize * 0.9, ascent + descent),
+  };
+}
+
+function clampCalloutWithinViewport({
+  boxX,
+  boxY,
+  textWidth,
+  textHeight,
+  margin,
+  viewportWidth,
+  viewportHeight,
+}) {
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight)) {
+    return { boxX, boxY };
+  }
+
+  const horizontalSlack = viewportWidth - textWidth;
+  const verticalSlack = viewportHeight - textHeight;
+
+  let clampedX = boxX;
+  if (horizontalSlack <= 0) {
+    clampedX = 0;
+  } else {
+    const minX = margin;
+    const maxX = viewportWidth - textWidth - margin;
+    clampedX = Math.min(Math.max(clampedX, minX), Math.max(minX, maxX));
+  }
+
+  let clampedY = boxY;
+  if (verticalSlack <= 0) {
+    clampedY = 0;
+  } else {
+    const minY = margin;
+    const maxY = viewportHeight - textHeight - margin;
+    clampedY = Math.min(Math.max(clampedY, minY), Math.max(minY, maxY));
+  }
+
+  if (
+    clampedX + textWidth < 0 ||
+    clampedX > viewportWidth ||
+    clampedY + textHeight < 0 ||
+    clampedY > viewportHeight
+  ) {
+    return null;
+  }
+
+  return { boxX: clampedX, boxY: clampedY };
+}
+
+function computeCalloutPlacement({
+  text,
+  blip,
+  fontSize,
+  markerWidth,
+  markerHeight,
+  existingPlacements,
+  iconBounds = [],
+  viewportWidth,
+  viewportHeight,
+}) {
+  const dimensions = measureLabelDimensions(text, fontSize);
+  if (!dimensions) {
+    return null;
+  }
+
+  const textWidth = dimensions.width;
+  const textHeight = dimensions.height;
+  const margin = fontSize * 0.35;
+  const baseDistance = Math.max(markerWidth, markerHeight) * 0.65 + fontSize * 1.25;
+  const stepDistance = fontSize * 1.05;
+  const maxAttempts = 10;
+
+  const planeBounds = expandBounds(
+    {
+      x: blip.x - markerWidth / 2,
+      y: blip.y - markerHeight / 2,
+      width: markerWidth,
+      height: markerHeight,
+    },
+    margin,
+  );
+
+  // Candidate offsets around the blip prioritized to favor quadrant callouts first.
+  const directions = [
+    { dx: 1, dy: -0.55, align: 'left' },
+    { dx: 1, dy: 0.55, align: 'left' },
+    { dx: -1, dy: -0.55, align: 'right' },
+    { dx: -1, dy: 0.55, align: 'right' },
+    { dx: 0, dy: -1, align: 'center' },
+    { dx: 0, dy: 1, align: 'center' },
+    { dx: 0.85, dy: -1, align: 'left' },
+    { dx: 0.85, dy: 1, align: 'left' },
+    { dx: -0.85, dy: -1, align: 'right' },
+    { dx: -0.85, dy: 1, align: 'right' },
+    { dx: 1, dy: 0, align: 'left' },
+    { dx: -1, dy: 0, align: 'right' },
+  ];
+
+  // Walk each candidate direction and progressively increase the distance
+  // until we find a placement that clears the icon and existing callouts.
+  for (const direction of directions) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const distance = baseDistance + attempt * stepDistance;
+      let anchorX = blip.x + direction.dx * distance;
+      let anchorY = blip.y + direction.dy * distance;
+
+      let boxX = anchorX;
+      if (direction.align === 'right') {
+        boxX = anchorX - textWidth;
+      } else if (direction.align === 'center') {
+        boxX = anchorX - textWidth / 2;
+      }
+      let boxY = anchorY - textHeight / 2;
+
+      const clamped = clampCalloutWithinViewport({
+        boxX,
+        boxY,
+        textWidth,
+        textHeight,
+        margin,
+        viewportWidth,
+        viewportHeight,
+      });
+
+      if (!clamped) {
+        continue;
+      }
+
+      boxX = clamped.boxX;
+      boxY = clamped.boxY;
+
+      if (direction.align === 'right') {
+        anchorX = boxX + textWidth;
+      } else if (direction.align === 'center') {
+        anchorX = boxX + textWidth / 2;
+      } else {
+        anchorX = boxX;
+      }
+
+      anchorY = boxY + textHeight / 2;
+
+      const bounds = { x: boxX, y: boxY, width: textWidth, height: textHeight };
+      const expandedBounds = expandBounds(bounds, margin);
+
+      if (rectanglesOverlap(expandedBounds, planeBounds)) {
+        continue;
+      }
+
+      const intersectsIcon = iconBounds.some((entry) => {
+        if (!entry) {
+          return false;
+        }
+
+        const targetBounds = entry.bounds || entry;
+        if (!targetBounds) {
+          return false;
+        }
+
+        if (entry.blip === blip) {
+          return false;
+        }
+
+        return rectanglesOverlap(expandedBounds, targetBounds);
+      });
+
+      if (intersectsIcon) {
+        continue;
+      }
+
+      const overlapsExisting = existingPlacements.some((placement) =>
+        rectanglesOverlap(expandedBounds, placement.expandedBounds),
+      );
+
+      if (overlapsExisting) {
+        continue;
+      }
+
+      const pointerTargetX =
+        direction.align === 'left'
+          ? boxX - margin * 0.4
+          : direction.align === 'right'
+          ? boxX + textWidth + margin * 0.4
+          : anchorX;
+      const pointerTargetY = anchorY;
+
+      const pointerVecX = anchorX - blip.x;
+      const pointerVecY = anchorY - blip.y;
+      const pointerVecLength = Math.hypot(pointerVecX, pointerVecY) || 1;
+      const pointerStart = {
+        x: blip.x + (pointerVecX / pointerVecLength) * markerWidth * 0.45,
+        y: blip.y + (pointerVecY / pointerVecLength) * markerHeight * 0.45,
+      };
+      const pointerEnd = { x: pointerTargetX, y: pointerTargetY };
+
+      const vecX = pointerEnd.x - pointerStart.x;
+      const vecY = pointerEnd.y - pointerStart.y;
+      const length = Math.hypot(vecX, vecY) || 1;
+      const midX = (pointerStart.x + pointerEnd.x) / 2;
+      const midY = (pointerStart.y + pointerEnd.y) / 2;
+      const controlOffset = Math.min(fontSize * 1.15, length * 0.35);
+      const normalX = (-vecY / length) * controlOffset;
+      const normalY = (vecX / length) * controlOffset;
+      const pointerControl = {
+        x: midX + normalX,
+        y: midY + normalY,
+      };
+
+      return {
+        anchorX,
+        anchorY,
+        textAlign: direction.align,
+        textBaseline: 'middle',
+        bounds,
+        expandedBounds,
+        pointerStart,
+        pointerEnd,
+        pointerControl,
+      };
+    }
+  }
+
+  return null;
 }
 
 function createTransparentIconCanvas(image) {
-  const width = image.naturalWidth || image.width;
-  const height = image.naturalHeight || image.height;
-  if (!width || !height) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  if (!width || !height) {
     throw new Error('Icon has invalid dimensions');
   }
 
@@ -2922,7 +3201,39 @@ function drawRadar(deltaTime) {
   const rotationPeriod = state.rotationPeriodMs || (360 / sweepSpeed) * 1000;
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
-  // draw blips
+  const showAircraftDetails = state.showAircraftDetails;
+  const labelPlacements = [];
+  const iconCollisionBounds = [];
+  const blipMarkerDimensions = new Map();
+  const latestBlipByAircraft = showAircraftDetails ? new Map() : null;
+
+  if (showAircraftDetails) {
+    state.activeBlips.forEach((blip) => {
+      const markerWidth = getBlipMarkerWidth(blip, radarRadius);
+      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
+      blipMarkerDimensions.set(blip, { markerWidth, markerHeight });
+      const baseBounds = getBlipIconBounds(blip, markerWidth, markerHeight);
+      const padding = Math.max(markerWidth, markerHeight) * 0.12;
+      iconCollisionBounds.push({
+        blip,
+        bounds: expandBounds(baseBounds, padding),
+      });
+
+      if (latestBlipByAircraft) {
+        const labelKey = blip.key || blip.hex || blip.flight || null;
+        if (!labelKey) {
+          return;
+        }
+
+        const currentLatest = latestBlipByAircraft.get(labelKey);
+        if (!currentLatest || blip.spawn > currentLatest.spawn) {
+          latestBlipByAircraft.set(labelKey, blip);
+        }
+      }
+    });
+  }
+
+  // draw blips
   for (const blip of state.activeBlips) {
     const age = (now - blip.spawn) / rotationPeriod;
     const alpha = Math.max(0, 1 - age);
@@ -2946,41 +3257,63 @@ function drawRadar(deltaTime) {
 
     drawBlipMarker(blip, radarRadius, alpha);
 
-    const showAircraftDetails = state.showAircraftDetails;
-
-    if (showAircraftDetails) {
-      const fontSize = Math.round(radarRadius * 0.055);
-      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-      const verticalSpacing = fontSize * 0.45;
+    if (showAircraftDetails) {
+      const fontSize = Math.max(10, Math.round(radarRadius * 0.045));
+      const dimensions = blipMarkerDimensions.get(blip);
+      const markerWidth = dimensions?.markerWidth ?? getBlipMarkerWidth(blip, radarRadius);
+      const markerHeight = dimensions?.markerHeight ?? getBlipMarkerHeight(blip, radarRadius);
       const identifierRaw = blip.flight || blip.hex || 'Unknown';
       const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
-      const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
 
-      const drawAircraftLabel = (text, anchorX, anchorY, align, baseline) => {
-        if (!text) {
-          return;
+      if (identifier) {
+        const labelKey = blip.key || blip.hex || blip.flight || null;
+        if (labelKey && latestBlipByAircraft && latestBlipByAircraft.get(labelKey) !== blip) {
+          continue;
         }
 
-        drawUprightAt(anchorX, anchorY, () => {
-          ctx.save();
-          ctx.globalAlpha = labelAlpha;
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-          ctx.textAlign = align;
-          ctx.textBaseline = baseline;
-          ctx.fillText(text, anchorX, anchorY);
-          ctx.restore();
-        });
-      };
+        const placement = computeCalloutPlacement({
+          text: identifier,
+          blip,
+          fontSize,
+          markerWidth,
+          markerHeight,
+          existingPlacements: labelPlacements,
+          iconBounds: iconCollisionBounds,
+          viewportWidth: canvas.width,
+          viewportHeight: canvas.height,
+        });
 
-      if (identifier) {
-        const identifierY = blip.y - markerHeight / 2 - verticalSpacing;
-        drawAircraftLabel(identifier, blip.x, identifierY, 'center', 'bottom');
-      }
+        if (placement) {
+          drawUpright(() => {
+            // Draw a short curved leader that links the callout back to the aircraft blip.
+            ctx.save();
+            ctx.globalAlpha = labelAlpha;
+            ctx.strokeStyle = 'rgba(82, 255, 194, 0.8)';
+            ctx.lineWidth = Math.max(1.1, fontSize * 0.075);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(placement.pointerStart.x, placement.pointerStart.y);
+            ctx.quadraticCurveTo(
+              placement.pointerControl.x,
+              placement.pointerControl.y,
+              placement.pointerEnd.x,
+              placement.pointerEnd.y,
+            );
+            ctx.stroke();
+            ctx.restore();
 
-      if (altitudeLabel) {
-        const altitudeY = blip.y + markerHeight / 2 + verticalSpacing;
-        drawAircraftLabel(altitudeLabel, blip.x, altitudeY, 'center', 'top');
+            ctx.save();
+            ctx.globalAlpha = labelAlpha;
+            ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+            ctx.textAlign = placement.textAlign;
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(255,255,255,0.88)';
+            ctx.fillText(identifier, placement.anchorX, placement.anchorY);
+            ctx.restore();
+          });
+
+          labelPlacements.push(placement);
+        }
       }
     }
   }
