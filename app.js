@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.0';
+const APP_VERSION = 'V1.10.0';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -2681,10 +2681,195 @@ function drawBlipMarker(blip, radarRadius, alpha) {
   ctx.restore();
 }
 
+function measureLabelMetrics(text, fontSize) {
+  ctx.save();
+  ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+  const metrics = ctx.measureText(text);
+  ctx.restore();
+
+  const width = metrics.width;
+  const ascent = metrics.actualBoundingBoxAscent ?? 0;
+  const descent = metrics.actualBoundingBoxDescent ?? 0;
+  const height = Math.max(fontSize, ascent + descent);
+  return { width, height };
+}
+
+function getLabelBoundingBox(anchorX, anchorY, align, baseline, width, height) {
+  let left = anchorX;
+  let right = anchorX;
+  if (align === 'center') {
+    left = anchorX - width / 2;
+    right = anchorX + width / 2;
+  } else if (align === 'right') {
+    left = anchorX - width;
+    right = anchorX;
+  } else {
+    right = anchorX + width;
+  }
+
+  let top = anchorY;
+  let bottom = anchorY;
+  if (baseline === 'top') {
+    top = anchorY;
+    bottom = anchorY + height;
+  } else if (baseline === 'middle') {
+    top = anchorY - height / 2;
+    bottom = anchorY + height / 2;
+  } else {
+    // Treat 'bottom' and all other baselines as referencing the lower edge.
+    top = anchorY - height;
+    bottom = anchorY;
+  }
+
+  return { left, top, right, bottom };
+}
+
+function expandBoundingBox(rect, padding) {
+  return {
+    left: rect.left - padding,
+    top: rect.top - padding,
+    right: rect.right + padding,
+    bottom: rect.bottom + padding,
+  };
+}
+
+function boxesOverlap(a, b) {
+  return (
+    a.left < b.right &&
+    a.right > b.left &&
+    a.top < b.bottom &&
+    a.bottom > b.top
+  );
+}
+
+function getLabelOffsetCandidates(preferredPosition, fontSize) {
+  const lateral = fontSize * 2.2;
+  const vertical = fontSize * 1.1;
+  const longVertical = fontSize * 2.3;
+  const shortLateral = fontSize * 1.2;
+
+  if (preferredPosition === 'top') {
+    return [
+      { dx: 0, dy: 0 },
+      { dx: lateral, dy: -vertical * 0.25 },
+      { dx: -lateral, dy: -vertical * 0.25 },
+      { dx: lateral, dy: -vertical },
+      { dx: -lateral, dy: -vertical },
+      { dx: 0, dy: -longVertical },
+      { dx: shortLateral, dy: -longVertical * 0.8 },
+      { dx: -shortLateral, dy: -longVertical * 0.8 },
+      { dx: lateral, dy: vertical },
+      { dx: -lateral, dy: vertical },
+    ];
+  }
+
+  return [
+    { dx: 0, dy: 0 },
+    { dx: lateral, dy: vertical * 0.25 },
+    { dx: -lateral, dy: vertical * 0.25 },
+    { dx: lateral, dy: vertical },
+    { dx: -lateral, dy: vertical },
+    { dx: 0, dy: longVertical },
+    { dx: shortLateral, dy: longVertical * 0.8 },
+    { dx: -shortLateral, dy: longVertical * 0.8 },
+    { dx: lateral, dy: -vertical },
+    { dx: -lateral, dy: -vertical },
+  ];
+}
+
+function resolveLabelPlacements(labelRequests) {
+  if (!labelRequests || labelRequests.length === 0) {
+    return [];
+  }
+
+  const placements = [];
+
+  for (const request of labelRequests) {
+    const metrics = measureLabelMetrics(request.text, request.fontSize);
+    const padding = Math.max(2, request.fontSize * 0.3);
+    const candidates = getLabelOffsetCandidates(request.preferredPosition, request.fontSize);
+    let chosenPlacement = null;
+    let fallbackPlacement = null;
+
+    for (const offset of candidates) {
+      const anchorX = request.initialAnchorX + offset.dx;
+      const anchorY = request.initialAnchorY + offset.dy;
+      const boundingBox = expandBoundingBox(
+        getLabelBoundingBox(anchorX, anchorY, request.align, request.baseline, metrics.width, metrics.height),
+        padding,
+      );
+
+      const overlaps = placements.some((placed) => boxesOverlap(boundingBox, placed.boundingBox));
+      const placement = {
+        request,
+        anchorX,
+        anchorY,
+        boundingBox,
+        offsetApplied: offset.dx !== 0 || offset.dy !== 0,
+      };
+
+      if (!overlaps) {
+        chosenPlacement = placement;
+        break;
+      }
+
+      fallbackPlacement = placement;
+    }
+
+    placements.push(chosenPlacement ?? fallbackPlacement);
+  }
+
+  return placements.filter(Boolean);
+}
+
+function drawLabelCallouts(labelPlacements, drawUprightAt) {
+  if (!labelPlacements || labelPlacements.length === 0) {
+    return;
+  }
+
+  for (const placement of labelPlacements) {
+    const { request, boundingBox, offsetApplied } = placement;
+    if (!offsetApplied || request.alpha <= 0) {
+      continue;
+    }
+
+    const endX = clamp(request.originX, boundingBox.left, boundingBox.right);
+    const endY = clamp(request.originY, boundingBox.top, boundingBox.bottom);
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.9, request.alpha);
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = Math.max(1, request.fontSize * 0.12);
+    ctx.beginPath();
+    ctx.moveTo(request.originX, request.originY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  for (const placement of labelPlacements) {
+    const { request, anchorX, anchorY } = placement;
+    if (request.alpha <= 0) {
+      continue;
+    }
+
+    drawUprightAt(anchorX, anchorY, () => {
+      ctx.save();
+      ctx.globalAlpha = request.alpha;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.font = `${request.fontSize}px "Share Tech Mono", monospace`;
+      ctx.textAlign = request.align;
+      ctx.textBaseline = request.baseline;
+      ctx.fillText(request.text, anchorX, anchorY);
+      ctx.restore();
+    });
+  }
+}
+
 function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radarRangeKm, drawUprightTextAt) {
-  if (!airspaces || airspaces.length === 0) {
-    return;
-  }
+  if (!airspaces || airspaces.length === 0) {
+    return;
+  }
 
   ctx.save();
   ctx.lineWidth = Math.max(1, radarRadius * 0.002);
@@ -2919,10 +3104,13 @@ function drawRadar(deltaTime) {
     state.activeBlips.push(...newBlips);
   }
 
-  const rotationPeriod = state.rotationPeriodMs || (360 / sweepSpeed) * 1000;
-  state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
+  const rotationPeriod = state.rotationPeriodMs || (360 / sweepSpeed) * 1000;
+  state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
-  // draw blips
+  const showAircraftDetails = state.showAircraftDetails;
+  const labelRequests = [];
+
+  // draw blips
   for (const blip of state.activeBlips) {
     const age = (now - blip.spawn) / rotationPeriod;
     const alpha = Math.max(0, 1 - age);
@@ -2946,49 +3134,54 @@ function drawRadar(deltaTime) {
 
     drawBlipMarker(blip, radarRadius, alpha);
 
-    const showAircraftDetails = state.showAircraftDetails;
-
-    if (showAircraftDetails) {
-      const fontSize = Math.round(radarRadius * 0.055);
+    if (showAircraftDetails && labelAlpha > 0) {
+      const fontSize = Math.round(radarRadius * 0.055);
       const markerHeight = getBlipMarkerHeight(blip, radarRadius);
       const verticalSpacing = fontSize * 0.45;
       const identifierRaw = blip.flight || blip.hex || 'Unknown';
       const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
       const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
 
-      const drawAircraftLabel = (text, anchorX, anchorY, align, baseline) => {
+      const enqueueLabel = (text, anchorX, anchorY, align, baseline, preferredPosition) => {
         if (!text) {
           return;
         }
 
-        drawUprightAt(anchorX, anchorY, () => {
-          ctx.save();
-          ctx.globalAlpha = labelAlpha;
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-          ctx.textAlign = align;
-          ctx.textBaseline = baseline;
-          ctx.fillText(text, anchorX, anchorY);
-          ctx.restore();
-        });
-      };
+        labelRequests.push({
+          text,
+          align,
+          baseline,
+          fontSize,
+          initialAnchorX: anchorX,
+          initialAnchorY: anchorY,
+          preferredPosition,
+          originX: blip.x,
+          originY: blip.y,
+          alpha: labelAlpha,
+        });
+      };
 
-      if (identifier) {
-        const identifierY = blip.y - markerHeight / 2 - verticalSpacing;
-        drawAircraftLabel(identifier, blip.x, identifierY, 'center', 'bottom');
-      }
+      if (identifier) {
+        const identifierY = blip.y - markerHeight / 2 - verticalSpacing;
+        enqueueLabel(identifier, blip.x, identifierY, 'center', 'bottom', 'top');
+      }
 
       if (altitudeLabel) {
         const altitudeY = blip.y + markerHeight / 2 + verticalSpacing;
-        drawAircraftLabel(altitudeLabel, blip.x, altitudeY, 'center', 'top');
+        enqueueLabel(altitudeLabel, blip.x, altitudeY, 'center', 'top', 'bottom');
       }
     }
   }
 
-  ctx.restore();
+  if (labelRequests.length > 0) {
+    const placements = resolveLabelPlacements(labelRequests);
+    drawLabelCallouts(placements, drawUprightAt);
+  }
 
-  updateMessage();
-  updateAircraftInfo();
+  ctx.restore();
+
+  updateMessage();
+  updateAircraftInfo();
 }
 
 function loop() {
