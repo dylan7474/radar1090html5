@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.10.0';
+const APP_VERSION = 'V1.10.1';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -2681,17 +2681,40 @@ function drawBlipMarker(blip, radarRadius, alpha) {
   ctx.restore();
 }
 
-function measureLabelMetrics(text, fontSize) {
+function measureLabelMetrics(lines, lineSpacing) {
+  if (!lines || lines.length === 0) {
+    return { width: 0, height: 0, lines: [], lineSpacing: lineSpacing ?? 0 };
+  }
+
+  const measuredLines = [];
+
   ctx.save();
-  ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-  const metrics = ctx.measureText(text);
+  for (const line of lines) {
+    const text = line?.text ?? '';
+    const fontSize = Math.max(1, line?.fontSize ?? 1);
+    ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+    const metrics = ctx.measureText(text);
+    const ascent = metrics.actualBoundingBoxAscent ?? 0;
+    const descent = metrics.actualBoundingBoxDescent ?? 0;
+    const height = Math.max(fontSize, ascent + descent);
+    measuredLines.push({
+      ...line,
+      width: metrics.width,
+      height,
+    });
+  }
   ctx.restore();
 
-  const width = metrics.width;
-  const ascent = metrics.actualBoundingBoxAscent ?? 0;
-  const descent = metrics.actualBoundingBoxDescent ?? 0;
-  const height = Math.max(fontSize, ascent + descent);
-  return { width, height };
+  const width = measuredLines.reduce((maxWidth, line) => Math.max(maxWidth, line.width), 0);
+  let totalHeight = 0;
+  for (let i = 0; i < measuredLines.length; i += 1) {
+    totalHeight += measuredLines[i].height;
+    if (i < measuredLines.length - 1) {
+      totalHeight += lineSpacing ?? 0;
+    }
+  }
+
+  return { width, height: totalHeight, lines: measuredLines, lineSpacing: lineSpacing ?? 0 };
 }
 
 function getLabelBoundingBox(anchorX, anchorY, align, baseline, width, height) {
@@ -2722,6 +2745,24 @@ function getLabelBoundingBox(anchorX, anchorY, align, baseline, width, height) {
   }
 
   return { left, top, right, bottom };
+}
+
+function computeLabelBlockPosition(anchorX, anchorY, align, baseline, width, height) {
+  let left = anchorX;
+  if (align === 'center') {
+    left = anchorX - width / 2;
+  } else if (align === 'right') {
+    left = anchorX - width;
+  }
+
+  let top = anchorY;
+  if (baseline === 'middle') {
+    top = anchorY - height / 2;
+  } else if (baseline !== 'top') {
+    top = anchorY - height;
+  }
+
+  return { left, top };
 }
 
 function expandBoundingBox(rect, padding) {
@@ -2785,26 +2826,51 @@ function resolveLabelPlacements(labelRequests) {
   const placements = [];
 
   for (const request of labelRequests) {
-    const metrics = measureLabelMetrics(request.text, request.fontSize);
-    const padding = Math.max(2, request.fontSize * 0.3);
-    const candidates = getLabelOffsetCandidates(request.preferredPosition, request.fontSize);
+    const lines = (request.lines || []).filter((line) => line && line.text);
+    if (lines.length === 0) {
+      continue;
+    }
+
+    const baseFontSize = request.fontSize ?? lines[0].fontSize ?? 12;
+    const lineSpacing = Number.isFinite(request.lineSpacing)
+      ? request.lineSpacing
+      : Math.max(2, Math.round(baseFontSize * 0.25));
+    const metrics = measureLabelMetrics(lines, lineSpacing);
+    if (metrics.width <= 0 || metrics.height <= 0) {
+      continue;
+    }
+
+    const collisionPadding = request.collisionPadding ?? Math.max(2, baseFontSize * 0.3);
+    const displayPadding = request.backgroundPadding ?? Math.max(2, baseFontSize * 0.25);
+    const candidates = getLabelOffsetCandidates(request.preferredPosition, baseFontSize);
     let chosenPlacement = null;
     let fallbackPlacement = null;
 
     for (const offset of candidates) {
       const anchorX = request.initialAnchorX + offset.dx;
       const anchorY = request.initialAnchorY + offset.dy;
-      const boundingBox = expandBoundingBox(
-        getLabelBoundingBox(anchorX, anchorY, request.align, request.baseline, metrics.width, metrics.height),
-        padding,
-      );
-
-      const overlaps = placements.some((placed) => boxesOverlap(boundingBox, placed.boundingBox));
-      const placement = {
-        request,
+      const textBounds = getLabelBoundingBox(
         anchorX,
         anchorY,
-        boundingBox,
+        request.align,
+        request.baseline,
+        metrics.width,
+        metrics.height,
+      );
+      const collisionBox = expandBoundingBox(textBounds, collisionPadding);
+      const displayBox = expandBoundingBox(textBounds, displayPadding);
+
+      const overlaps = placements.some(
+        (placed) => placed?.collisionBox && boxesOverlap(collisionBox, placed.collisionBox),
+      );
+
+      const placement = {
+        request: { ...request, lines },
+        anchorX,
+        anchorY,
+        collisionBox,
+        displayBox,
+        metrics: { ...metrics, lineSpacing },
         offsetApplied: offset.dx !== 0 || offset.dy !== 0,
       };
 
@@ -2816,10 +2882,13 @@ function resolveLabelPlacements(labelRequests) {
       fallbackPlacement = placement;
     }
 
-    placements.push(chosenPlacement ?? fallbackPlacement);
+    const finalPlacement = chosenPlacement ?? fallbackPlacement;
+    if (finalPlacement) {
+      placements.push(finalPlacement);
+    }
   }
 
-  return placements.filter(Boolean);
+  return placements;
 }
 
 function drawLabelCallouts(labelPlacements, drawUprightAt) {
@@ -2828,18 +2897,19 @@ function drawLabelCallouts(labelPlacements, drawUprightAt) {
   }
 
   for (const placement of labelPlacements) {
-    const { request, boundingBox, offsetApplied } = placement;
-    if (!offsetApplied || request.alpha <= 0) {
+    const { request, displayBox, offsetApplied, metrics } = placement;
+    if (!offsetApplied || request.alpha <= 0 || !metrics) {
       continue;
     }
 
-    const endX = clamp(request.originX, boundingBox.left, boundingBox.right);
-    const endY = clamp(request.originY, boundingBox.top, boundingBox.bottom);
+    const primaryFontSize = request.fontSize ?? metrics.lines?.[0]?.fontSize ?? 12;
+    const endX = clamp(request.originX, displayBox.left, displayBox.right);
+    const endY = clamp(request.originY, displayBox.top, displayBox.bottom);
 
     ctx.save();
-    ctx.globalAlpha = Math.min(0.9, request.alpha);
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx.lineWidth = Math.max(1, request.fontSize * 0.12);
+    ctx.globalAlpha = Math.min(0.75, request.alpha);
+    ctx.strokeStyle = 'rgba(166, 206, 255, 0.45)';
+    ctx.lineWidth = Math.max(1, primaryFontSize * 0.08);
     ctx.beginPath();
     ctx.moveTo(request.originX, request.originY);
     ctx.lineTo(endX, endY);
@@ -2848,19 +2918,50 @@ function drawLabelCallouts(labelPlacements, drawUprightAt) {
   }
 
   for (const placement of labelPlacements) {
-    const { request, anchorX, anchorY } = placement;
-    if (request.alpha <= 0) {
+    const { request, anchorX, anchorY, metrics } = placement;
+    if (request.alpha <= 0 || !metrics) {
       continue;
     }
 
     drawUprightAt(anchorX, anchorY, () => {
       ctx.save();
       ctx.globalAlpha = request.alpha;
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = `${request.fontSize}px "Share Tech Mono", monospace`;
-      ctx.textAlign = request.align;
-      ctx.textBaseline = request.baseline;
-      ctx.fillText(request.text, anchorX, anchorY);
+
+      const primaryFontSize = request.fontSize ?? metrics.lines?.[0]?.fontSize ?? 12;
+      const backgroundPadding = request.backgroundPadding ?? Math.max(4, primaryFontSize * 0.45);
+      const { left: blockLeft, top: blockTop } = computeLabelBlockPosition(
+        anchorX,
+        anchorY,
+        request.align,
+        request.baseline,
+        metrics.width,
+        metrics.height,
+      );
+      const boxLeft = blockLeft - backgroundPadding;
+      const boxTop = blockTop - backgroundPadding;
+      const boxWidth = metrics.width + backgroundPadding * 2;
+      const boxHeight = metrics.height + backgroundPadding * 2;
+
+      ctx.fillStyle = 'rgba(10, 15, 28, 0.82)';
+      ctx.fillRect(boxLeft, boxTop, boxWidth, boxHeight);
+      ctx.strokeStyle = 'rgba(160, 200, 255, 0.32)';
+      ctx.lineWidth = Math.max(1, primaryFontSize * 0.06);
+      ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
+
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+
+      let cursorY = blockTop;
+      metrics.lines.forEach((line, index) => {
+        ctx.font = `${line.fontSize}px "Share Tech Mono", monospace`;
+        ctx.fillStyle = line.fillStyle ?? 'rgba(255,255,255,0.9)';
+        ctx.fillText(line.text, blockLeft, cursorY);
+        cursorY += line.height;
+        if (index < metrics.lines.length - 1) {
+          cursorY += metrics.lineSpacing;
+        }
+      });
+
       ctx.restore();
     });
   }
@@ -3108,6 +3209,7 @@ function drawRadar(deltaTime) {
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
   const showAircraftDetails = state.showAircraftDetails;
+  const activeBlipCount = state.activeBlips.length;
   const labelRequests = [];
 
   // draw blips
@@ -3135,40 +3237,45 @@ function drawRadar(deltaTime) {
     drawBlipMarker(blip, radarRadius, alpha);
 
     if (showAircraftDetails && labelAlpha > 0) {
-      const fontSize = Math.round(radarRadius * 0.055);
       const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-      const verticalSpacing = fontSize * 0.45;
+      const density = clamp((activeBlipCount - 8) / 28, 0, 1);
+      const maxFontSize = radarRadius * 0.05;
+      const minFontSize = radarRadius * 0.034;
+      const primaryFontSize = Math.max(12, Math.round(maxFontSize - (maxFontSize - minFontSize) * density));
+      const secondaryFontSize = Math.max(10, Math.round(primaryFontSize * 0.78));
+      const lineSpacing = Math.max(2, Math.round(primaryFontSize * 0.24));
       const identifierRaw = blip.flight || blip.hex || 'Unknown';
       const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
       const altitudeLabel = blip.altitude != null ? `${blip.altitude.toLocaleString()} ft` : null;
+      const showAltitude = altitudeLabel && activeBlipCount <= 36;
 
-      const enqueueLabel = (text, anchorX, anchorY, align, baseline, preferredPosition) => {
-        if (!text) {
-          return;
-        }
+      const lines = [];
 
+      if (identifier) {
+        lines.push({ text: identifier, fontSize: primaryFontSize, fillStyle: 'rgba(255,255,255,0.95)' });
+      }
+
+      if (showAltitude) {
+        lines.push({ text: altitudeLabel, fontSize: secondaryFontSize, fillStyle: 'rgba(173, 214, 255, 0.85)' });
+      }
+
+      if (lines.length > 0) {
+        const separation = markerHeight * 0.6 + primaryFontSize * 0.8;
         labelRequests.push({
-          text,
-          align,
-          baseline,
-          fontSize,
-          initialAnchorX: anchorX,
-          initialAnchorY: anchorY,
-          preferredPosition,
+          lines,
+          fontSize: primaryFontSize,
+          lineSpacing,
+          align: 'center',
+          baseline: 'bottom',
+          initialAnchorX: blip.x,
+          initialAnchorY: blip.y - separation,
+          preferredPosition: 'top',
           originX: blip.x,
           originY: blip.y,
           alpha: labelAlpha,
+          backgroundPadding: Math.round(primaryFontSize * 0.55),
+          collisionPadding: Math.round(primaryFontSize * 0.65),
         });
-      };
-
-      if (identifier) {
-        const identifierY = blip.y - markerHeight / 2 - verticalSpacing;
-        enqueueLabel(identifier, blip.x, identifierY, 'center', 'bottom', 'top');
-      }
-
-      if (altitudeLabel) {
-        const altitudeY = blip.y + markerHeight / 2 + verticalSpacing;
-        enqueueLabel(altitudeLabel, blip.x, altitudeY, 'center', 'top', 'bottom');
       }
     }
   }
