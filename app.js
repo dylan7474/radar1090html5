@@ -1,7 +1,6 @@
 import {
   CONTROLLED_AIRSPACES,
   DEFAULT_RECEIVER_LOCATION,
-  GOOGLE_MAPS_API_KEY,
   LAND_MASS_OUTLINES,
   LAND_MASS_SOURCES,
 } from './config.js';
@@ -16,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.20';
+const APP_VERSION = 'V1.9.21';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -212,7 +211,7 @@ let manualLocationReturnFocusEl = null;
 let manualLocationSelection = null;
 let manualLocationMap = null;
 let manualLocationMarker = null;
-let googleMapsApiPromise = null;
+let leafletAssetsPromise = null;
 
 // First character of the wake turbulence category -> icon key.
 const WTC_ICON_MAP = {
@@ -2709,7 +2708,7 @@ function updateRangeInfo() {
   updateGoogleMapOverlaySource();
 }
 
-function calculateGoogleMapZoom(rangeKm) {
+function calculateBasemapZoom(rangeKm) {
   if (!Number.isFinite(rangeKm)) {
     return 9;
   }
@@ -2746,7 +2745,7 @@ function updateGoogleMapOverlaySource() {
   }
 
   const rangeKm = RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX];
-  const zoom = calculateGoogleMapZoom(rangeKm);
+  const zoom = calculateBasemapZoom(rangeKm);
   const url = buildGoogleMapEmbedUrl(lat, lon, zoom);
 
   if (url && googleMapFrameEl.getAttribute('src') !== url) {
@@ -2781,51 +2780,63 @@ function refreshGoogleMapOverlay() {
   googleMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
 }
 
-function loadGoogleMapsApi() {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('Google Maps requires a browser environment.'));
+function loadLeafletAssets() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return Promise.reject(new Error('The manual picker requires a browser environment.'));
   }
 
-  if (window.google && window.google.maps) {
-    return Promise.resolve(window.google.maps);
+  if (window.L && typeof window.L.map === 'function') {
+    return Promise.resolve(window.L);
   }
 
-  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.trim().length === 0) {
-    return Promise.reject(new Error('Add a Google Maps API key in config.js to enable manual location.'));
+  if (leafletAssetsPromise) {
+    return leafletAssetsPromise;
   }
 
-  if (googleMapsApiPromise) {
-    return googleMapsApiPromise;
-  }
-
-  googleMapsApiPromise = new Promise((resolve, reject) => {
-    const callbackName = '__radar1090ManualLocationInit';
-
-    const cleanup = () => {
-      if (Object.prototype.hasOwnProperty.call(window, callbackName)) {
-        delete window[callbackName];
+  leafletAssetsPromise = new Promise((resolve, reject) => {
+    const resolveIfReady = () => {
+      if (window.L && typeof window.L.map === 'function') {
+        resolve(window.L);
+        return true;
       }
+      return false;
     };
 
-    window[callbackName] = () => {
-      cleanup();
-      resolve(window.google.maps);
+    const handleError = () => {
+      leafletAssetsPromise = null;
+      reject(new Error('The map library could not be loaded. Check your connection and try again.'));
     };
+
+    if (!document.querySelector('link[data-leaflet="css"]')) {
+      const stylesheet = document.createElement('link');
+      stylesheet.rel = 'stylesheet';
+      stylesheet.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      stylesheet.integrity = 'sha512-sA+Rw8fK1HgNHQJrWZLxE+nobVhtSGcVwqDAVBBusZT6F4LmSpaV0Uy1Ik5+pNSTsKQWP9k+rquDaXw2C5uXmw==';
+      stylesheet.crossOrigin = '';
+      stylesheet.setAttribute('data-leaflet', 'css');
+      document.head.appendChild(stylesheet);
+    }
+
+    if (resolveIfReady()) {
+      return;
+    }
 
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=${callbackName}`;
-    script.async = true;
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.integrity = 'sha512-XQoYMqMTK8LvdlxUMF4Gx7Z7tGDZC1x1i+6whhtj6Vxz41IrT9jpJ1rssZgGSyEtpI0PtmF6TuN7+7e2Jc2RMQ==';
+    script.crossOrigin = '';
     script.defer = true;
-    script.onerror = () => {
-      cleanup();
-      googleMapsApiPromise = null;
-      reject(new Error('Google Maps could not be loaded. Check the API key and your connection.'));
+    script.setAttribute('data-leaflet', 'js');
+    script.onload = () => {
+      if (!resolveIfReady()) {
+        handleError();
+      }
     };
-
+    script.onerror = handleError;
     document.head.appendChild(script);
   });
 
-  return googleMapsApiPromise;
+  return leafletAssetsPromise;
 }
 
 function setManualLocationStatus(message, { isError = false } = {}) {
@@ -2858,7 +2869,11 @@ function updateManualLocationSelection(lat, lon, { fromMarker = false } = {}) {
   } else {
     manualLocationSelection = { lat, lon };
     if (manualLocationMarker && !fromMarker) {
-      manualLocationMarker.setPosition({ lat, lng: lon });
+      if (typeof manualLocationMarker.setPosition === 'function') {
+        manualLocationMarker.setPosition({ lat, lng: lon });
+      } else if (typeof manualLocationMarker.setLatLng === 'function') {
+        manualLocationMarker.setLatLng([lat, lon]);
+      }
     }
   }
 
@@ -2880,60 +2895,67 @@ function getManualLocationDefaultCenter() {
   return { lat, lon };
 }
 
-function ensureManualLocationMap(googleMaps) {
+function ensureManualLocationMap(leaflet) {
   if (!manualLocationMapEl) {
     return;
   }
 
   const center = getManualLocationDefaultCenter();
-  const latLngLiteral = { lat: center.lat, lng: center.lon };
-  const zoom = calculateGoogleMapZoom(RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX]);
+  const latLng = [center.lat, center.lon];
+  const zoom = calculateBasemapZoom(
+    RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX],
+  );
 
   if (!manualLocationMap) {
-    manualLocationMap = new googleMaps.Map(manualLocationMapEl, {
-      center: latLngLiteral,
+    manualLocationMap = leaflet.map(manualLocationMapEl, {
+      center: latLng,
       zoom,
-      mapTypeControl: false,
-      fullscreenControl: false,
-      streetViewControl: false,
+      scrollWheelZoom: true,
     });
 
-    manualLocationMarker = new googleMaps.Marker({
-      map: manualLocationMap,
-      position: latLngLiteral,
-      draggable: true,
-    });
+    leaflet
+      .tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+      })
+      .addTo(manualLocationMap);
 
-    manualLocationMarker.addListener('dragend', (event) => {
-      const lat = typeof event?.latLng?.lat === 'function' ? event.latLng.lat() : null;
-      const lon = typeof event?.latLng?.lng === 'function' ? event.latLng.lng() : null;
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        updateManualLocationSelection(lat, lon, { fromMarker: true });
+    manualLocationMarker = leaflet
+      .marker(latLng, { draggable: true })
+      .addTo(manualLocationMap);
+
+    manualLocationMarker.on('dragend', (event) => {
+      const position = typeof event?.target?.getLatLng === 'function'
+        ? event.target.getLatLng()
+        : null;
+      if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
+        updateManualLocationSelection(position.lat, position.lng, { fromMarker: true });
       }
     });
 
-    manualLocationMap.addListener('click', (event) => {
-      const lat = typeof event?.latLng?.lat === 'function' ? event.latLng.lat() : null;
-      const lon = typeof event?.latLng?.lng === 'function' ? event.latLng.lng() : null;
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        updateManualLocationSelection(lat, lon);
+    manualLocationMap.on('click', (event) => {
+      if (event && event.latlng) {
+        const { lat, lng } = event.latlng;
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          updateManualLocationSelection(lat, lng);
+        }
       }
     });
   } else {
-    manualLocationMap.setCenter(latLngLiteral);
-    manualLocationMap.setZoom(zoom);
-    if (manualLocationMarker) {
-      manualLocationMarker.setPosition(latLngLiteral);
+    manualLocationMap.setView(latLng, zoom);
+    if (manualLocationMarker && typeof manualLocationMarker.setLatLng === 'function') {
+      manualLocationMarker.setLatLng(latLng);
     }
-    googleMaps.event.trigger(manualLocationMap, 'resize');
   }
 
   updateManualLocationSelection(center.lat, center.lon, { fromMarker: true });
 
   // Give the modal a moment to settle before forcing a resize so tiles render correctly.
   setTimeout(() => {
-    googleMaps.event.trigger(manualLocationMap, 'resize');
-    manualLocationMap.setCenter(latLngLiteral);
+    if (manualLocationMap && typeof manualLocationMap.invalidateSize === 'function') {
+      manualLocationMap.invalidateSize();
+      manualLocationMap.setView(latLng, zoom);
+    }
   }, 150);
 }
 
@@ -2954,23 +2976,11 @@ async function openManualLocationPicker() {
   }
 
   updateManualLocationSelection(NaN, NaN);
-  setManualLocationStatus('', { isError: false });
-
-  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.trim().length === 0) {
-    setManualLocationStatus('Add a Google Maps API key in config.js to use the manual picker.', {
-      isError: true,
-    });
-    if (manualLocationCancelBtn) {
-      manualLocationCancelBtn.focus();
-    }
-    return;
-  }
-
-  setManualLocationStatus('Loading Google Maps…');
+  setManualLocationStatus('Loading map…');
 
   try {
-    const googleMaps = await loadGoogleMapsApi();
-    ensureManualLocationMap(googleMaps);
+    const leaflet = await loadLeafletAssets();
+    ensureManualLocationMap(leaflet);
     setManualLocationStatus('Click the map to drop the marker or drag it into position.');
     if (manualLocationCancelBtn) {
       manualLocationCancelBtn.focus();
@@ -2978,7 +2988,7 @@ async function openManualLocationPicker() {
   } catch (error) {
     const message = error && typeof error === 'object' && typeof error.message === 'string'
       ? error.message
-      : 'Google Maps could not be loaded. Check the API key and your connection.';
+      : 'The map could not be loaded. Check your connection and try again.';
     setManualLocationStatus(message, { isError: true });
     if (manualLocationCancelBtn) {
       manualLocationCancelBtn.focus();

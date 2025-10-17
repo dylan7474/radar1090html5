@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.20
+**Current Version:** V1.9.21
 
 ---
 
@@ -27,7 +27,7 @@ from any modern browser.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
 - One-tap "Use My Location" control recenters the radar on your current coordinates and keeps them stored for future visits.
-- Manual receiver picker opens an interactive Google Map so you can drop a marker on your station when GPS fixes are unreliable.
+- Manual receiver picker opens an interactive OpenStreetMap-powered picker so you can drop a marker on your station when GPS fixes are unreliable.
 - If location permissions are blocked, an in-app help overlay walks through re-enabling access in popular browsers so centering can resume quickly.
 - Optional aircraft label overlay toggled from the sidebar to display compact callsign tags connected by curved leaders that automatically dodge nearby blips, evaluate every surrounding anchor point to hug each aircraft as tightly as possible, avoid plane icons, other tags, clamp themselves fully inside the radar view, stay pinned to the latest sweep echo so IDs no longer hop as older traces fade, and continue tracking each blip as the radar scope is rotated.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
@@ -57,7 +57,8 @@ from any modern browser.
 - A modern Chromium-, WebKit-, or Gecko-based browser (recent versions of Chrome, Edge,
   Firefox, or Safari).
 - Optional: access to the companion airband audio stream if you want synced radio audio.
-- Optional: Google Maps JavaScript API key if you plan to use the manual receiver picker.
+- Optional: temporary Internet access so the manual receiver picker can load OpenStreetMap tiles.
+  
 
 ## Quick Start
 
@@ -86,10 +87,9 @@ Default receiver coordinates now live in [`config.js`](config.js). Adjust the
 `DEFAULT_RECEIVER_LOCATION` export there to match your station's latitude and longitude.
 The sidebar shows the current coordinates so you can confirm the values in use.
 
-To enable the manual receiver picker, supply a Google Maps JavaScript API key via the
-`GOOGLE_MAPS_API_KEY` export in [`config.js`](config.js). If the key is left blank, the
-existing read-only Google Maps overlay remains available, but the draggable picker stays
-disabled.
+The manual receiver picker works out of the box using OpenStreetMap tiles—no API keys
+required. Ensure the device can briefly reach the public tile servers when you open the
+picker so the basemap can load beneath the draggable marker.
 
 Controlled airspace footprints are also defined in [`config.js`](config.js) via the
 `CONTROLLED_AIRSPACES` array. Each entry needs an ICAO code, human-friendly name,
