@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.13';
+const APP_VERSION = 'V1.9.14';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -2598,12 +2598,32 @@ function formatCoordinate(value) {
   return `${value.toFixed(4)}°`;
 }
 
-function findAirspacesInRange(rangeKm) {
-  if (!Array.isArray(CONTROLLED_AIRSPACES) || CONTROLLED_AIRSPACES.length === 0) {
-    return [];
-  }
+const getAirspaceIdentifier = (space) => {
+  if (!space || typeof space !== 'object') {
+    return '';
+  }
 
-  const { lat, lon } = state.receiver;
+  if (typeof space.shortIdentifier === 'string' && space.shortIdentifier.trim().length > 0) {
+    return space.shortIdentifier.trim();
+  }
+
+  if (typeof space.icao === 'string' && space.icao.trim().length > 0) {
+    return space.icao.trim();
+  }
+
+  if (typeof space.name === 'string' && space.name.trim().length > 0) {
+    return space.name.trim();
+  }
+
+  return '';
+};
+
+function findAirspacesInRange(rangeKm) {
+  if (!Array.isArray(CONTROLLED_AIRSPACES) || CONTROLLED_AIRSPACES.length === 0) {
+    return [];
+  }
+
+  const { lat, lon } = state.receiver;
   return CONTROLLED_AIRSPACES.map((space) => {
     const distanceKm = haversine(lat, lon, space.lat, space.lon);
     if (!Number.isFinite(distanceKm)) {
@@ -3300,7 +3320,8 @@ function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radar
     ctx.arc(x, y, displayRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    drawLabel(space.name, x, y - displayRadius - labelOffset, 'bottom');
+    const nameLabel = getAirspaceIdentifier(space);
+    drawLabel(nameLabel, x, y - displayRadius - labelOffset, 'bottom');
 
     const distanceLabel = `${Math.round(space.distanceKm)} km`;
     drawLabel(distanceLabel, x, y + displayRadius + labelOffset, 'top');
