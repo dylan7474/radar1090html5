@@ -499,3 +499,88 @@ canvas#radar {
     order: 3;
   }
 }
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1rem, 4vw, 2.5rem);
+  z-index: 20;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 8, 13, 0.78);
+  backdrop-filter: blur(4px);
+}
+
+.modal__dialog {
+  position: relative;
+  z-index: 1;
+  width: min(520px, 100%);
+  background: rgba(12, 17, 28, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: clamp(1rem, 3vw, 2rem);
+  display: grid;
+  gap: 1rem;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.modal__dialog h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.modal__dialog p {
+  margin: 0;
+  line-height: 1.5;
+  font-size: 0.95rem;
+  color: rgba(242, 246, 255, 0.9);
+}
+
+.modal__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  color: rgba(242, 246, 255, 0.85);
+}
+
+.modal__list li::marker {
+  color: var(--accent);
+}
+
+.modal__hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.modal__actions .control-button {
+  min-width: 120px;
+}
+
+@media (max-width: 600px) {
+  .modal {
+    padding: 1.25rem;
+  }
+
+  .modal__dialog {
+    width: 100%;
+  }
+}

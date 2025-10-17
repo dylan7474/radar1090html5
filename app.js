@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.16';
+const APP_VERSION = 'V1.9.17';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -153,6 +153,9 @@ const alertRangeDecreaseBtn = document.getElementById('alert-range-decrease');
 const alertRangeIncreaseBtn = document.getElementById('alert-range-increase');
 const radarRotateBtn = document.getElementById('radar-rotate');
 const centerOnLocationBtn = document.getElementById('center-on-location');
+const geolocationPermissionModal = document.getElementById('geolocation-permission-modal');
+const geolocationPermissionBackdrop = document.getElementById('geolocation-permission-backdrop');
+const geolocationPermissionCloseBtn = document.getElementById('geolocation-permission-close');
 const audioStreamEl = document.getElementById('airband-stream');
 const audioMuteToggleBtn = document.getElementById('audio-mute-toggle');
 const audioStatusEl = document.getElementById('audio-status');
@@ -225,6 +228,8 @@ let cachedLandMassPattern = null;
 let landMassGeoJsonCache = null;
 let activeLandMassSettings = null;
 let pendingUserLocationRequest = false;
+let geolocationPermissionState = null;
+let lastFocusBeforeGeolocationHelp = null;
 
 function resolveIconKeyFromWtc(entry) {
   const raw = typeof entry.wtc === 'string' ? entry.wtc.trim().toUpperCase() : '';
@@ -1292,9 +1297,21 @@ if (versionEl) {
 refreshAircraftDetailsControls();
 refreshPanelVisibility();
 
-if (centerOnLocationBtn && !supportsGeolocation()) {
-  centerOnLocationBtn.setAttribute('disabled', 'true');
-  centerOnLocationBtn.setAttribute('title', 'Geolocation is unavailable in this browser.');
+if (geolocationPermissionModal) {
+  geolocationPermissionModal.setAttribute(
+    'aria-hidden',
+    geolocationPermissionModal.hasAttribute('hidden') ? 'true' : 'false',
+  );
+}
+
+if (centerOnLocationBtn) {
+  if (!supportsGeolocation()) {
+    centerOnLocationBtn.setAttribute('disabled', 'true');
+    centerOnLocationBtn.setAttribute('title', 'Geolocation is unavailable in this browser.');
+  } else {
+    applyGeolocationPermissionState(geolocationPermissionState);
+    void watchGeolocationPermissionState();
+  }
 }
 
 if (aircraftDetailsToggleBtn) {
@@ -1415,7 +1432,22 @@ alertRangeDecreaseBtn?.addEventListener('click', () => adjustBaseAlertRange(-BAS
 alertRangeIncreaseBtn?.addEventListener('click', () => adjustBaseAlertRange(BASE_ALERT_RANGE_STEP_KM));
 radarRotateBtn?.addEventListener('click', rotateRadarClockwise);
 centerOnLocationBtn?.addEventListener('click', () => {
+  if (geolocationPermissionState === 'denied') {
+    showGeolocationPermissionHelp();
+  }
   centerRadarOnUserLocation();
+});
+geolocationPermissionCloseBtn?.addEventListener('click', hideGeolocationPermissionHelp);
+geolocationPermissionBackdrop?.addEventListener('click', hideGeolocationPermissionHelp);
+geolocationPermissionModal?.addEventListener('click', (event) => {
+  if (event.target === geolocationPermissionModal) {
+    hideGeolocationPermissionHelp();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && geolocationPermissionModal && !geolocationPermissionModal.hasAttribute('hidden')) {
+    hideGeolocationPermissionHelp();
+  }
 });
 canvas?.addEventListener('click', handleRadarTap);
 
@@ -2689,6 +2721,107 @@ function setCenterOnLocationBusy(busy) {
   }
 }
 
+function applyGeolocationPermissionState(state) {
+  geolocationPermissionState = state;
+  if (!centerOnLocationBtn || !supportsGeolocation()) {
+    return;
+  }
+
+  switch (state) {
+    case 'granted': {
+      centerOnLocationBtn.setAttribute('title', 'Center radar on your current location.');
+      break;
+    }
+    case 'denied': {
+      centerOnLocationBtn.setAttribute(
+        'title',
+        'Location access is blocked. Click for steps to re-enable.',
+      );
+      break;
+    }
+    default: {
+      centerOnLocationBtn.removeAttribute('title');
+      break;
+    }
+  }
+}
+
+async function watchGeolocationPermissionState() {
+  if (
+    !centerOnLocationBtn ||
+    !supportsGeolocation() ||
+    !navigator.permissions ||
+    typeof navigator.permissions.query !== 'function'
+  ) {
+    return;
+  }
+
+  try {
+    const status = await navigator.permissions.query({ name: 'geolocation' });
+    applyGeolocationPermissionState(status.state);
+    const handleChange = () => {
+      applyGeolocationPermissionState(status.state);
+      if (status.state === 'granted') {
+        hideGeolocationPermissionHelp();
+      }
+    };
+
+    if (typeof status.addEventListener === 'function') {
+      status.addEventListener('change', handleChange);
+    } else {
+      status.onchange = handleChange;
+    }
+  } catch (error) {
+    console.warn('Unable to query geolocation permission state', error);
+  }
+}
+
+function showGeolocationPermissionHelp() {
+  if (!geolocationPermissionModal || !geolocationPermissionModal.hasAttribute('hidden')) {
+    return;
+  }
+
+  const activeElement = document.activeElement;
+  lastFocusBeforeGeolocationHelp =
+    activeElement && activeElement instanceof HTMLElement ? activeElement : null;
+
+  geolocationPermissionModal.removeAttribute('hidden');
+  geolocationPermissionModal.setAttribute('aria-hidden', 'false');
+
+  if (geolocationPermissionCloseBtn && typeof geolocationPermissionCloseBtn.focus === 'function') {
+    try {
+      geolocationPermissionCloseBtn.focus({ preventScroll: true });
+    } catch (error) {
+      console.warn('Unable to focus geolocation permission close button', error);
+    }
+  }
+}
+
+function hideGeolocationPermissionHelp() {
+  if (!geolocationPermissionModal || geolocationPermissionModal.hasAttribute('hidden')) {
+    return;
+  }
+
+  geolocationPermissionModal.setAttribute('hidden', 'true');
+  geolocationPermissionModal.setAttribute('aria-hidden', 'true');
+
+  const focusTarget = lastFocusBeforeGeolocationHelp;
+  if (
+    focusTarget &&
+    typeof focusTarget.focus === 'function' &&
+    document.body &&
+    document.body.contains(focusTarget)
+  ) {
+    try {
+      focusTarget.focus({ preventScroll: true });
+    } catch (error) {
+      console.warn('Unable to restore focus after closing geolocation help', error);
+    }
+  }
+
+  lastFocusBeforeGeolocationHelp = null;
+}
+
 async function centerRadarOnUserLocation() {
   if (pendingUserLocationRequest) {
     return;
@@ -2734,6 +2867,8 @@ async function centerRadarOnUserLocation() {
       switch (error.code) {
         case 1:
           message = 'Location request denied. Update browser permissions to re-enable.';
+          applyGeolocationPermissionState('denied');
+          showGeolocationPermissionHelp();
           break;
         case 2:
           message = 'Location information is unavailable right now.';
