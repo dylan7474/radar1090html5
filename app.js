@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.2';
+const APP_VERSION = 'V1.9.3';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -354,6 +354,23 @@ function getBlipMarkerWidth(blip, radarRadius) {
   return radarRadius * 0.04 * scale;
 }
 
+function getBlipIconBounds(blip, markerWidth, markerHeight) {
+  const headingRad = Number.isFinite(blip?.heading) ? deg2rad(blip.heading) : 0;
+  const halfWidth = markerWidth / 2;
+  const halfHeight = markerHeight / 2;
+  const absCos = Math.abs(Math.cos(headingRad));
+  const absSin = Math.abs(Math.sin(headingRad));
+  const rotatedHalfWidth = halfWidth * absCos + halfHeight * absSin;
+  const rotatedHalfHeight = halfWidth * absSin + halfHeight * absCos;
+
+  return {
+    x: blip.x - rotatedHalfWidth,
+    y: blip.y - rotatedHalfHeight,
+    width: rotatedHalfWidth * 2,
+    height: rotatedHalfHeight * 2,
+  };
+}
+
 function rectanglesOverlap(a, b) {
   return (
     a.x < b.x + b.width &&
@@ -402,6 +419,7 @@ function computeCalloutPlacement({
   markerWidth,
   markerHeight,
   existingPlacements,
+  iconBounds = [],
 }) {
   const dimensions = measureLabelDimensions(text, fontSize);
   if (!dimensions) {
@@ -457,6 +475,27 @@ function computeCalloutPlacement({
       const expandedBounds = expandBounds(bounds, margin);
 
       if (rectanglesOverlap(expandedBounds, planeBounds)) {
+        continue;
+      }
+
+      const intersectsIcon = iconBounds.some((entry) => {
+        if (!entry) {
+          return false;
+        }
+
+        const targetBounds = entry.bounds || entry;
+        if (!targetBounds) {
+          return false;
+        }
+
+        if (entry.blip === blip) {
+          return false;
+        }
+
+        return rectanglesOverlap(expandedBounds, targetBounds);
+      });
+
+      if (intersectsIcon) {
         continue;
       }
 
@@ -3122,7 +3161,24 @@ function drawRadar(deltaTime) {
   const rotationPeriod = state.rotationPeriodMs || (360 / sweepSpeed) * 1000;
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
+  const showAircraftDetails = state.showAircraftDetails;
   const labelPlacements = [];
+  const iconCollisionBounds = [];
+  const blipMarkerDimensions = new Map();
+
+  if (showAircraftDetails) {
+    state.activeBlips.forEach((blip) => {
+      const markerWidth = getBlipMarkerWidth(blip, radarRadius);
+      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
+      blipMarkerDimensions.set(blip, { markerWidth, markerHeight });
+      const baseBounds = getBlipIconBounds(blip, markerWidth, markerHeight);
+      const padding = Math.max(markerWidth, markerHeight) * 0.12;
+      iconCollisionBounds.push({
+        blip,
+        bounds: expandBounds(baseBounds, padding),
+      });
+    });
+  }
 
   // draw blips
   for (const blip of state.activeBlips) {
@@ -3148,12 +3204,11 @@ function drawRadar(deltaTime) {
 
     drawBlipMarker(blip, radarRadius, alpha);
 
-    const showAircraftDetails = state.showAircraftDetails;
-
     if (showAircraftDetails) {
       const fontSize = Math.max(10, Math.round(radarRadius * 0.045));
-      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-      const markerWidth = getBlipMarkerWidth(blip, radarRadius);
+      const dimensions = blipMarkerDimensions.get(blip);
+      const markerWidth = dimensions?.markerWidth ?? getBlipMarkerWidth(blip, radarRadius);
+      const markerHeight = dimensions?.markerHeight ?? getBlipMarkerHeight(blip, radarRadius);
       const identifierRaw = blip.flight || blip.hex || 'Unknown';
       const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
 
@@ -3165,6 +3220,7 @@ function drawRadar(deltaTime) {
           markerWidth,
           markerHeight,
           existingPlacements: labelPlacements,
+          iconBounds: iconCollisionBounds,
         });
 
         if (placement) {
