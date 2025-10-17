@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.8';
+const APP_VERSION = 'V1.9.9';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -3393,33 +3393,33 @@ function drawRadar(deltaTime) {
         });
 
         if (placement) {
-          drawUpright(() => {
-            // Draw a short curved leader that links the callout back to the aircraft blip.
-            ctx.save();
-            ctx.globalAlpha = labelAlpha;
-            ctx.strokeStyle = 'rgba(82, 255, 194, 0.8)';
-            ctx.lineWidth = Math.max(1.1, fontSize * 0.075);
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(placement.pointerStart.x, placement.pointerStart.y);
-            ctx.quadraticCurveTo(
-              placement.pointerControl.x,
-              placement.pointerControl.y,
-              placement.pointerEnd.x,
-              placement.pointerEnd.y,
-            );
-            ctx.stroke();
-            ctx.restore();
+          // Draw a short curved leader that links the callout back to the aircraft blip.
+          ctx.save();
+          ctx.globalAlpha = labelAlpha;
+          ctx.strokeStyle = 'rgba(82, 255, 194, 0.8)';
+          ctx.lineWidth = Math.max(1.1, fontSize * 0.075);
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(placement.pointerStart.x, placement.pointerStart.y);
+          ctx.quadraticCurveTo(
+            placement.pointerControl.x,
+            placement.pointerControl.y,
+            placement.pointerEnd.x,
+            placement.pointerEnd.y,
+          );
+          ctx.stroke();
+          ctx.restore();
 
-            ctx.save();
-            ctx.globalAlpha = labelAlpha;
-            ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
-            ctx.textAlign = placement.textAlign;
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = 'rgba(255,255,255,0.88)';
-            ctx.fillText(identifier, placement.anchorX, placement.anchorY);
-            ctx.restore();
-          });
+          ctx.save();
+          ctx.translate(placement.anchorX, placement.anchorY);
+          ctx.rotate(-rotationRad);
+          ctx.globalAlpha = labelAlpha;
+          ctx.font = `${fontSize}px "Share Tech Mono", monospace`;
+          ctx.textAlign = placement.textAlign;
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'rgba(255,255,255,0.88)';
+          ctx.fillText(identifier, 0, 0);
+          ctx.restore();
 
           labelPlacements.push(placement);
         }
