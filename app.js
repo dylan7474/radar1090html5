@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.12';
+const APP_VERSION = 'V1.9.13';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -739,6 +739,10 @@ function restorePersistedCalloutPlacement({
   fontSize,
   markerWidth,
   markerHeight,
+  existingPlacements = [],
+  iconBounds = [],
+  viewportWidth,
+  viewportHeight,
 }) {
   if (!persisted) {
     return null;
@@ -758,8 +762,8 @@ function restorePersistedCalloutPlacement({
     return null;
   }
 
-  const anchorX = blip.x + anchorOffsetX;
-  const anchorY = blip.y + anchorOffsetY;
+  let anchorX = blip.x + anchorOffsetX;
+  let anchorY = blip.y + anchorOffsetY;
   const margin = fontSize * 0.35;
 
   let boxX = anchorX;
@@ -769,9 +773,79 @@ function restorePersistedCalloutPlacement({
     boxX = anchorX - textWidth / 2;
   }
 
-  const boxY = anchorY - textHeight / 2;
+  let boxY = anchorY - textHeight / 2;
+
+  const clamped = clampCalloutWithinViewport({
+    boxX,
+    boxY,
+    textWidth,
+    textHeight,
+    margin,
+    viewportWidth,
+    viewportHeight,
+  });
+
+  if (!clamped) {
+    return null;
+  }
+
+  ({ boxX, boxY } = clamped);
+
+  if (textAlign === 'right') {
+    anchorX = boxX + textWidth;
+  } else if (textAlign === 'center') {
+    anchorX = boxX + textWidth / 2;
+  } else {
+    anchorX = boxX;
+  }
+
+  anchorY = boxY + textHeight / 2;
+
   const bounds = { x: boxX, y: boxY, width: textWidth, height: textHeight };
   const expandedBounds = expandBounds(bounds, margin);
+
+  const planeBounds = expandBounds(
+    {
+      x: blip.x - markerWidth / 2,
+      y: blip.y - markerHeight / 2,
+      width: markerWidth,
+      height: markerHeight,
+    },
+    margin,
+  );
+
+  if (rectanglesOverlap(expandedBounds, planeBounds)) {
+    return null;
+  }
+
+  const intersectsIcon = iconBounds.some((entry) => {
+    if (!entry) {
+      return false;
+    }
+
+    const targetBounds = entry.bounds || entry;
+    if (!targetBounds) {
+      return false;
+    }
+
+    if (entry.blip === blip) {
+      return false;
+    }
+
+    return rectanglesOverlap(expandedBounds, targetBounds);
+  });
+
+  if (intersectsIcon) {
+    return null;
+  }
+
+  const overlapsExisting = existingPlacements.some((placement) =>
+    rectanglesOverlap(expandedBounds, placement.expandedBounds),
+  );
+
+  if (overlapsExisting) {
+    return null;
+  }
 
   const pointerTargetX =
     textAlign === 'left'
@@ -3502,6 +3576,10 @@ function drawRadar(deltaTime) {
               fontSize,
               markerWidth,
               markerHeight,
+              existingPlacements: labelPlacements,
+              iconBounds: iconCollisionBounds,
+              viewportWidth: canvas.width,
+              viewportHeight: canvas.height,
             });
 
             if (!placement) {
