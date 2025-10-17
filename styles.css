@@ -442,6 +442,7 @@ main.app.data-hidden .data-panel {
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(242, 246, 255, 0.85);
   pointer-events: none;
+  z-index: 2;
 }
 
 canvas#radar {
@@ -453,6 +454,35 @@ canvas#radar {
   border-radius: 14px;
   background: transparent;
   display: block;
+  position: relative;
+  z-index: 1;
+}
+
+.google-map-overlay {
+  position: absolute;
+  top: clamp(0.75rem, 2vw, 2.5rem);
+  right: clamp(0.75rem, 2vw, 2.5rem);
+  bottom: clamp(0.75rem, 2vw, 2.5rem);
+  left: clamp(0.75rem, 2vw, 2.5rem);
+  border-radius: 14px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease-in-out;
+  z-index: 0;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.google-map-overlay--visible {
+  opacity: 0.55;
+}
+
+.google-map-overlay iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  pointer-events: none;
+  filter: saturate(0.75) contrast(0.95);
 }
 
 @media (max-width: 900px) {
