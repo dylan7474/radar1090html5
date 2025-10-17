@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.10.2
+**Current Version:** V1.10.3
 
 ---
 
@@ -26,7 +26,7 @@ from any modern browser.
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
-- Optional aircraft label overlay toggled from the sidebar to display callsigns around each blip, presented in compact callout panels with collision avoidance, dynamic font sizing, and connector lines back to their aircraft when repositioned.
+- Optional aircraft label overlay toggled from the sidebar to display callsigns around each blip, presented in compact callout panels with collision avoidance, dynamic font sizing, stabilized placement to prevent jitter, and connector lines back to their aircraft when repositioned.
 - Layout toggle buttons collapse the controls or data sidebars so the radar can claim the freed screen real estate when desired.
 - Sidebar readout that surfaces the receiver latitude/longitude for quick verification.
 - Highlighted controlled airspace rings for nearby airports within the selected radar range.

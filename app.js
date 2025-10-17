@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.10.2';
+const APP_VERSION = 'V1.10.3';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -495,6 +495,7 @@ const state = {
   dataPanelVisible: savedDataPanelVisible,
   alertHistory: new Map(),
   alertHighlights: new Map(),
+  labelPlacementMemory: new Map(),
 };
 
 const tickerState = {
@@ -2820,14 +2821,25 @@ function getLabelOffsetCandidates(preferredPosition, fontSize) {
 
 function resolveLabelPlacements(labelRequests) {
   if (!labelRequests || labelRequests.length === 0) {
+    state.labelPlacementMemory?.clear?.();
     return [];
   }
 
   const placements = [];
+  const memory = state.labelPlacementMemory;
+  const seenKeys = new Set();
 
   for (const request of labelRequests) {
+    const memoryKey = request.placementKey ?? request.id ?? request.key ?? null;
+    if (memoryKey) {
+      seenKeys.add(memoryKey);
+    }
+
     const lines = (request.lines || []).filter((line) => line && line.text);
     if (lines.length === 0) {
+      if (memoryKey && memory) {
+        memory.delete(memoryKey);
+      }
       continue;
     }
 
@@ -2837,16 +2849,32 @@ function resolveLabelPlacements(labelRequests) {
       : Math.max(2, Math.round(baseFontSize * 0.25));
     const metrics = measureLabelMetrics(lines, lineSpacing);
     if (metrics.width <= 0 || metrics.height <= 0) {
+      if (memoryKey && memory) {
+        memory.delete(memoryKey);
+      }
       continue;
     }
 
     const collisionPadding = request.collisionPadding ?? Math.max(2, baseFontSize * 0.3);
     const displayPadding = request.backgroundPadding ?? Math.max(2, baseFontSize * 0.25);
     const candidates = getLabelOffsetCandidates(request.preferredPosition, baseFontSize);
+    const orderedCandidates = candidates.map((offset, index) => ({ offset, index }));
+
+    if (memoryKey && memory && memory.has(memoryKey)) {
+      const previous = memory.get(memoryKey);
+      if (previous && Number.isInteger(previous.offsetIndex)) {
+        const matchIndex = orderedCandidates.findIndex((entry) => entry.index === previous.offsetIndex);
+        if (matchIndex > 0) {
+          const [matched] = orderedCandidates.splice(matchIndex, 1);
+          orderedCandidates.unshift(matched);
+        }
+      }
+    }
+
     let chosenPlacement = null;
     let fallbackPlacement = null;
 
-    for (const offset of candidates) {
+    for (const { offset, index } of orderedCandidates) {
       const anchorX = request.initialAnchorX + offset.dx;
       const anchorY = request.initialAnchorY + offset.dy;
       const textBounds = getLabelBoundingBox(
@@ -2872,6 +2900,7 @@ function resolveLabelPlacements(labelRequests) {
         displayBox,
         metrics: { ...metrics, lineSpacing },
         offsetApplied: offset.dx !== 0 || offset.dy !== 0,
+        offsetIndex: index,
       };
 
       if (!overlaps) {
@@ -2885,6 +2914,19 @@ function resolveLabelPlacements(labelRequests) {
     const finalPlacement = chosenPlacement ?? fallbackPlacement;
     if (finalPlacement) {
       placements.push(finalPlacement);
+      if (memoryKey && memory) {
+        memory.set(memoryKey, { offsetIndex: finalPlacement.offsetIndex ?? 0 });
+      }
+    } else if (memoryKey && memory) {
+      memory.delete(memoryKey);
+    }
+  }
+
+  if (memory && memory.size > 0) {
+    for (const key of Array.from(memory.keys())) {
+      if (!seenKeys.has(key)) {
+        memory.delete(key);
+      }
     }
   }
 
@@ -3254,6 +3296,7 @@ function drawRadar(deltaTime) {
       if (lines.length > 0) {
         const separation = markerHeight * 0.6 + primaryFontSize * 0.8;
         labelRequests.push({
+          placementKey: blip.key,
           lines,
           fontSize: primaryFontSize,
           lineSpacing,
