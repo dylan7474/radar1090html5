@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.3';
+const APP_VERSION = 'V1.9.4';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -412,6 +412,52 @@ function measureLabelDimensions(text, fontSize) {
   };
 }
 
+function clampCalloutWithinViewport({
+  boxX,
+  boxY,
+  textWidth,
+  textHeight,
+  margin,
+  viewportWidth,
+  viewportHeight,
+}) {
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight)) {
+    return { boxX, boxY };
+  }
+
+  const horizontalSlack = viewportWidth - textWidth;
+  const verticalSlack = viewportHeight - textHeight;
+
+  let clampedX = boxX;
+  if (horizontalSlack <= 0) {
+    clampedX = 0;
+  } else {
+    const minX = margin;
+    const maxX = viewportWidth - textWidth - margin;
+    clampedX = Math.min(Math.max(clampedX, minX), Math.max(minX, maxX));
+  }
+
+  let clampedY = boxY;
+  if (verticalSlack <= 0) {
+    clampedY = 0;
+  } else {
+    const minY = margin;
+    const maxY = viewportHeight - textHeight - margin;
+    clampedY = Math.min(Math.max(clampedY, minY), Math.max(minY, maxY));
+  }
+
+  if (
+    clampedX + textWidth < 0 ||
+    clampedX > viewportWidth ||
+    clampedY + textHeight < 0 ||
+    clampedY > viewportHeight
+  ) {
+    return null;
+  }
+
+  return { boxX: clampedX, boxY: clampedY };
+}
+
 function computeCalloutPlacement({
   text,
   blip,
@@ -420,6 +466,8 @@ function computeCalloutPlacement({
   markerHeight,
   existingPlacements,
   iconBounds = [],
+  viewportWidth,
+  viewportHeight,
 }) {
   const dimensions = measureLabelDimensions(text, fontSize);
   if (!dimensions) {
@@ -430,8 +478,8 @@ function computeCalloutPlacement({
   const textHeight = dimensions.height;
   const margin = fontSize * 0.35;
   const baseDistance = Math.max(markerWidth, markerHeight) * 0.65 + fontSize * 1.25;
-  const stepDistance = fontSize * 0.9;
-  const maxAttempts = 6;
+  const stepDistance = fontSize * 1.05;
+  const maxAttempts = 10;
 
   const planeBounds = expandBounds(
     {
@@ -451,17 +499,21 @@ function computeCalloutPlacement({
     { dx: -1, dy: 0.55, align: 'right' },
     { dx: 0, dy: -1, align: 'center' },
     { dx: 0, dy: 1, align: 'center' },
+    { dx: 0.85, dy: -1, align: 'left' },
+    { dx: 0.85, dy: 1, align: 'left' },
+    { dx: -0.85, dy: -1, align: 'right' },
+    { dx: -0.85, dy: 1, align: 'right' },
+    { dx: 1, dy: 0, align: 'left' },
+    { dx: -1, dy: 0, align: 'right' },
   ];
-
-  let fallbackPlacement = null;
 
   // Walk each candidate direction and progressively increase the distance
   // until we find a placement that clears the icon and existing callouts.
   for (const direction of directions) {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const distance = baseDistance + attempt * stepDistance;
-      const anchorX = blip.x + direction.dx * distance;
-      const anchorY = blip.y + direction.dy * distance;
+      let anchorX = blip.x + direction.dx * distance;
+      let anchorY = blip.y + direction.dy * distance;
 
       let boxX = anchorX;
       if (direction.align === 'right') {
@@ -469,7 +521,34 @@ function computeCalloutPlacement({
       } else if (direction.align === 'center') {
         boxX = anchorX - textWidth / 2;
       }
-      const boxY = anchorY - textHeight / 2;
+      let boxY = anchorY - textHeight / 2;
+
+      const clamped = clampCalloutWithinViewport({
+        boxX,
+        boxY,
+        textWidth,
+        textHeight,
+        margin,
+        viewportWidth,
+        viewportHeight,
+      });
+
+      if (!clamped) {
+        continue;
+      }
+
+      boxX = clamped.boxX;
+      boxY = clamped.boxY;
+
+      if (direction.align === 'right') {
+        anchorX = boxX + textWidth;
+      } else if (direction.align === 'center') {
+        anchorX = boxX + textWidth / 2;
+      } else {
+        anchorX = boxX;
+      }
+
+      anchorY = boxY + textHeight / 2;
 
       const bounds = { x: boxX, y: boxY, width: textWidth, height: textHeight };
       const expandedBounds = expandBounds(bounds, margin);
@@ -504,17 +583,6 @@ function computeCalloutPlacement({
       );
 
       if (overlapsExisting) {
-        if (!fallbackPlacement) {
-          fallbackPlacement = {
-            anchorX,
-            anchorY,
-            textAlign: direction.align,
-            textBaseline: 'middle',
-            bounds,
-            expandedBounds,
-            margin,
-          };
-        }
         continue;
       }
 
@@ -526,9 +594,12 @@ function computeCalloutPlacement({
           : anchorX;
       const pointerTargetY = anchorY;
 
+      const pointerVecX = anchorX - blip.x;
+      const pointerVecY = anchorY - blip.y;
+      const pointerVecLength = Math.hypot(pointerVecX, pointerVecY) || 1;
       const pointerStart = {
-        x: blip.x + direction.dx * markerWidth * 0.45,
-        y: blip.y + direction.dy * markerHeight * 0.45,
+        x: blip.x + (pointerVecX / pointerVecLength) * markerWidth * 0.45,
+        y: blip.y + (pointerVecY / pointerVecLength) * markerHeight * 0.45,
       };
       const pointerEnd = { x: pointerTargetX, y: pointerTargetY };
 
@@ -557,37 +628,6 @@ function computeCalloutPlacement({
         pointerControl,
       };
     }
-  }
-
-  // Fallback to the first slot that cleared the aircraft marker even if we
-  // still overlap another tag. The callout will still render farther out so
-  // it never covers the icon itself.
-  if (fallbackPlacement) {
-    const { anchorX, anchorY, textAlign, bounds, expandedBounds } = fallbackPlacement;
-    const pointerStart = { x: blip.x, y: blip.y - markerHeight * 0.45 };
-    const pointerEnd = { x: anchorX, y: anchorY };
-    const vecX = pointerEnd.x - pointerStart.x;
-    const vecY = pointerEnd.y - pointerStart.y;
-    const length = Math.hypot(vecX, vecY) || 1;
-    const midX = (pointerStart.x + pointerEnd.x) / 2;
-    const midY = (pointerStart.y + pointerEnd.y) / 2;
-    const controlOffset = Math.min(fontSize * 1.15, length * 0.35);
-    const pointerControl = {
-      x: midX - (vecY / length) * controlOffset,
-      y: midY + (vecX / length) * controlOffset,
-    };
-
-    return {
-      anchorX,
-      anchorY,
-      textAlign,
-      textBaseline: 'middle',
-      bounds,
-      expandedBounds,
-      pointerStart,
-      pointerEnd,
-      pointerControl,
-    };
   }
 
   return null;
@@ -3221,6 +3261,8 @@ function drawRadar(deltaTime) {
           markerHeight,
           existingPlacements: labelPlacements,
           iconBounds: iconCollisionBounds,
+          viewportWidth: canvas.width,
+          viewportHeight: canvas.height,
         });
 
         if (placement) {
