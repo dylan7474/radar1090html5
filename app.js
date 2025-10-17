@@ -15,7 +15,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.10.3';
+const APP_VERSION = 'V1.10.4';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -2612,6 +2612,22 @@ function getBlipLabelAlpha(blip, alpha) {
   return alpha * 0.9;
 }
 
+function getCalloutAlpha(craft, { highlighted = false, selected = false } = {}) {
+  if (highlighted || selected) {
+    return 1;
+  }
+
+  const ageSec = Number.isFinite(craft?.lastMessageAgeSec) ? craft.lastMessageAgeSec : null;
+  if (ageSec === null) {
+    return 0.92;
+  }
+
+  const normalizedAge = clamp(ageSec / 15, 0, 1);
+  const maxAlpha = 0.94;
+  const minAlpha = 0.6;
+  return maxAlpha - (maxAlpha - minAlpha) * normalizedAge;
+}
+
 function isCraftHighlighted(key, now = Date.now()) {
   if (!key || !state.alertHighlights?.size) {
     return false;
@@ -2948,9 +2964,12 @@ function drawLabelCallouts(labelPlacements, drawUprightAt) {
     const endX = clamp(request.originX, displayBox.left, displayBox.right);
     const endY = clamp(request.originY, displayBox.top, displayBox.bottom);
 
+    const connectorAlpha = Math.min(0.75, request.alpha);
+    const connectorColor = request.connectorColor || 'rgba(166, 206, 255, 0.45)';
+
     ctx.save();
-    ctx.globalAlpha = Math.min(0.75, request.alpha);
-    ctx.strokeStyle = 'rgba(166, 206, 255, 0.45)';
+    ctx.globalAlpha = connectorAlpha;
+    ctx.strokeStyle = connectorColor;
     ctx.lineWidth = Math.max(1, primaryFontSize * 0.08);
     ctx.beginPath();
     ctx.moveTo(request.originX, request.originY);
@@ -2984,9 +3003,12 @@ function drawLabelCallouts(labelPlacements, drawUprightAt) {
       const boxWidth = metrics.width + backgroundPadding * 2;
       const boxHeight = metrics.height + backgroundPadding * 2;
 
-      ctx.fillStyle = 'rgba(10, 15, 28, 0.82)';
+      const backgroundColor = request.backgroundColor || 'rgba(10, 15, 28, 0.82)';
+      const borderColor = request.borderColor || 'rgba(160, 200, 255, 0.32)';
+
+      ctx.fillStyle = backgroundColor;
       ctx.fillRect(boxLeft, boxTop, boxWidth, boxHeight);
-      ctx.strokeStyle = 'rgba(160, 200, 255, 0.32)';
+      ctx.strokeStyle = borderColor;
       ctx.lineWidth = Math.max(1, primaryFontSize * 0.06);
       ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
 
@@ -3251,7 +3273,6 @@ function drawRadar(deltaTime) {
   state.activeBlips = state.activeBlips.filter((blip) => now - blip.spawn < rotationPeriod && shouldDisplayBlip(blip));
 
   const showAircraftDetails = state.showAircraftDetails;
-  const activeBlipCount = state.activeBlips.length;
   const labelRequests = [];
 
   // draw blips
@@ -3259,7 +3280,6 @@ function drawRadar(deltaTime) {
     const age = (now - blip.spawn) / rotationPeriod;
     const alpha = Math.max(0, 1 - age);
     const headingRad = deg2rad(blip.heading);
-    const labelAlpha = getBlipLabelAlpha(blip, alpha);
     const highlighted = isCraftHighlighted(blip.key, highlightCheckTime);
 
     if (highlighted) {
@@ -3276,40 +3296,65 @@ function drawRadar(deltaTime) {
     ctx.stroke();
     ctx.restore();
 
-    drawBlipMarker(blip, radarRadius, alpha);
+    drawBlipMarker(blip, radarRadius, alpha);
+  }
 
-    if (showAircraftDetails && labelAlpha > 0) {
-      const markerHeight = getBlipMarkerHeight(blip, radarRadius);
-      const density = clamp((activeBlipCount - 8) / 28, 0, 1);
+  if (showAircraftDetails) {
+    const visibleCraft = state.trackedAircraft.filter(shouldDisplayCraft);
+    const visibleCount = visibleCraft.length;
+
+    if (visibleCount > 0) {
+      const density = clamp((visibleCount - 8) / 28, 0, 1);
       const maxFontSize = radarRadius * 0.05;
       const minFontSize = radarRadius * 0.034;
       const primaryFontSize = Math.max(12, Math.round(maxFontSize - (maxFontSize - minFontSize) * density));
       const lineSpacing = Math.max(2, Math.round(primaryFontSize * 0.24));
-      const identifierRaw = blip.flight || blip.hex || 'Unknown';
-      const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
-      const lines = [];
 
-      if (identifier) {
-        lines.push({ text: identifier, fontSize: primaryFontSize, fillStyle: 'rgba(255,255,255,0.95)' });
-      }
+      for (const craft of visibleCraft) {
+        const identifierRaw = craft.flight || craft.hex || 'Unknown';
+        const identifier = (identifierRaw || 'Unknown').trim().slice(0, 8) || 'Unknown';
+        if (!identifier) {
+          continue;
+        }
 
-      if (lines.length > 0) {
+        const distanceKm = Number.isFinite(craft.distanceKm) ? craft.distanceKm : radarRangeKm;
+        const screenRadius = Math.min(1, distanceKm / radarRangeKm) * radarRadius;
+        const angleRad = deg2rad(Number.isFinite(craft.bearing) ? craft.bearing : 0);
+        const craftX = centerX + Math.sin(angleRad) * screenRadius;
+        const craftY = centerY - Math.cos(angleRad) * screenRadius;
+        const markerHeight = getBlipMarkerHeight(craft, radarRadius);
         const separation = markerHeight * 0.6 + primaryFontSize * 0.8;
+        const highlighted = isCraftHighlighted(craft.key, highlightCheckTime);
+        const selected = state.selectedAircraftKey === craft.key;
+        const alpha = getCalloutAlpha(craft, { highlighted, selected });
+
+        if (alpha <= 0) {
+          continue;
+        }
+
+        const lineColor = highlighted || selected ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.95)';
+        const connectorColor = highlighted ? 'rgba(255, 214, 153, 0.85)' : undefined;
+        const backgroundColor = selected ? 'rgba(20, 44, 78, 0.95)' : undefined;
+        const borderColor = highlighted ? 'rgba(255, 214, 153, 0.75)' : undefined;
+
         labelRequests.push({
-          placementKey: blip.key,
-          lines,
+          placementKey: craft.key,
+          lines: [{ text: identifier, fontSize: primaryFontSize, fillStyle: lineColor }],
           fontSize: primaryFontSize,
           lineSpacing,
           align: 'center',
           baseline: 'bottom',
-          initialAnchorX: blip.x,
-          initialAnchorY: blip.y - separation,
+          initialAnchorX: craftX,
+          initialAnchorY: craftY - separation,
           preferredPosition: 'top',
-          originX: blip.x,
-          originY: blip.y,
-          alpha: labelAlpha,
+          originX: craftX,
+          originY: craftY,
+          alpha,
           backgroundPadding: Math.round(primaryFontSize * 0.55),
           collisionPadding: Math.round(primaryFontSize * 0.65),
+          connectorColor,
+          backgroundColor,
+          borderColor,
         });
       }
     }
