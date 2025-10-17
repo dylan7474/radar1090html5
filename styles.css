@@ -266,6 +266,19 @@ main.app.data-hidden .data-panel {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015);
 }
 
+.control-row--single {
+  grid-template-columns: 1fr;
+}
+
+.control-row--single .control-buttons {
+  justify-self: stretch;
+  justify-content: center;
+}
+
+.control-row--single .control-button {
+  width: 100%;
+}
+
 .control-info {
   display: grid;
   gap: 0.15rem;
