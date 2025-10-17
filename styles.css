@@ -577,6 +577,10 @@ canvas#radar {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
 }
 
+.modal__dialog--wide {
+  width: min(720px, 100%);
+}
+
 .modal__dialog h2 {
   margin: 0;
   font-size: 1.1rem;
@@ -616,6 +620,32 @@ canvas#radar {
 
 .modal__actions .control-button {
   min-width: 120px;
+}
+
+.manual-location__map {
+  position: relative;
+  width: 100%;
+  height: clamp(260px, 45vh, 360px);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  background: rgba(9, 14, 24, 0.9);
+}
+
+.manual-location__coordinates {
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(242, 246, 255, 0.92);
+}
+
+.manual-location__status {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.manual-location__status--error {
+  color: var(--accent);
 }
 
 @media (max-width: 600px) {

@@ -3,6 +3,10 @@ export const DEFAULT_RECEIVER_LOCATION = Object.freeze({
   lon: -1,
 });
 
+// Optional: provide a Google Maps JavaScript API key to enable the manual receiver
+// location picker. Leave blank to rely on the default embed-only overlay.
+export const GOOGLE_MAPS_API_KEY = '';
+
 export const CONTROLLED_AIRSPACES = Object.freeze([
   Object.freeze({
     icao: 'EGNV',

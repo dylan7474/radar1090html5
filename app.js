@@ -1,6 +1,7 @@
 import {
   CONTROLLED_AIRSPACES,
   DEFAULT_RECEIVER_LOCATION,
+  GOOGLE_MAPS_API_KEY,
   LAND_MASS_OUTLINES,
   LAND_MASS_SOURCES,
 } from './config.js';
@@ -15,7 +16,7 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.19';
+const APP_VERSION = 'V1.9.20';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -154,6 +155,7 @@ const alertRangeDecreaseBtn = document.getElementById('alert-range-decrease');
 const alertRangeIncreaseBtn = document.getElementById('alert-range-increase');
 const radarRotateBtn = document.getElementById('radar-rotate');
 const centerOnLocationBtn = document.getElementById('center-on-location');
+const manualLocationBtn = document.getElementById('manual-location');
 const geolocationPermissionModal = document.getElementById('geolocation-permission-modal');
 const geolocationPermissionBackdrop = document.getElementById('geolocation-permission-backdrop');
 const geolocationPermissionCloseBtn = document.getElementById('geolocation-permission-close');
@@ -166,6 +168,13 @@ const googleMapOverlayToggleBtn = document.getElementById('google-map-overlay-to
 const googleMapOverlayStateEl = document.getElementById('google-map-overlay-state');
 const googleMapOverlayEl = document.getElementById('google-map-overlay');
 const googleMapFrameEl = document.getElementById('google-map-frame');
+const manualLocationModal = document.getElementById('manual-location-modal');
+const manualLocationBackdrop = document.getElementById('manual-location-backdrop');
+const manualLocationMapEl = document.getElementById('manual-location-map');
+const manualLocationStatusEl = document.getElementById('manual-location-status');
+const manualLocationCoordinatesEl = document.getElementById('manual-location-coordinates');
+const manualLocationConfirmBtn = document.getElementById('manual-location-confirm');
+const manualLocationCancelBtn = document.getElementById('manual-location-cancel');
 const mainAppEl = document.querySelector('main.app');
 const controlsPanelEl = document.getElementById('controls-panel');
 const dataPanelEl = document.getElementById('data-panel');
@@ -189,15 +198,21 @@ const ICON_DEFINITIONS = {
 };
 
 const iconLibrary = Object.entries(ICON_DEFINITIONS).reduce((acc, [key, src]) => {
-  acc[key] = {
-    image: new Image(),
-    ready: false,
-    aspect: 1,
-    canvas: null,
-    src,
-  };
-  return acc;
+  acc[key] = {
+    image: new Image(),
+    ready: false,
+    aspect: 1,
+    canvas: null,
+    src,
+  };
+  return acc;
 }, {});
+
+let manualLocationReturnFocusEl = null;
+let manualLocationSelection = null;
+let manualLocationMap = null;
+let manualLocationMarker = null;
+let googleMapsApiPromise = null;
 
 // First character of the wake turbulence category -> icon key.
 const WTC_ICON_MAP = {
@@ -1324,6 +1339,39 @@ if (centerOnLocationBtn) {
     applyGeolocationPermissionState(geolocationPermissionState);
     void watchGeolocationPermissionState();
   }
+}
+
+if (manualLocationBtn) {
+  manualLocationBtn.addEventListener('click', () => {
+    openManualLocationPicker();
+  });
+}
+
+if (manualLocationCancelBtn) {
+  manualLocationCancelBtn.addEventListener('click', () => {
+    closeManualLocationPicker();
+  });
+}
+
+if (manualLocationConfirmBtn) {
+  manualLocationConfirmBtn.addEventListener('click', () => {
+    applyManualLocationSelection();
+  });
+}
+
+if (manualLocationBackdrop) {
+  manualLocationBackdrop.addEventListener('click', () => {
+    closeManualLocationPicker();
+  });
+}
+
+if (manualLocationModal) {
+  manualLocationModal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeManualLocationPicker();
+    }
+  });
 }
 
 if (aircraftDetailsToggleBtn) {
@@ -2731,6 +2779,244 @@ function refreshGoogleMapOverlay() {
   googleMapOverlayEl.classList.toggle('google-map-overlay--visible', shouldShowOverlay);
   googleMapOverlayEl.toggleAttribute('hidden', !shouldShowOverlay);
   googleMapOverlayEl.setAttribute('aria-hidden', shouldShowOverlay ? 'false' : 'true');
+}
+
+function loadGoogleMapsApi() {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Google Maps requires a browser environment.'));
+  }
+
+  if (window.google && window.google.maps) {
+    return Promise.resolve(window.google.maps);
+  }
+
+  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.trim().length === 0) {
+    return Promise.reject(new Error('Add a Google Maps API key in config.js to enable manual location.'));
+  }
+
+  if (googleMapsApiPromise) {
+    return googleMapsApiPromise;
+  }
+
+  googleMapsApiPromise = new Promise((resolve, reject) => {
+    const callbackName = '__radar1090ManualLocationInit';
+
+    const cleanup = () => {
+      if (Object.prototype.hasOwnProperty.call(window, callbackName)) {
+        delete window[callbackName];
+      }
+    };
+
+    window[callbackName] = () => {
+      cleanup();
+      resolve(window.google.maps);
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=${callbackName}`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => {
+      cleanup();
+      googleMapsApiPromise = null;
+      reject(new Error('Google Maps could not be loaded. Check the API key and your connection.'));
+    };
+
+    document.head.appendChild(script);
+  });
+
+  return googleMapsApiPromise;
+}
+
+function setManualLocationStatus(message, { isError = false } = {}) {
+  if (!manualLocationStatusEl) {
+    return;
+  }
+
+  manualLocationStatusEl.textContent = message || '';
+  manualLocationStatusEl.classList.toggle('manual-location__status--error', !!isError);
+  manualLocationStatusEl.toggleAttribute('hidden', !message);
+}
+
+function updateManualLocationCoordinatesDisplay(selection) {
+  if (!manualLocationCoordinatesEl) {
+    return;
+  }
+
+  if (!selection) {
+    manualLocationCoordinatesEl.textContent = 'Click the map to drop the marker.';
+    return;
+  }
+
+  const { lat, lon } = selection;
+  manualLocationCoordinatesEl.textContent = `${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
+}
+
+function updateManualLocationSelection(lat, lon, { fromMarker = false } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    manualLocationSelection = null;
+  } else {
+    manualLocationSelection = { lat, lon };
+    if (manualLocationMarker && !fromMarker) {
+      manualLocationMarker.setPosition({ lat, lng: lon });
+    }
+  }
+
+  if (manualLocationConfirmBtn) {
+    manualLocationConfirmBtn.toggleAttribute('disabled', !manualLocationSelection);
+  }
+
+  updateManualLocationCoordinatesDisplay(manualLocationSelection);
+}
+
+function getManualLocationDefaultCenter() {
+  const lat = Number.isFinite(state.receiver?.lat)
+    ? state.receiver.lat
+    : DEFAULT_RECEIVER_LOCATION.lat;
+  const lon = Number.isFinite(state.receiver?.lon)
+    ? state.receiver.lon
+    : DEFAULT_RECEIVER_LOCATION.lon;
+
+  return { lat, lon };
+}
+
+function ensureManualLocationMap(googleMaps) {
+  if (!manualLocationMapEl) {
+    return;
+  }
+
+  const center = getManualLocationDefaultCenter();
+  const latLngLiteral = { lat: center.lat, lng: center.lon };
+  const zoom = calculateGoogleMapZoom(RANGE_STEPS[state.rangeStepIndex] ?? RANGE_STEPS[DEFAULT_RANGE_STEP_INDEX]);
+
+  if (!manualLocationMap) {
+    manualLocationMap = new googleMaps.Map(manualLocationMapEl, {
+      center: latLngLiteral,
+      zoom,
+      mapTypeControl: false,
+      fullscreenControl: false,
+      streetViewControl: false,
+    });
+
+    manualLocationMarker = new googleMaps.Marker({
+      map: manualLocationMap,
+      position: latLngLiteral,
+      draggable: true,
+    });
+
+    manualLocationMarker.addListener('dragend', (event) => {
+      const lat = typeof event?.latLng?.lat === 'function' ? event.latLng.lat() : null;
+      const lon = typeof event?.latLng?.lng === 'function' ? event.latLng.lng() : null;
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        updateManualLocationSelection(lat, lon, { fromMarker: true });
+      }
+    });
+
+    manualLocationMap.addListener('click', (event) => {
+      const lat = typeof event?.latLng?.lat === 'function' ? event.latLng.lat() : null;
+      const lon = typeof event?.latLng?.lng === 'function' ? event.latLng.lng() : null;
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        updateManualLocationSelection(lat, lon);
+      }
+    });
+  } else {
+    manualLocationMap.setCenter(latLngLiteral);
+    manualLocationMap.setZoom(zoom);
+    if (manualLocationMarker) {
+      manualLocationMarker.setPosition(latLngLiteral);
+    }
+    googleMaps.event.trigger(manualLocationMap, 'resize');
+  }
+
+  updateManualLocationSelection(center.lat, center.lon, { fromMarker: true });
+
+  // Give the modal a moment to settle before forcing a resize so tiles render correctly.
+  setTimeout(() => {
+    googleMaps.event.trigger(manualLocationMap, 'resize');
+    manualLocationMap.setCenter(latLngLiteral);
+  }, 150);
+}
+
+async function openManualLocationPicker() {
+  if (!manualLocationModal) {
+    return;
+  }
+
+  manualLocationReturnFocusEl = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  manualLocationModal.removeAttribute('hidden');
+  manualLocationModal.setAttribute('aria-hidden', 'false');
+
+  if (manualLocationConfirmBtn) {
+    manualLocationConfirmBtn.setAttribute('disabled', 'true');
+  }
+
+  updateManualLocationSelection(NaN, NaN);
+  setManualLocationStatus('', { isError: false });
+
+  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.trim().length === 0) {
+    setManualLocationStatus('Add a Google Maps API key in config.js to use the manual picker.', {
+      isError: true,
+    });
+    if (manualLocationCancelBtn) {
+      manualLocationCancelBtn.focus();
+    }
+    return;
+  }
+
+  setManualLocationStatus('Loading Google Maps…');
+
+  try {
+    const googleMaps = await loadGoogleMapsApi();
+    ensureManualLocationMap(googleMaps);
+    setManualLocationStatus('Click the map to drop the marker or drag it into position.');
+    if (manualLocationCancelBtn) {
+      manualLocationCancelBtn.focus();
+    }
+  } catch (error) {
+    const message = error && typeof error === 'object' && typeof error.message === 'string'
+      ? error.message
+      : 'Google Maps could not be loaded. Check the API key and your connection.';
+    setManualLocationStatus(message, { isError: true });
+    if (manualLocationCancelBtn) {
+      manualLocationCancelBtn.focus();
+    }
+  }
+}
+
+function closeManualLocationPicker() {
+  if (!manualLocationModal) {
+    return;
+  }
+
+  manualLocationModal.setAttribute('hidden', 'true');
+  manualLocationModal.setAttribute('aria-hidden', 'true');
+
+  if (manualLocationReturnFocusEl && typeof manualLocationReturnFocusEl.focus === 'function') {
+    manualLocationReturnFocusEl.focus();
+  }
+
+  manualLocationReturnFocusEl = null;
+}
+
+function applyManualLocationSelection() {
+  if (!manualLocationSelection) {
+    return;
+  }
+
+  const { lat, lon } = manualLocationSelection;
+  state.receiver.lat = lat;
+  state.receiver.lon = lon;
+  state.receiver.hasOverride = true;
+  writeCookie('receiverLat', String(lat));
+  writeCookie('receiverLon', String(lon));
+  updateReceiverInfo();
+  updateRangeInfo();
+  rebuildLandMassOutlines({ silent: true });
+  showMessage('Receiver location updated.', { duration: DISPLAY_TIMEOUT_MS * 2 });
+  closeManualLocationPicker();
 }
 
 function formatCoordinate(value) {
