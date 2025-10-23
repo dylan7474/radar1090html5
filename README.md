@@ -134,6 +134,10 @@ python3 -m http.server 8080
 
 Then visit `http://localhost:8080` in your browser.
 
+If you need to produce the native executable build, run the repository `Makefile` so it emits the
+`z80` binary that matches the current configuration. Refer to
+[`docs/BUILD_TARGETS.md`](docs/BUILD_TARGETS.md) for a concise summary of the available targets.
+
 If you contribute code, please follow the conventions in [`AGENTS.md`](AGENTS.md) for
 styling, documentation, and testing expectations.
 
