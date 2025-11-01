@@ -120,6 +120,11 @@ the radar rings automatically.
 - If the audio stream cannot be reached, the app displays a warning message in the sidebar.
 - When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
   or audio endpoints are plain HTTP.
+- Web search lookups invoked through the companion `openaichat` utility require a
+  working DuckDuckGo endpoint. If requests fail with `HTTP 404` responses, point the
+  `AICHAT_SEARCH_URL` environment variable to the service root (e.g.
+  `https://ddg-webapp-aagd.vercel.app/search`) instead of the deprecated `/api/search`
+  path, leaving the `q` query parameter unchanged.
 
 ## Development
 
