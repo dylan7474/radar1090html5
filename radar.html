@@ -254,9 +254,9 @@
 
     // Prompt Personas
     const PERSONAS = {
-        MILITARY: `You are a TACTICAL DEFENSE COMPUTER. Tone: Cold, precise, military. Focus on threats, velocities, and airspace violations.`,
-        ATC: `You are a CIVILIAN AIR TRAFFIC CONTROLLER. Tone: Professional, calm, authoritative. Use aviation phraseology (Flight Levels, Knots, Vectors). Focus on safety and separation.`,
-        SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual. Focus on airlines, altitude (low passes), and "cool" aircraft actions.`
+        MILITARY: `You are a TACTICAL DEFENSE COMPUTER. Tone: Cold, precise, military. Focus on threats, velocities, and airspace violations. Do not ask questions. Do not offer assistance. You are a broadcast system only.`,
+        ATC: `You are a CIVILIAN AIR TRAFFIC CONTROLLER. Tone: Professional, calm, authoritative. Use aviation phraseology (Flight Levels, Knots, Vectors). Focus on safety and separation. Do not ask questions. Do not expect a readback. Broadcast information only.`,
+        SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual. Focus on airlines, altitude (low passes), and "cool" aircraft actions. Do not ask questions to the listener. Just narrate what you see.`
     };
 
     let aiProcessing = false;
@@ -530,14 +530,17 @@
         }).join("\n");
         
         const alertSection = alerts.length > 0 ? `CRITICAL ALERTS:\n${alerts.join("\n")}` : "No critical anomalies.";
+        
+        const timestamp = new Date().toLocaleString();
 
         const userPrompt = `
+            CURRENT TIME: ${timestamp}
             RADAR SUMMARY: ${count} contacts in range.
             CLOSEST TRAFFIC:
             ${report}
             ${alertSection}
             
-            INSTRUCTION: Provide a concise status update based on your Persona. If there are Alerts, prioritize them.
+            INSTRUCTION: Provide a concise status update based on your Persona. If there are Alerts, prioritize them. DO NOT ASK QUESTIONS. DO NOT OFFER ASSISTANCE.
         `;
 
         const res = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
