@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Sector Watch (Auto-Config)</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #58a6ff;
+            font-family: 'Segoe UI', 'Roboto', monospace;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        
+        h1 { 
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            text-shadow: 0 0 10px rgba(88, 166, 255, 0.5);
+            margin-bottom: 10px;
+        }
+        
+        #status-box {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 15px;
+            width: 90%;
+            max-width: 700px;
+            text-align: center;
+            margin-bottom: 20px;
+            color: #8b949e;
+        }
+
+        .config-info {
+            font-size: 0.85em;
+            color: #238636;
+            margin-top: 5px;
+            padding-top: 5px;
+            border-top: 1px solid #30363d;
+        }
+
+        #radar-screen {
+            flex-grow: 1;
+            width: 90%;
+            max-width: 700px;
+            border: 1px solid #30363d;
+            background: #010409;
+            border-radius: 6px;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .log-entry {
+            border-left: 3px solid #238636;
+            background: rgba(35, 134, 54, 0.1);
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 0 4px 4px 0;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        .log-entry.error {
+            border-left: 3px solid #da3633;
+            background: rgba(218, 54, 51, 0.1);
+        }
+
+        .log-header {
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .ai-text { 
+            color: #a5d6ff; 
+            font-size: 1.1em; 
+            line-height: 1.4;
+        }
+
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .controls label { cursor: pointer; color: #fff; }
+    </style>
+</head>
+<body>
+
+    <h1>📡 AI Sector Watch</h1>
+    
+    <div id="status-box">
+        <span id="status-indicator">System Initializing...</span>
+        <div id="model-indicator" class="config-info">Detecting Ollama Model...</div>
+        <div class="controls" style="margin-top:10px;">
+            <label><input type="checkbox" id="tts-toggle" checked> Enable Audio Commentary</label>
+        </div>
+    </div>
+
+    <div id="radar-screen">
+        </div>
+
+<script>
+    // --- CONFIGURATION ---
+    const CONFIG = {
+        dump1090Url: "http://192.168.50.100:8080/dump1090-fa/data/aircraft.json",
+        ollamaUrl: "http://127.0.0.1:11434", 
+        
+        // We will set this automatically now!
+        ollamaModel: null, 
+
+        myLat: 54.531836, 
+        myLon: -1.087954, 
+        scanInterval: 20000, 
+        maxPlanesToAnalyze: 6, 
+        minDistanceKm: 300   
+    };
+
+    let isProcessing = false;
+
+    // --- UTILITIES ---
+
+    function updateStatus(msg) {
+        document.getElementById('status-indicator').innerText = msg;
+    }
+
+    function logToScreen(summary, aiResponse, isError = false) {
+        const container = document.getElementById('radar-screen');
+        const div = document.createElement('div');
+        div.className = isError ? 'log-entry error' : 'log-entry';
+        div.innerHTML = `
+            <div class="log-header">
+                <span>${summary}</span>
+                <span style="font-size:0.8em; opacity:0.7">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="ai-text">${aiResponse}</div>
+        `;
+        container.prepend(div);
+    }
+
+    function speak(text) {
+        if (!document.getElementById('tts-toggle').checked) return;
+        window.speechSynthesis.cancel(); 
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.05; 
+        const voices = window.speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => v.name.includes("Google US English") || v.name.includes("Samantha"));
+        if (preferredVoice) utterance.voice = preferredVoice;
+        window.speechSynthesis.speak(utterance);
+    }
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; 
+        const dLat = deg2rad(lat2 - lat1);
+        const dLon = deg2rad(lon2 - lon1);
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+        return R * c;
+    }
+    function deg2rad(deg) { return deg * (Math.PI/180); }
+
+    // --- AUTO-CONFIGURATION ---
+
+    async function detectModel() {
+        try {
+            updateStatus("Connecting to Ollama...");
+            const response = await fetch(`${CONFIG.ollamaUrl}/api/tags`);
+            if (!response.ok) throw new Error("Failed to connect to Ollama");
+            
+            const data = await response.json();
+            const models = data.models || [];
+            
+            if (models.length === 0) {
+                document.getElementById('model-indicator').innerText = "Error: No models found in Ollama. Run 'ollama pull llama3'";
+                return false;
+            }
+
+            // Try to find llama3 or mistral, otherwise take the first one
+            const preferred = models.find(m => m.name.includes("llama3")) || 
+                              models.find(m => m.name.includes("mistral")) || 
+                              models[0];
+            
+            CONFIG.ollamaModel = preferred.name;
+            document.getElementById('model-indicator').innerText = `✅ Connected to: ${CONFIG.ollamaModel}`;
+            return true;
+
+        } catch (e) {
+            document.getElementById('model-indicator').innerText = `❌ Connection Failed: ${e.message}. Check CORS?`;
+            logToScreen("System Error", `Could not find Ollama at ${CONFIG.ollamaUrl}. Ensure 'OLLAMA_ORIGINS="*"' is set.`, true);
+            return false;
+        }
+    }
+
+    // --- CORE LOGIC ---
+
+    async function fetchAircraft() {
+        try {
+            const response = await fetch(CONFIG.dump1090Url);
+            const data = await response.json();
+            return data.aircraft || [];
+        } catch (e) {
+            updateStatus(`Error fetching Radar Data: ${e.message}`);
+            return [];
+        }
+    }
+
+    async function generateSectorCommentary(planeList, totalCount) {
+        if (!CONFIG.ollamaModel) return "Error: No AI Model selected.";
+
+        // Build Traffic Report string
+        let trafficReport = planeList.map(p => 
+            `- Flight ${p.flight} is ${p.dist.toFixed(1)}km away at ${p.alt}ft, speed ${p.speed}kts.`
+        ).join("\n");
+
+        const prompt = `
+        You are an expert air traffic commentator giving a live update.
+        
+        RADAR DATA:
+        Total Aircraft: ${totalCount}
+        Closest Traffic:
+        ${trafficReport}
+        
+        INSTRUCTIONS:
+        - Give a 2-sentence situation report on the traffic.
+        - Mention if it is busy or quiet.
+        - Highlight the closest plane or any low altitude planes (landing/takeoff).
+        - Be professional but enthusiastic.
+        `;
+
+        try {
+            const response = await fetch(`${CONFIG.ollamaUrl}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: CONFIG.ollamaModel,
+                    prompt: prompt,
+                    stream: false,
+                    options: { stop: ["User:", "\n\n"] }
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Ollama Server Error: ${response.status} ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            return data.response;
+
+        } catch (e) {
+            throw e; // Throw to main loop for logging
+        }
+    }
+
+    async function scanTraffic() {
+        if (isProcessing) return;
+        isProcessing = true;
+
+        // Ensure we have a model
+        if (!CONFIG.ollamaModel) {
+            const success = await detectModel();
+            if (!success) { isProcessing = false; return; }
+        }
+
+        updateStatus("Scanning Radar...");
+        const planes = await fetchAircraft();
+        const validPlanes = planes.filter(p => p.lat && p.lon);
+        
+        if (validPlanes.length === 0) {
+            updateStatus("Radar clear.");
+            isProcessing = false;
+            return;
+        }
+
+        // Enrich and Sort
+        const enrichedPlanes = validPlanes.map(p => ({
+            flight: (p.flight || "Unknown").trim(),
+            alt: p.alt_baro || 0,
+            speed: p.gs || 0,
+            lat: p.lat,
+            lon: p.lon,
+            dist: getDistance(CONFIG.myLat, CONFIG.myLon, p.lat, p.lon)
+        })).sort((a, b) => a.dist - b.dist);
+
+        const planesInRange = enrichedPlanes.filter(p => p.dist < CONFIG.minDistanceKm);
+
+        if (planesInRange.length > 0) {
+            const topPlanes = planesInRange.slice(0, CONFIG.maxPlanesToAnalyze);
+            updateStatus(`Analyzing ${planesInRange.length} targets using ${CONFIG.ollamaModel}...`);
+            
+            try {
+                const commentary = await generateSectorCommentary(topPlanes, planesInRange.length);
+                const headerText = `Active: ${planesInRange.length} | Lead: ${topPlanes[0].flight}`;
+                logToScreen(headerText, commentary);
+                speak(commentary);
+            } catch (e) {
+                logToScreen("AI Error", `Connection failed: ${e.message}`, true);
+            }
+        } else {
+            updateStatus(`Tracking ${validPlanes.length} planes (all > ${CONFIG.minDistanceKm}km away).`);
+        }
+
+        isProcessing = false;
+    }
+
+    // --- INIT ---
+    window.speechSynthesis.getVoices();
+    setTimeout(scanTraffic, 1000); // Start after 1s
+    setInterval(scanTraffic, CONFIG.scanInterval);
+
+</script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Sector Watch (Auto-Config)</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #58a6ff;
+            font-family: 'Segoe UI', 'Roboto', monospace;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        
+        h1 { 
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            text-shadow: 0 0 10px rgba(88, 166, 255, 0.5);
+            margin-bottom: 10px;
+        }
+        
+        #status-box {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 15px;
+            width: 90%;
+            max-width: 700px;
+            text-align: center;
+            margin-bottom: 20px;
+            color: #8b949e;
+        }
+
+        .config-info {
+            font-size: 0.85em;
+            color: #238636;
+            margin-top: 5px;
+            padding-top: 5px;
+            border-top: 1px solid #30363d;
+        }
+
+        #radar-screen {
+            flex-grow: 1;
+            width: 90%;
+            max-width: 700px;
+            border: 1px solid #30363d;
+            background: #010409;
+            border-radius: 6px;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .log-entry {
+            border-left: 3px solid #238636;
+            background: rgba(35, 134, 54, 0.1);
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 0 4px 4px 0;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        .log-entry.error {
+            border-left: 3px solid #da3633;
+            background: rgba(218, 54, 51, 0.1);
+        }
+
+        .log-header {
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .ai-text { 
+            color: #a5d6ff; 
+            font-size: 1.1em; 
+            line-height: 1.4;
+        }
+
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .controls label { cursor: pointer; color: #fff; }
+    </style>
+</head>
+<body>
+
+    <h1>📡 AI Sector Watch</h1>
+    
+    <div id="status-box">
+        <span id="status-indicator">System Initializing...</span>
+        <div id="model-indicator" class="config-info">Detecting Ollama Model...</div>
+        <div class="controls" style="margin-top:10px;">
+            <label><input type="checkbox" id="tts-toggle" checked> Enable Audio Commentary</label>
+        </div>
+    </div>
+
+    <div id="radar-screen">
+        </div>
+
+<script>
+    // --- CONFIGURATION ---
+    const CONFIG = {
+        dump1090Url: "http://192.168.50.100:8080/dump1090-fa/data/aircraft.json",
+        ollamaUrl: "http://127.0.0.1:11434", 
+        
+        // We will set this automatically now!
+        ollamaModel: null, 
+
+        myLat: 54.531836, 
+        myLon: -1.087954, 
+        scanInterval: 20000, 
+        maxPlanesToAnalyze: 6, 
+        minDistanceKm: 300   
+    };
+
+    let isProcessing = false;
+
+    // --- UTILITIES ---
+
+    function updateStatus(msg) {
+        document.getElementById('status-indicator').innerText = msg;
+    }
+
+    function logToScreen(summary, aiResponse, isError = false) {
+        const container = document.getElementById('radar-screen');
+        const div = document.createElement('div');
+        div.className = isError ? 'log-entry error' : 'log-entry';
+        div.innerHTML = `
+            <div class="log-header">
+                <span>${summary}</span>
+                <span style="font-size:0.8em; opacity:0.7">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="ai-text">${aiResponse}</div>
+        `;
+        container.prepend(div);
+    }
+
+    function speak(text) {
+        if (!document.getElementById('tts-toggle').checked) return;
+        window.speechSynthesis.cancel(); 
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.05; 
+        const voices = window.speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => v.name.includes("Google US English") || v.name.includes("Samantha"));
+        if (preferredVoice) utterance.voice = preferredVoice;
+        window.speechSynthesis.speak(utterance);
+    }
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; 
+        const dLat = deg2rad(lat2 - lat1);
+        const dLon = deg2rad(lon2 - lon1);
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+        return R * c;
+    }
+    function deg2rad(deg) { return deg * (Math.PI/180); }
+
+    // --- AUTO-CONFIGURATION ---
+
+    async function detectModel() {
+        try {
+            updateStatus("Connecting to Ollama...");
+            const response = await fetch(`${CONFIG.ollamaUrl}/api/tags`);
+            if (!response.ok) throw new Error("Failed to connect to Ollama");
+            
+            const data = await response.json();
+            const models = data.models || [];
+            
+            if (models.length === 0) {
+                document.getElementById('model-indicator').innerText = "Error: No models found in Ollama. Run 'ollama pull llama3'";
+                return false;
+            }
+
+            // Try to find llama3 or mistral, otherwise take the first one
+            const preferred = models.find(m => m.name.includes("llama3")) || 
+                              models.find(m => m.name.includes("mistral")) || 
+                              models[0];
+            
+            CONFIG.ollamaModel = preferred.name;
+            document.getElementById('model-indicator').innerText = `✅ Connected to: ${CONFIG.ollamaModel}`;
+            return true;
+
+        } catch (e) {
+            document.getElementById('model-indicator').innerText = `❌ Connection Failed: ${e.message}. Check CORS?`;
+            logToScreen("System Error", `Could not find Ollama at ${CONFIG.ollamaUrl}. Ensure 'OLLAMA_ORIGINS="*"' is set.`, true);
+            return false;
+        }
+    }
+
+    // --- CORE LOGIC ---
+
+    async function fetchAircraft() {
+        try {
+            const response = await fetch(CONFIG.dump1090Url);
+            const data = await response.json();
+            return data.aircraft || [];
+        } catch (e) {
+            updateStatus(`Error fetching Radar Data: ${e.message}`);
+            return [];
+        }
+    }
+
+    async function generateSectorCommentary(planeList, totalCount) {
+        if (!CONFIG.ollamaModel) return "Error: No AI Model selected.";
+
+        // Build Traffic Report string
+        let trafficReport = planeList.map(p => 
+            `- Flight ${p.flight} is ${p.dist.toFixed(1)}km away at ${p.alt}ft, speed ${p.speed}kts.`
+        ).join("\n");
+
+        const prompt = `
+        You are an expert air traffic commentator giving a live update.
+        
+        RADAR DATA:
+        Total Aircraft: ${totalCount}
+        Closest Traffic:
+        ${trafficReport}
+        
+        INSTRUCTIONS:
+        - Give a 2-sentence situation report on the traffic.
+        - Mention if it is busy or quiet.
+        - Highlight the closest plane or any low altitude planes (landing/takeoff).
+        - Be professional but enthusiastic.
+        `;
+
+        try {
+            const response = await fetch(`${CONFIG.ollamaUrl}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: CONFIG.ollamaModel,
+                    prompt: prompt,
+                    stream: false,
+                    options: { stop: ["User:", "\n\n"] }
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Ollama Server Error: ${response.status} ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            return data.response;
+
+        } catch (e) {
+            throw e; // Throw to main loop for logging
+        }
+    }
+
+    async function scanTraffic() {
+        if (isProcessing) return;
+        isProcessing = true;
+
+        // Ensure we have a model
+        if (!CONFIG.ollamaModel) {
+            const success = await detectModel();
+            if (!success) { isProcessing = false; return; }
+        }
+
+        updateStatus("Scanning Radar...");
+        const planes = await fetchAircraft();
+        const validPlanes = planes.filter(p => p.lat && p.lon);
+        
+        if (validPlanes.length === 0) {
+            updateStatus("Radar clear.");
+            isProcessing = false;
+            return;
+        }
+
+        // Enrich and Sort
+        const enrichedPlanes = validPlanes.map(p => ({
+            flight: (p.flight || "Unknown").trim(),
+            alt: p.alt_baro || 0,
+            speed: p.gs || 0,
+            lat: p.lat,
+            lon: p.lon,
+            dist: getDistance(CONFIG.myLat, CONFIG.myLon, p.lat, p.lon)
+        })).sort((a, b) => a.dist - b.dist);
+
+        const planesInRange = enrichedPlanes.filter(p => p.dist < CONFIG.minDistanceKm);
+
+        if (planesInRange.length > 0) {
+            const topPlanes = planesInRange.slice(0, CONFIG.maxPlanesToAnalyze);
+            updateStatus(`Analyzing ${planesInRange.length} targets using ${CONFIG.ollamaModel}...`);
+            
+            try {
+                const commentary = await generateSectorCommentary(topPlanes, planesInRange.length);
+                const headerText = `Active: ${planesInRange.length} | Lead: ${topPlanes[0].flight}`;
+                logToScreen(headerText, commentary);
+                speak(commentary);
+            } catch (e) {
+                logToScreen("AI Error", `Connection failed: ${e.message}`, true);
+            }
+        } else {
+            updateStatus(`Tracking ${validPlanes.length} planes (all > ${CONFIG.minDistanceKm}km away).`);
+        }
+
+        isProcessing = false;
+    }
+
+    // --- INIT ---
+    window.speechSynthesis.getVoices();
+    setTimeout(scanTraffic, 1000); // Start after 1s
+    setInterval(scanTraffic, CONFIG.scanInterval);
+
+</script>
+</body>
+</html>
