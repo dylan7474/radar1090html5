@@ -25,6 +25,13 @@
       box-shadow: 0 0 20px rgba(0, 255, 65, 0.2); animation: pulse 2s infinite;
     }
     @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; text-shadow: 0 0 10px #00ff41; } 100% { opacity: 0.8; } }
+    
+    /* Dropdown Styling */
+    .control-select {
+        background: #111; color: #00ff41; border: 1px solid #333;
+        font-family: 'Share Tech Mono', monospace; padding: 5px;
+        width: 100%; text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -48,7 +55,7 @@
         <h2>Controls</h2>
         <div class="control-panel">
           
-          <!-- 2. NEW AI CONTROLS (Inserted at Top) -->
+          <!-- AI CONTROLS -->
           <div class="control-row">
             <div class="control-info">
               <span class="control-name" style="color:#00ff41">AI Core</span>
@@ -58,6 +65,21 @@
               <button type="button" class="control-button" id="ai-toggle-btn">RETRY</button>
             </div>
           </div>
+
+          <!-- PERSONA SELECTOR -->
+          <div class="control-row">
+             <div class="control-info">
+                <span class="control-name">AI Persona</span>
+             </div>
+             <div class="control-buttons" style="flex: 2;">
+                <select id="ai-persona-select" class="control-select">
+                    <option value="MILITARY">Tactical Defense</option>
+                    <option value="ATC">Air Traffic Control</option>
+                    <option value="SPOTTER">Plane Spotter</option>
+                </select>
+             </div>
+          </div>
+
           <div class="control-row">
             <div class="control-info">
               <span class="control-name">Commentary</span>
@@ -69,7 +91,7 @@
           </div>
           <!-- END AI CONTROLS -->
 
-          <!-- ORIGINAL CONTROLS (Fully Preserved) -->
+          <!-- ORIGINAL CONTROLS -->
           <div class="control-row">
             <div class="control-info">
               <span class="control-name" id="volume-label">Volume</span>
@@ -174,7 +196,7 @@
         <div class="info-block" id="range-info"></div>
         <div class="info-block" id="receiver-info" aria-live="polite"></div>
       </div>
-      <!-- AI feeds into this existing ticker -->
+      <!-- Ticker used by AI -->
       <div class="message-ticker" id="message-ticker" aria-live="polite">
         <span class="message-ticker__track" id="message-ticker-track"></span>
       </div>
@@ -182,7 +204,7 @@
     </section>
   </main>
 
-  <!-- ORIGINAL MODALS -->
+  <!-- MODALS -->
   <div class="modal" id="geolocation-permission-modal" hidden aria-hidden="true">
     <div class="modal__backdrop" id="geolocation-permission-backdrop" role="presentation"></div>
     <section class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="geolocation-permission-title">
@@ -220,14 +242,21 @@
   <!-- 4. AI CONTROLLER SCRIPT -->
   <script>
     const AI_CONFIG = {
-        dump1090Url: "http://192.168.50.100:8080/dump1090-fa/data/aircraft.json",
+        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data", // Base URL for data
         ollamaUrl: "http://127.0.0.1:11434", 
         ollamaModel: null,
+        // Default location (Fallback)
         myLat: 54.531836, 
         myLon: -1.087954, 
         scanInterval: 20000, 
-        minDistanceKm: 300,
         maxPlanes: 5
+    };
+
+    // Prompt Personas
+    const PERSONAS = {
+        MILITARY: `You are a TACTICAL DEFENSE COMPUTER. Tone: Cold, precise, military. Focus on threats, velocities, and airspace violations.`,
+        ATC: `You are a CIVILIAN AIR TRAFFIC CONTROLLER. Tone: Professional, calm, authoritative. Use aviation phraseology (Flight Levels, Knots, Vectors). Focus on safety and separation.`,
+        SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual. Focus on airlines, altitude (low passes), and "cool" aircraft actions.`
     };
 
     let aiProcessing = false;
@@ -239,10 +268,37 @@
         document.getElementById('interaction-overlay').style.display = 'none';
         systemActive = true;
         window.speechSynthesis.resume();
-        updateAiStatus("INITIALIZING...", "#ffff00");
-        speak("System Online.");
-        detectModel();
-        setInterval(runAiCycle, AI_CONFIG.scanInterval);
+        
+        // Restore Cookie
+        const savedPersona = getCookie("aiPersona");
+        if(savedPersona && PERSONAS[savedPersona]) {
+            document.getElementById('ai-persona-select').value = savedPersona;
+        }
+
+        // 1. Sync Location with Receiver
+        updateReceiverLocation().then(() => {
+            updateAiStatus("INITIALIZING...", "#ffff00");
+            speak("System Online. Sensors Calibrated.");
+            detectModel();
+            setInterval(runAiCycle, AI_CONFIG.scanInterval);
+        });
+    }
+
+    // --- FETCH OFFICIAL RECEIVER LOCATION ---
+    async function updateReceiverLocation() {
+        try {
+            const r = await fetch(`${AI_CONFIG.dump1090Base}/receiver.json`);
+            if(r.ok) {
+                const d = await r.json();
+                if(d.lat && d.lon) {
+                    AI_CONFIG.myLat = d.lat;
+                    AI_CONFIG.myLon = d.lon;
+                    console.log(`AI: Synced to Receiver Location: ${d.lat}, ${d.lon}`);
+                }
+            }
+        } catch(e) {
+            console.log("AI: Could not fetch receiver.json, using fallback location.");
+        }
     }
 
     function updateAiStatus(msg, color) {
@@ -287,22 +343,77 @@
         }
     });
 
+    // --- RANGE CHANGE HANDLER ---
+    function handleRangeChange() {
+        window.speechSynthesis.cancel();
+        currentUtterance = null;
+        updateAiStatus("RANGE UPDATING...", "#ffff00");
+        setTimeout(() => {
+            aiProcessing = false; 
+            runAiCycle();
+        }, 500);
+    }
+    
+    document.getElementById('range-increase').addEventListener('click', handleRangeChange);
+    document.getElementById('range-decrease').addEventListener('click', handleRangeChange);
+
+    // --- PERSONA CHANGED HANDLER ---
+    document.getElementById('ai-persona-select').addEventListener('change', (e) => {
+        const newMode = e.target.value;
+        setCookie("aiPersona", newMode, 365);
+        window.speechSynthesis.cancel();
+        currentUtterance = null;
+        updateAiStatus("SWITCHING MODE...", "#ffff00");
+        aiProcessing = false; 
+        runAiCycle(); 
+    });
+
     function speak(text) {
         if (!voiceEnabled) return;
         window.speechSynthesis.cancel();
         
         currentUtterance = new SpeechSynthesisUtterance(text);
-        currentUtterance.rate = 1.1; 
+        const persona = document.getElementById('ai-persona-select').value;
+        currentUtterance.rate = persona === 'ATC' ? 1.0 : 1.1;
         
         const voices = window.speechSynthesis.getVoices();
-        const v = voices.find(v => v.name.includes("Google US English") || v.name.includes("Daniel") || v.name.includes("Samantha"));
-        if (v) currentUtterance.voice = v;
+        
+        // --- VOICE SELECTION (UK PRIORITY) ---
+        const v = voices.find(v => 
+            v.lang === 'en-GB' || 
+            v.name.includes("UK English") || 
+            v.name.includes("Daniel") || 
+            v.name.includes("Arthur") || 
+            v.name.includes("Martha")
+        );
+        
+        if (v) {
+            currentUtterance.voice = v;
+        } else {
+            // Fallback
+            const vDefault = voices.find(v => v.name.includes("Google US English") || v.name.includes("Samantha"));
+            if (vDefault) currentUtterance.voice = vDefault;
+        }
         
         currentUtterance.onend = () => { currentUtterance = null; updateAiStatus("ONLINE", "#00ff41"); };
         updateAiStatus("BROADCASTING...", "#00ff41");
         window.speechSynthesis.speak(currentUtterance);
     }
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+
+    // --- HELPER TO GET UI RANGE ---
+    function getCurrentRangeLimit() {
+        const el = document.getElementById('range-value');
+        if (el) {
+            // Robust parsing to handle "50 km", "50km", " 50 "
+            const text = el.innerText || "";
+            const match = text.match(/(\d+)/);
+            if (match) {
+                return parseInt(match[0], 10);
+            }
+        }
+        return 50; // Fallback
+    }
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
@@ -327,30 +438,49 @@
 
     async function runAiCycle() {
         if (!systemActive || aiProcessing) return;
+        
+        if (window.speechSynthesis.speaking) {
+            console.log("AI: Channel Busy. Skipping scan.");
+            return; 
+        }
+
         if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
         
         aiProcessing = true;
         try {
-            const r = await fetch(AI_CONFIG.dump1090Url);
+            // Ensure we update location if it's changed on server
+            // await updateReceiverLocation(); // Uncomment if receiver moves (mobile setup)
+
+            const r = await fetch(`${AI_CONFIG.dump1090Base}/aircraft.json`);
             const d = await r.json();
             const valid = (d.aircraft || []).filter(p => p.lat && p.lon);
             
-            const enriched = valid.map(p => ({
-                id: (p.flight || "UFO").trim(),
-                alt: p.alt_baro || 0,
-                speed: p.gs || 0,
-                dist: getDistance(AI_CONFIG.myLat, AI_CONFIG.myLon, p.lat, p.lon)
-            })).sort((a, b) => a.dist - b.dist);
+            const enriched = valid.map(p => {
+                const dist = getDistance(AI_CONFIG.myLat, AI_CONFIG.myLon, p.lat, p.lon);
+                return {
+                    id: (p.flight || "UFO").trim(),
+                    alt: p.alt_baro || 0,
+                    speed: p.gs || 0,
+                    lat: p.lat, lon: p.lon,
+                    track: p.track || 0,
+                    vertRate: p.baro_rate || 0,
+                    dist: dist
+                };
+            }).sort((a, b) => a.dist - b.dist);
 
-            const inRange = enriched.filter(p => p.dist < AI_CONFIG.minDistanceKm);
+            // --- DYNAMIC RANGE FILTERING ---
+            const currentMaxRange = getCurrentRangeLimit();
+            const inRange = enriched.filter(p => p.dist < currentMaxRange);
             
             if (inRange.length > 0) {
                 updateAiStatus("ANALYZING...", "#ffff00");
-                const top = inRange.slice(0, AI_CONFIG.maxPlanes);
-                const commentary = await generateCommentary(top, inRange.length);
                 
-                const isAlert = top[0].dist < 20;
-                const header = isAlert ? `ALERT [${top[0].id}]` : `UPDATE [${inRange.length} TARGETS]`;
+                const alerts = analyzeConditions(inRange);
+                const top = inRange.slice(0, AI_CONFIG.maxPlanes);
+                const commentary = await generateCommentary(top, inRange.length, alerts);
+                
+                const isAlert = alerts.length > 0 || top[0].dist < 15;
+                const header = isAlert ? `ALERT` : `STATUS`;
                 
                 aiLog(header, commentary, isAlert ? 'alert' : 'normal');
                 speak(commentary);
@@ -362,27 +492,60 @@
         aiProcessing = false;
     }
 
-    async function generateCommentary(targets, count) {
-        const report = targets.map(p => {
-            let altDesc = p.alt < 1000 ? "NAP OF EARTH" : "CRUISING";
-            let speedDesc = p.speed > 400 ? "HIGH VELOCITY" : "SUBSONIC";
-            return `Contact ${p.id}: Range ${p.dist.toFixed(0)}km, ${altDesc}, ${speedDesc}.`;
-        }).join("\n");
+    // --- TELEMETRY ANALYSIS ENGINE ---
+    function analyzeConditions(planes) {
+        let detected = [];
+        const scope = planes.slice(0, 5);
+        
+        scope.forEach(p => {
+            const bearingToMe = calculateBearing(p.lat, p.lon, AI_CONFIG.myLat, AI_CONFIG.myLon);
+            let diff = Math.abs(p.track - bearingToMe);
+            if (diff > 180) diff = 360 - diff;
+            
+            if (diff < 20 && p.dist < 50) detected.push(`Target ${p.id} is INBOUND on approach vector.`);
+            if (p.vertRate > 2000) detected.push(`Target ${p.id} performing RAPID CLIMB.`);
+            if (p.vertRate < -2000) detected.push(`Target ${p.id} performing RAPID DESCENT.`);
+            if (p.alt < 1000 && p.dist < 20) detected.push(`Target ${p.id} at LOW ALTITUDE.`);
+        });
 
-        const systemPrompt = `
-            You are a TACTICAL RADAR AI. 
-            Analyze the data and output ONE concise, military-style status line.
-            No markdown. No "System ready" messages.
-            Example: "Multiple contacts. Target Alpha on approach."
+        for(let i=0; i<scope.length; i++) {
+            for(let j=i+1; j<scope.length; j++) {
+                const p1 = scope[i];
+                const p2 = scope[j];
+                const d = getDistance(p1.lat, p1.lon, p2.lat, p2.lon);
+                const altDiff = Math.abs(p1.alt - p2.alt);
+                if (d < 5 && altDiff < 1000) detected.push(`TRAFFIC ALERT: ${p1.id} and ${p2.id} in CLOSE PROXIMITY.`);
+            }
+        }
+        return detected;
+    }
+
+    async function generateCommentary(targets, count, alerts) {
+        const personaKey = document.getElementById('ai-persona-select').value;
+        const basePersona = PERSONAS[personaKey];
+
+        const report = targets.map(p => {
+            let altDesc = p.alt < 1000 ? "LOW" : "HIGH";
+            return `${p.id}: Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft, Spd ${p.speed}kts, Trk ${p.track}°.`;
+        }).join("\n");
+        
+        const alertSection = alerts.length > 0 ? `CRITICAL ALERTS:\n${alerts.join("\n")}` : "No critical anomalies.";
+
+        const userPrompt = `
+            RADAR SUMMARY: ${count} contacts in range.
+            CLOSEST TRAFFIC:
+            ${report}
+            ${alertSection}
+            
+            INSTRUCTION: Provide a concise status update based on your Persona. If there are Alerts, prioritize them.
         `;
-        const userPrompt = `RADAR CONTACTS: ${count}.\n${report}\nSTATUS REPORT:`;
 
         const res = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: AI_CONFIG.ollamaModel,
-                messages: [{role: "system", content: systemPrompt}, {role: "user", content: userPrompt}],
+                messages: [{role: "system", content: basePersona}, {role: "user", content: userPrompt}],
                 stream: false
             })
         });
@@ -390,12 +553,41 @@
         return data.message.content.trim();
     }
 
+    // Math Helpers
     function getDistance(lat1, lon1, lat2, lon2) {
         const R = 6371; 
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
         const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2); 
         return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+    }
+    
+    function calculateBearing(lat1, lon1, lat2, lon2) {
+        const y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
+        const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+                  Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos((lon2 - lon1) * Math.PI / 180);
+        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    // Cookie Helpers
+    function setCookie(name, value, days) {
+        let expires = "";
+        if (days) {
+            const date = new Date();
+            date.setTime(date.getTime() + (days*24*60*60*1000));
+            expires = "; expires=" + date.toUTCString();
+        }
+        document.cookie = name + "=" + (value || "")  + expires + "; path=/";
+    }
+    function getCookie(name) {
+        const nameEQ = name + "=";
+        const ca = document.cookie.split(';');
+        for(let i=0;i < ca.length;i++) {
+            let c = ca[i];
+            while (c.charAt(0)==' ') c = c.substring(1,c.length);
+            if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+        }
+        return null;
     }
   </script>
 </body>
