@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.30
+**Current Version:** V1.9.31
 
 ---
 
@@ -141,6 +141,23 @@ the radar rings automatically.
 - Use the **Show Log** button under the AI panel to inspect recent dump1090 and Ollama
   requests with response codes and durations—handy when requests are routed through
   `lighttpd` or another reverse proxy.
+- To verify the server side of Ollama when troubleshooting 404/CORS errors, run these on
+  the host that serves the dashboard:
+
+  ```bash
+  # Confirm Ollama responds locally
+  curl -i http://127.0.0.1:11434/api/tags
+
+  # Confirm CORS headers include your dashboard origin
+  curl -i -H "Origin: http://YOUR_DASHBOARD_HOST" http://127.0.0.1:11434/api/tags
+
+  # If using a lighttpd proxy at /ollama, confirm the path forwards correctly
+  curl -i http://127.0.0.1/ollama/api/tags
+  ```
+
+  Replace `YOUR_DASHBOARD_HOST` with the hostname you load in the browser (e.g.
+  `http://192.168.50.123`). Successful calls should return HTTP 200 and include
+  an `Access-Control-Allow-Origin` header that permits the dashboard.
 - If the audio stream cannot be reached, the app displays a warning message in the sidebar.
 - When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
   or audio endpoints are plain HTTP.

@@ -328,14 +328,15 @@
     let currentUtterance = null;
     let isSpeaking = false;
     let audioContext = null; 
-    let msgHistory = []; 
-    let visInterval = null; 
-    
+    let msgHistory = [];
+    let visInterval = null;
+
     let carrierNode = null;
     let carrierGain = null;
     let noiseBuffer = null;
     let monitorInterval = null;
     let lastAiStatus = { text: null, color: null };
+    let serverDiagnosticsLogged = false;
 
     function startSystem() {
         document.getElementById('interaction-overlay').style.display = 'none';
@@ -645,6 +646,20 @@
                 aiLog("AI ERROR", `Ollama connection failed at ${candidate}: ${e.message || e}`, 'alert');
                 if ((e.message || '').includes('Status 404') && candidate.includes('/ollama')) {
                     aiLog('DEBUG', 'Hint: /ollama returned 404 — ensure your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 with trailing slash preservation.', 'debug');
+                }
+                if (!serverDiagnosticsLogged) {
+                    const origin = window.location.origin;
+                    let proxyPath = '/ollama';
+                    try {
+                        const parsed = new URL(candidate);
+                        proxyPath = parsed.pathname || proxyPath;
+                    } catch (err) {
+                        console.debug('Falling back to default proxy path hint', err);
+                    }
+
+                    const cleanProxyPath = proxyPath.replace(/\/$/, '');
+                    aiLog('DEBUG', `Server-side tests: curl -i http://127.0.0.1:11434/api/tags ; curl -i -H "Origin: ${origin}" http://127.0.0.1:11434/api/tags ; if proxying, curl -i http://127.0.0.1${cleanProxyPath}/api/tags`, 'debug');
+                    serverDiagnosticsLogged = true;
                 }
             }
         }
