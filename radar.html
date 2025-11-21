@@ -340,7 +340,38 @@
     let serverDiagnosticsLogged = false;
     let proxyHintLogged = false;
     let corsEnvHintLogged = false;
+    let remediationLogged = false;
+    let lastProxy404Candidate = null;
+    let lastCorsBlockedCandidate = null;
+    let lastOpaqueCandidate = null;
     const corsProbeLogged = {};
+
+    function logOllamaRemediation() {
+        if (remediationLogged) return;
+        remediationLogged = true;
+
+        aiLog('DEBUG', 'Ollama remediation checklist:', 'debug');
+        if (lastProxy404Candidate) {
+            aiLog('DEBUG', ' - /ollama returned 404. Add a reverse-proxy rule to forward /ollama/* to 127.0.0.1:11434 (lighttpd example below).', 'debug');
+            aiLog('DEBUG', '   $HTTP["url"].startswith("/ollama/") { proxy.server = ("" => (( "host" => "127.0.0.1", "port" => 11434 ))) }', 'debug');
+        }
+        if (lastCorsBlockedCandidate || lastOpaqueCandidate) {
+            aiLog('DEBUG', ' - Direct port responded without CORS. Enable Access-Control-Allow-Origin on Ollama or access it via a same-origin /ollama proxy.', 'debug');
+            aiLog('DEBUG', '   Example: export OLLAMA_ORIGINS="*" && export OLLAMA_HOST=0.0.0.0 && systemctl restart ollama', 'debug');
+        }
+
+        const origin = window.location.origin;
+        let proxyPath = '/ollama';
+        if (lastProxy404Candidate) {
+            try {
+                proxyPath = new URL(lastProxy404Candidate).pathname.replace(/\/$/, '') || proxyPath;
+            } catch (err) {
+                console.debug('Unable to parse proxy path from candidate', err);
+            }
+        }
+        aiLog('DEBUG', ` - Server-side checks: curl -i http://127.0.0.1:11434/api/tags ; curl -i -H "Origin: ${origin}" http://127.0.0.1:11434/api/tags ; curl -i http://127.0.0.1${proxyPath}/api/tags`, 'debug');
+        aiLog('DEBUG', 'If the proxy curl returns 404, the rule is missing. If the Origin curl lacks Access-Control-Allow-Origin, enable CORS or proxy.', 'debug');
+    }
 
     function startSystem() {
         document.getElementById('interaction-overlay').style.display = 'none';
@@ -652,6 +683,7 @@
                 console.error(`Ollama detection failed at ${candidate}`, e);
                 aiLog("AI ERROR", `Ollama connection failed at ${candidate}: ${e.message || e}`, 'alert');
                 if ((e.message || '').includes('Status 404') && candidate.includes('/ollama')) {
+                    lastProxy404Candidate = candidate;
                     if (!proxyHintLogged) {
                         aiLog('DEBUG', 'Hint: /ollama returned 404 — ensure your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 with trailing slash preservation. Example:', 'debug');
                         aiLog('DEBUG', 'lighttpd snippet ->   $HTTP["url"].startswith("/ollama/") { proxy.server  =  ("" => (( "host" => "127.0.0.1", "port" => 11434 ))) }', 'debug');
@@ -659,6 +691,9 @@
                     }
                 }
                 if ((e.message || '').includes('Failed to fetch') && !corsProbeLogged[candidate]) {
+                    if (candidate.includes(':11434')) {
+                        lastCorsBlockedCandidate = candidate;
+                    }
                     corsProbeLogged[candidate] = true;
                     probeOllamaReachability(candidate);
                     if (candidate.includes(':11434') && !corsEnvHintLogged) {
@@ -688,6 +723,8 @@
         if (lastError) {
             aiLog("AI ERROR", `No Ollama endpoint reachable (${lastError.message || lastError}).`, 'alert');
         }
+
+        logOllamaRemediation();
         return false;
     }
 
@@ -702,6 +739,7 @@
             const elapsed = Math.round(performance.now() - started);
             clearTimeout(timer);
             if (resp && resp.type === 'opaque') {
+                lastOpaqueCandidate = candidate;
                 aiLog('DEBUG', `Ollama responded (opaque/no-cors) in ${elapsed}ms — service reachable but CORS/proxy headers are missing. Add Access-Control-Allow-Origin:* on Ollama or forward /ollama/* via lighttpd.`, 'debug');
             } else {
                 aiLog('DEBUG', `No-cors probe returned type=${resp && resp.type}, status=${resp && resp.status} in ${elapsed}ms`, 'debug');
@@ -729,6 +767,7 @@
         }
 
         aiLog('DEBUG', 'Self-test complete. If every candidate returns 404, confirm your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 and preserves trailing slashes.', 'debug');
+        logOllamaRemediation();
     }
 
     async function runAiCycle() {

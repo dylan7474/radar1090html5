@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.34
+**Current Version:** V1.9.35
 
 ---
 
@@ -145,6 +145,9 @@ the radar rings automatically.
   detected Ollama endpoints. The results land in the comms log so you can tell whether
   the browser is blocked by CORS, hitting a proxy 404, or actually reaching the
   service.
+- After a failed detection or self-test, the comms log now prints an "Ollama
+  remediation checklist" with the exact proxy/CORS commands to run (including a
+  lighttpd snippet and server-side curl tests) based on the observed failures.
 - To verify the server side of Ollama when troubleshooting 404/CORS errors, run these on
   the host that serves the dashboard:
 
