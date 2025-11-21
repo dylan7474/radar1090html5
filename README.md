@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.24
+**Current Version:** V1.9.38
 
 ---
 
@@ -83,6 +83,27 @@ The dashboard expects the dump1090-fa JSON endpoints to live at
 `http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the
 top of `app.js` if your receiver runs on a different host, port, or protocol.
 
+The AI assistant attempts to reach an Ollama instance on the same host that serves the
+dashboard (defaulting to port `11434`). Override the target by setting `localStorage.ollamaUrl`
+in your browser (for example, `http://192.168.50.4:11434`). If the dashboard is on HTTPS but
+Ollama only exposes HTTP, the app now automatically retries with `http://` so LAN clients can
+still connect. For lighttpd or other reverse proxies, you can also expose Ollama on the same
+origin at `/ollama` (or `/ollama/`) to dodge CORS and mixed-content blocks—the app now tests
+both paths automatically and will log a 404 hint if the proxy rule is missing. Saved custom
+targets are normalized to strip trailing slashes so `/api/*` requests do not double up and
+return 404s under strict proxies. Connection
+attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
+when the browser blocks HTTP calls from an HTTPS dashboard.
+
+Example lighttpd reverse proxy (requires `mod_proxy`):
+
+```conf
+$HTTP["url"] =~ "^/ollama(/|$)" {
+  proxy.header = ("upgrade" => "enable")
+  proxy.server = ("" => (("host" => "127.0.0.1", "port" => 11434)))
+}
+```
+
 Default receiver coordinates now live in [`config.js`](config.js). Adjust the
 `DEFAULT_RECEIVER_LOCATION` export there to match your station's latitude and longitude.
 The sidebar shows the current coordinates so you can confirm the values in use.
@@ -117,6 +138,75 @@ the radar rings automatically.
 - Connection issues surface in the message area and in the browser developer console
   (open it with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> or
   <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd> on macOS).
+- Use the **Show Log** button under the AI panel to inspect recent dump1090 and Ollama
+  requests with response codes and durations—handy when requests are routed through
+  `lighttpd` or another reverse proxy.
+- Click **Run AI Self-Test** in the sidebar to fire CORS and no-cors probes against all
+  detected Ollama endpoints. The results land in the comms log so you can tell whether
+  the browser is blocked by CORS, hitting a proxy 404, or actually reaching the
+  service.
+- After a failed detection or self-test, the comms log now prints an "Ollama
+  remediation checklist" with the exact proxy/CORS commands to run (including a
+  lighttpd snippet and server-side curl tests) based on the observed failures.
+  If you see HTTP 403 in the log, Ollama is rejecting your dashboard origin;
+  set `OLLAMA_ORIGINS` to the URL you use in the browser (e.g.
+  `http://192.168.50.123`) or `*` and restart the service.
+- To verify the server side of Ollama when troubleshooting 404/CORS errors, run these on
+  the host that serves the dashboard:
+
+  ```bash
+  # Confirm Ollama responds locally
+  curl -i http://127.0.0.1:11434/api/tags
+
+  # Confirm CORS headers include your dashboard origin
+  curl -i -H "Origin: http://YOUR_DASHBOARD_HOST" http://127.0.0.1:11434/api/tags
+
+  # If using a lighttpd proxy at /ollama, confirm the path forwards correctly
+  curl -i http://127.0.0.1/ollama/api/tags
+  ```
+
+  Replace `YOUR_DASHBOARD_HOST` with the hostname you load in the browser (e.g.
+  `http://192.168.50.123`). Successful calls should return HTTP 200 and include
+  an `Access-Control-Allow-Origin` header that permits the dashboard.
+- If direct calls to `http://127.0.0.1:11434` succeed but the browser still fails
+  or returns HTTP 403 when an `Origin` header is present, enable CORS directly on
+  Ollama before restarting the service:
+
+  ```bash
+  export OLLAMA_ORIGINS="*"
+  export OLLAMA_HOST=0.0.0.0
+  systemctl restart ollama
+  ```
+
+  For a persistent change on systemd installs, add these lines to
+  `/etc/systemd/system/ollama.service.d/override.conf` under `[Service]`:
+
+  ```conf
+  Environment=OLLAMA_ORIGINS=*
+  Environment=OLLAMA_HOST=0.0.0.0
+  ```
+
+  Then run `systemctl daemon-reload && systemctl restart ollama`.
+- If `OLLAMA_ORIGINS="*"` is present but 403 responses persist, pin explicit
+  origins instead of the wildcard—for example:
+
+  ```bash
+  export OLLAMA_ORIGINS="http://192.168.50.123,http://192.168.50.129"
+  export OLLAMA_HOST=0.0.0.0
+  systemctl restart ollama
+  ```
+
+  This helps on older Ollama builds that ignore `*` for security reasons. Use the
+  dashboard URL(s) you actually load in the browser.
+- On low-spec hosts, Ollama can take significantly longer to respond during
+  discovery and chat. The app now waits up to 60 seconds for tag discovery,
+  self-tests, and chat requests. If you still see timeouts immediately after
+  booting, wait for the Ollama service to finish loading models before
+  refreshing the dashboard.
+- If the in-app log shows `opaque/no-cors` probe results for Ollama, the browser could
+  reach the service but was blocked by missing CORS headers or proxy rules; add
+  `Access-Control-Allow-Origin:*` on Ollama or forward `/ollama/*` to the service on
+  the same origin to resolve it.
 - If the audio stream cannot be reached, the app displays a warning message in the sidebar.
 - When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
   or audio endpoints are plain HTTP.

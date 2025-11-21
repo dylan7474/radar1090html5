@@ -44,6 +44,7 @@
     .log-modal-content { background: #0a0a0a; border: 1px solid #00ff41; color: #eee; font-family: 'Share Tech Mono', monospace; max-height: 60vh; overflow-y: auto; padding: 20px; }
     .log-entry { border-bottom: 1px solid #333; padding: 8px 0; font-size: 12px; }
     .log-entry.alert { color: #ff5555; }
+    .log-entry.debug { color: #9ec5ff; }
     .log-timestamp { color: #666; margin-right: 10px; }
   </style>
 </head>
@@ -101,6 +102,7 @@
           
           <div class="control-row control-row--single">
              <div class="control-buttons">
+               <button type="button" class="control-button" id="ai-self-test-btn">RUN AI SELF-TEST</button>
                 <button type="button" class="control-button" id="show-log-btn">VIEW COMMS LOG</button>
              </div>
           </div>
@@ -223,17 +225,100 @@
 
   <!-- 4. AI CONTROLLER SCRIPT -->
   <script>
+    function normalizeOllamaBase(url) {
+        if (!url) return url;
+        try {
+            const parsed = new URL(url);
+            parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+            return parsed.toString().replace(/\/+$/, '');
+        } catch (e) {
+            return url.replace(/\/+$/, '');
+        }
+    }
+
+    function resolveOllamaCandidates() {
+        const saved = localStorage.getItem('ollamaUrl');
+        const protocol = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
+        const host = window.location.hostname || '127.0.0.1';
+        const primary = `${protocol}//${host}:11434`;
+        const originProxy = `${window.location.origin}/ollama`;
+        const originProxySlash = `${window.location.origin}/ollama/`;
+
+        // If the dashboard is served via HTTPS but Ollama is only available over HTTP,
+        // try the downgraded scheme as a fallback so LAN users still connect.
+        const candidates = saved ? [saved] : [primary];
+        if (!saved && protocol === 'https:') {
+            candidates.push(`http://${host}:11434`);
+        }
+
+        // If lighttpd or another reverse proxy exposes Ollama on the same origin
+        // (e.g., via "/ollama"), try that path to avoid mixed-content or CORS blocks.
+        candidates.push(originProxy, originProxySlash);
+
+        return [...new Set(candidates.map(normalizeOllamaBase))];
+    }
+
+    async function fetchWithTimeout(resource, options = {}, timeoutMs = 8000, label = 'fetch') {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const started = performance.now();
+        const isMixedContentRisk = window.location.protocol === 'https:' && resource.startsWith('http:');
+
+        if (isMixedContentRisk) {
+            aiLog('DEBUG', `Mixed-content risk: page is https but request is http -> ${resource}`, 'debug');
+        }
+
+        aiLog('DEBUG', `Requesting ${label} -> ${resource} (timeout ${timeoutMs}ms)`, 'debug');
+        try {
+            const response = await fetch(resource, { ...options, signal: controller.signal });
+            const elapsed = Math.round(performance.now() - started);
+            aiLog('DEBUG', `Response ${label}: status ${response.status} in ${elapsed}ms`, 'debug');
+            return response;
+        } catch (e) {
+            const elapsed = Math.round(performance.now() - started);
+            const hints = [];
+
+            if (e.name === 'AbortError') {
+                hints.push('request timed out');
+            }
+
+            if (isMixedContentRisk) {
+                hints.push('browser may block HTTP calls from HTTPS pages');
+            }
+
+            if (e instanceof TypeError && resource.startsWith('http')) {
+                hints.push('check CORS headers or reverse proxy to same origin');
+                if (resource.includes(':11434')) {
+                    hints.push('if Ollama is running, add Access-Control-Allow-Origin:* (or set up /ollama proxy) so browsers can reach it');
+                }
+            }
+
+            const hintText = hints.length ? ` Hint: ${hints.join('; ')}.` : '';
+            aiLog('AI ERROR', `${label} failed after ${elapsed}ms: ${e.message || e}.${hintText}`, 'alert');
+            throw e;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    const ollamaCandidates = resolveOllamaCandidates();
+
     const AI_CONFIG = {
-        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data", 
-        ollamaUrl: "http://127.0.0.1:11434", 
+        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data",
+        ollamaUrl: ollamaCandidates[0],
         ollamaModel: null,
-        myLat: 54.531836, 
-        myLon: -1.087954, 
-        locationName: "SECTOR", 
-        scanInterval: 20000, 
+        myLat: 54.531836,
+        myLon: -1.087954,
+        locationName: "SECTOR",
+        scanInterval: 20000,
         maxPlanes: 5,
-        weatherData: null 
+        weatherData: null
     };
+
+    // Slow hosts can take a while to load or answer Ollama requests; allow up to 60s.
+    const OLLAMA_DISCOVERY_TIMEOUT_MS = 60000;
+    const OLLAMA_SELF_TEST_TIMEOUT_MS = 60000;
+    const OLLAMA_CHAT_TIMEOUT_MS = 60000;
 
     const PERSONAS = {
         MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
@@ -249,13 +334,59 @@
     let currentUtterance = null;
     let isSpeaking = false;
     let audioContext = null; 
-    let msgHistory = []; 
-    let visInterval = null; 
-    
-    let carrierNode = null; 
+    let msgHistory = [];
+    let visInterval = null;
+
+    let carrierNode = null;
     let carrierGain = null;
     let noiseBuffer = null;
     let monitorInterval = null;
+    let lastAiStatus = { text: null, color: null };
+    let serverDiagnosticsLogged = false;
+    let proxyHintLogged = false;
+    let corsEnvHintLogged = false;
+    let corsForbiddenHintLogged = false;
+    let remediationLogged = false;
+    let lastProxy404Candidate = null;
+    let lastCorsBlockedCandidate = null;
+    let lastCorsForbiddenCandidate = null;
+    let lastOpaqueCandidate = null;
+    const corsProbeLogged = {};
+
+    function logOllamaRemediation() {
+        if (remediationLogged) return;
+        remediationLogged = true;
+
+        aiLog('DEBUG', 'Ollama remediation checklist:', 'debug');
+        if (lastProxy404Candidate) {
+            aiLog('DEBUG', ' - /ollama returned 404. Add a reverse-proxy rule to forward /ollama/* to 127.0.0.1:11434 (lighttpd example below).', 'debug');
+            aiLog('DEBUG', '   $HTTP["url"].startswith("/ollama/") { proxy.server = ("" => (( "host" => "127.0.0.1", "port" => 11434 ))) }', 'debug');
+        }
+        if (lastCorsBlockedCandidate || lastOpaqueCandidate) {
+            aiLog('DEBUG', ' - Direct port responded without CORS. Enable Access-Control-Allow-Origin on Ollama or access it via a same-origin /ollama proxy.', 'debug');
+            aiLog('DEBUG', '   Example: export OLLAMA_ORIGINS="*" && export OLLAMA_HOST=0.0.0.0 && systemctl restart ollama', 'debug');
+        }
+        if (lastCorsForbiddenCandidate) {
+            aiLog('DEBUG', ' - Ollama returned 403 Forbidden for browser Origin. Set OLLAMA_ORIGINS to your dashboard URL (or "*") and restart.', 'debug');
+            const origin = window.location.origin;
+            aiLog('DEBUG', `   export OLLAMA_ORIGINS="${origin}" && export OLLAMA_HOST=0.0.0.0 && systemctl restart ollama`, 'debug');
+            aiLog('DEBUG', '   (systemd) sudo mkdir -p /etc/systemd/system/ollama.service.d', 'debug');
+            aiLog('DEBUG', `   (systemd) printf "[Service]\nEnvironment=OLLAMA_ORIGINS=${origin}\nEnvironment=OLLAMA_HOST=0.0.0.0\n" | sudo tee /etc/systemd/system/ollama.service.d/override.conf`, 'debug');
+            aiLog('DEBUG', '   (systemd) sudo systemctl daemon-reload && sudo systemctl restart ollama', 'debug');
+        }
+
+        const origin = window.location.origin;
+        let proxyPath = '/ollama';
+        if (lastProxy404Candidate) {
+            try {
+                proxyPath = new URL(lastProxy404Candidate).pathname.replace(/\/$/, '') || proxyPath;
+            } catch (err) {
+                console.debug('Unable to parse proxy path from candidate', err);
+            }
+        }
+        aiLog('DEBUG', ` - Server-side checks: curl -i http://127.0.0.1:11434/api/tags ; curl -i -H "Origin: ${origin}" http://127.0.0.1:11434/api/tags ; curl -i http://127.0.0.1${proxyPath}/api/tags`, 'debug');
+        aiLog('DEBUG', 'If the proxy curl returns 404, the rule is missing. If the Origin curl lacks Access-Control-Allow-Origin, enable CORS or proxy.', 'debug');
+    }
 
     function startSystem() {
         document.getElementById('interaction-overlay').style.display = 'none';
@@ -264,6 +395,8 @@
 
         systemActive = true;
         window.speechSynthesis.resume(); // Force Audio Context Wakeup
+
+        aiLog("DEBUG", `Startup: host=${window.location.hostname} protocol=${window.location.protocol} dump1090=${AI_CONFIG.dump1090Base} ollamaCandidates=${ollamaCandidates.join(', ')}`, 'debug');
         
         try {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -440,10 +573,13 @@
     const logModal = document.getElementById('ai-log-modal');
     const logContent = document.getElementById('ai-log-content');
     document.getElementById('show-log-btn').addEventListener('click', () => {
-        logContent.innerHTML = msgHistory.map(e => 
+        logContent.innerHTML = msgHistory.map(e =>
             `<div class="log-entry ${e.type}"><span class="log-timestamp">[${e.time}]</span><strong>${e.title}:</strong> ${e.text}</div>`
         ).join('');
         logModal.hidden = false;
+    });
+    document.getElementById('ai-self-test-btn').addEventListener('click', () => {
+        runAiSelfTest().catch(e => aiLog('AI ERROR', `Self-test failed: ${e.message || e}`, 'alert'));
     });
     document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
     document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
@@ -460,14 +596,14 @@
     async function fetchLocalWeather() {
         try {
             const url = `https://api.open-meteo.com/v1/forecast?latitude=${AI_CONFIG.myLat}&longitude=${AI_CONFIG.myLon}&current=temperature_2m,wind_speed_10m,weather_code`;
-            const r = await fetch(url);
+            const r = await fetchWithTimeout(url, {}, 6000, 'local weather');
             const d = await r.json();
             if(d.current) {
                 AI_CONFIG.weatherData = { temp: d.current.temperature_2m, wind: d.current.wind_speed_10m };
                 const el = document.getElementById('weather-display');
                 if(el) el.innerText = `WEATHER: ${AI_CONFIG.weatherData.temp}°C | WIND: ${AI_CONFIG.weatherData.wind} KM/H`;
             }
-        } catch(e) {}
+        } catch(e) { aiLog('DEBUG', `Weather fetch failed: ${e.message || e}`, 'debug'); }
     }
 
     async function updateReceiverLocation() {
@@ -479,26 +615,37 @@
                 const lon = t.match(/Lon:?\s*(-?[\d.]+)/);
                 if (lat && lon) { AI_CONFIG.myLat = parseFloat(lat[1]); AI_CONFIG.myLon = parseFloat(lon[1]); return; }
             }
-            const r = await fetch(`${AI_CONFIG.dump1090Base}/receiver.json`);
+            const r = await fetchWithTimeout(`${AI_CONFIG.dump1090Base}/receiver.json`, {}, 6000, 'dump1090 receiver');
             if(r.ok) {
                 const d = await r.json();
                 if(d.lat && d.lon) { AI_CONFIG.myLat = d.lat; AI_CONFIG.myLon = d.lon; }
             }
-        } catch(e) {}
+        } catch(e) {
+            aiLog("AI ERROR", `Unable to read receiver coordinates: ${e.message || e}`, 'alert');
+        }
     }
 
     function updateAiStatus(msg, color) {
         const el = document.getElementById('ai-status-text');
         if(el) { el.innerText = msg; el.style.color = color || '#fff'; }
+        if (msg !== lastAiStatus.text || color !== lastAiStatus.color) {
+            aiLog('DEBUG', `AI status -> ${msg} (${color || '#fff'})`, 'debug');
+            lastAiStatus = { text: msg, color: color };
+        }
     }
 
     function aiLog(title, text, type = 'normal') {
         const tick = document.getElementById('message-ticker-track');
         const time = new Date().toLocaleTimeString();
         const clean = text.replace(/\n/g, ' ');
-        if(tick) tick.innerText = `[${time}] ${title}: ${clean}`;
+        const payload = `[${time}] ${title}: ${clean}`;
+        if(tick) tick.innerText = payload;
         msgHistory.unshift({time: time, title: title, text: clean, type: type});
-        if(msgHistory.length > 20) msgHistory.pop();
+        if(msgHistory.length > 50) msgHistory.pop();
+
+        if (type === 'alert') console.error(payload);
+        else if (type === 'debug') console.debug(payload);
+        else console.log(payload);
     }
 
     document.getElementById('ai-toggle-btn').addEventListener('click', detectModel);
@@ -529,26 +676,143 @@
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
+        aiLog("DEBUG", `Attempting Ollama detection across ${ollamaCandidates.length} candidates`, 'debug');
+
+        let lastError = null;
+        for (const candidate of ollamaCandidates) {
+            AI_CONFIG.ollamaUrl = candidate;
+            aiLog("AI", `Detecting Ollama at ${candidate}`);
+            try {
+                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_DISCOVERY_TIMEOUT_MS, `Ollama tags @ ${candidate}`);
+                if (!r.ok) throw new Error(`Status ${r.status}`);
+                const d = await r.json();
+                if (!d.models || d.models.length === 0) throw new Error('No models available');
+
+                const m = d.models.find(x => x.name.includes('llama3')) || d.models[0];
+                AI_CONFIG.ollamaModel = m.name;
+                aiLog("AI", `Connected to ${candidate} using ${AI_CONFIG.ollamaModel}`);
+                updateAiStatus("ONLINE", "#00ff41");
+                return true;
+            } catch (e) {
+                lastError = e;
+                console.error(`Ollama detection failed at ${candidate}`, e);
+                aiLog("AI ERROR", `Ollama connection failed at ${candidate}: ${e.message || e}`, 'alert');
+                if ((e.message || '').includes('Status 404') && candidate.includes('/ollama')) {
+                    lastProxy404Candidate = candidate;
+                    if (!proxyHintLogged) {
+                        aiLog('DEBUG', 'Hint: /ollama returned 404 — ensure your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 with trailing slash preservation. Example:', 'debug');
+                        aiLog('DEBUG', 'lighttpd snippet ->   $HTTP["url"].startswith("/ollama/") { proxy.server  =  ("" => (( "host" => "127.0.0.1", "port" => 11434 ))) }', 'debug');
+                        proxyHintLogged = true;
+                    }
+                }
+                if ((e.message || '').includes('Status 403')) {
+                    lastCorsForbiddenCandidate = candidate;
+                    if (!corsForbiddenHintLogged) {
+                        const origin = window.location.origin;
+                        aiLog('DEBUG', `403 Forbidden from ${candidate} — Ollama is rejecting browser Origin. Set OLLAMA_ORIGINS="${origin}" (or your dashboard URL) and restart Ollama.`, 'debug');
+                        aiLog('DEBUG', `Server check: curl -i -H "Origin: ${origin}" http://127.0.0.1:11434/api/tags should return 200 with Access-Control-Allow-Origin`, 'debug');
+                        aiLog('DEBUG', 'If using systemd, add OLLAMA_ORIGINS to /etc/systemd/system/ollama.service.d/override.conf then daemon-reload + restart.', 'debug');
+                        aiLog('DEBUG', `If wildcard (*) is set but 403 persists, pin explicit origins: export OLLAMA_ORIGINS="${origin},http://${window.location.hostname}" && systemctl restart ollama`, 'debug');
+                        aiLog('DEBUG', 'Verify the environment is active with: systemctl show ollama.service | grep OLLAMA_ORIGINS', 'debug');
+                        corsForbiddenHintLogged = true;
+                    }
+                }
+                if ((e.message || '').includes('Failed to fetch') && !corsProbeLogged[candidate]) {
+                    if (candidate.includes(':11434')) {
+                        lastCorsBlockedCandidate = candidate;
+                    }
+                    corsProbeLogged[candidate] = true;
+                    probeOllamaReachability(candidate);
+                    if (candidate.includes(':11434') && !corsEnvHintLogged) {
+                        aiLog('DEBUG', 'If direct port 11434 is reachable but blocked by the browser, set OLLAMA_ORIGINS="*" (or your dashboard URL) before starting Ollama, e.g.:', 'debug');
+                        aiLog('DEBUG', '  export OLLAMA_ORIGINS="*" && export OLLAMA_HOST=0.0.0.0 && systemctl restart ollama', 'debug');
+                        corsEnvHintLogged = true;
+                    }
+                }
+                if (!serverDiagnosticsLogged) {
+                    const origin = window.location.origin;
+                    let proxyPath = '/ollama';
+                    try {
+                        const parsed = new URL(candidate);
+                        proxyPath = parsed.pathname || proxyPath;
+                    } catch (err) {
+                        console.debug('Falling back to default proxy path hint', err);
+                    }
+
+                    const cleanProxyPath = proxyPath.replace(/\/$/, '');
+                    aiLog('DEBUG', `Server-side tests: curl -i http://127.0.0.1:11434/api/tags ; curl -i -H "Origin: ${origin}" http://127.0.0.1:11434/api/tags ; if proxying, curl -i http://127.0.0.1${cleanProxyPath}/api/tags`, 'debug');
+                    serverDiagnosticsLogged = true;
+                }
+            }
+        }
+
+        updateAiStatus("ERROR", "#ff3333");
+        if (lastError) {
+            aiLog("AI ERROR", `No Ollama endpoint reachable (${lastError.message || lastError}).`, 'alert');
+        }
+
+        logOllamaRemediation();
+        return false;
+    }
+
+    async function probeOllamaReachability(candidate) {
+        const url = `${candidate}/api/tags`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const started = performance.now();
         try {
-            const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/tags`);
-            if (!r.ok) throw new Error();
-            const d = await r.json();
-            const m = d.models.find(x => x.name.includes('llama3')) || d.models[0];
-            AI_CONFIG.ollamaModel = m.name;
-            updateAiStatus("ONLINE", "#00ff41");
-            return true;
-        } catch (e) { updateAiStatus("ERROR", "#ff3333"); return false; }
+            aiLog('DEBUG', `Probing reachability without CORS @ ${url}`, 'debug');
+            const resp = await fetch(url, { mode: 'no-cors', signal: controller.signal });
+            const elapsed = Math.round(performance.now() - started);
+            clearTimeout(timer);
+            if (resp && resp.type === 'opaque') {
+                lastOpaqueCandidate = candidate;
+                aiLog('DEBUG', `Ollama responded (opaque/no-cors) in ${elapsed}ms — service reachable but CORS/proxy headers are missing. Add Access-Control-Allow-Origin:* on Ollama or forward /ollama/* via lighttpd.`, 'debug');
+            } else {
+                aiLog('DEBUG', `No-cors probe returned type=${resp && resp.type}, status=${resp && resp.status} in ${elapsed}ms`, 'debug');
+            }
+        } catch (probeErr) {
+            clearTimeout(timer);
+            aiLog('DEBUG', `No-cors probe failed at ${candidate}: ${probeErr.message || probeErr}`, 'debug');
+        }
+    }
+
+    async function runAiSelfTest() {
+        const candidates = resolveOllamaCandidates();
+        aiLog('DEBUG', `Self-test: checking ${candidates.length} Ollama candidate(s): ${candidates.join(', ')}`, 'debug');
+
+        for (const candidate of candidates) {
+            try {
+                const resp = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_SELF_TEST_TIMEOUT_MS, `Self-test tags @ ${candidate}`);
+                const summary = `Self-test: ${candidate} responded with status ${resp.status} (type=${resp.type})`;
+                if (resp.status === 403) {
+                    lastCorsForbiddenCandidate = candidate;
+                    aiLog('DEBUG', `${summary} — add OLLAMA_ORIGINS for ${window.location.origin} or enable /ollama proxy.`, 'debug');
+                } else {
+                    aiLog(resp.ok ? 'AI' : 'DEBUG', summary, resp.ok ? 'normal' : 'debug');
+                }
+            } catch (e) {
+                aiLog('DEBUG', `Self-test (cors) failed at ${candidate}: ${e.message || e}`, 'debug');
+            }
+
+            await probeOllamaReachability(candidate);
+        }
+
+        aiLog('DEBUG', 'Self-test complete. If every candidate returns 404, confirm your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 and preserves trailing slashes.', 'debug');
+        logOllamaRemediation();
     }
 
     async function runAiCycle() {
         if (!systemActive || aiProcessing) return;
         if (isSpeaking) return; // Watchdog prevents overlap
         if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
-        
+
         aiProcessing = true;
         try {
+            aiLog('DEBUG', `AI cycle start (range=${getCurrentRangeLimit()}km, model=${AI_CONFIG.ollamaModel})`, 'debug');
             await updateReceiverLocation();
-            const r = await fetch(`${AI_CONFIG.dump1090Base}/aircraft.json`);
+            const r = await fetchWithTimeout(`${AI_CONFIG.dump1090Base}/aircraft.json`, {}, 7000, 'dump1090 aircraft');
+            if (!r.ok) throw new Error(`dump1090 status ${r.status}`);
             const d = await r.json();
             const valid = (d.aircraft || []).filter(p => p.lat && p.lon && (p.seen||0)<60);
             const enriched = valid.map(p => ({
@@ -561,7 +825,7 @@
 
             const limit = getCurrentRangeLimit();
             const inRange = enriched.filter(p => p.dist < limit);
-            
+
             if (inRange.length > 0) {
                 updateAiStatus("ANALYZING...", "#ffff00");
                 const alerts = analyzeConditions(inRange);
@@ -576,8 +840,13 @@
                 aiLog(isAlert ? "ALERT" : "STATUS", comms, isAlert ? 'alert' : 'normal');
                 speak(comms);
             }
-        } catch (e) { updateAiStatus("DATA ERROR", "#ff3333"); }
+        } catch (e) {
+            console.error("AI processing failed", e);
+            aiLog("AI ERROR", `Processing failed: ${e.message || e}`, 'alert');
+            updateAiStatus("DATA ERROR", "#ff3333");
+        }
         aiProcessing = false;
+        aiLog('DEBUG', 'AI cycle complete', 'debug');
     }
 
     function analyzeConditions(planes) {
@@ -603,11 +872,19 @@
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
         TASK: Short status update based on Persona. Alerts first. No questions.`;
 
-        const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
-        });
-        return (await r.json()).message.content.trim();
+        try {
+            const r = await fetchWithTimeout(`${AI_CONFIG.ollamaUrl}/api/chat`, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
+            }, OLLAMA_CHAT_TIMEOUT_MS, `Ollama chat @ ${AI_CONFIG.ollamaUrl}`);
+            if (!r.ok) throw new Error(`Status ${r.status}`);
+            return (await r.json()).message.content.trim();
+        } catch (e) {
+            console.error("Ollama chat request failed", e);
+            aiLog("AI ERROR", `Chat request failed: ${e.message || e}`, 'alert');
+            updateAiStatus("ERROR", "#ff3333");
+            return "AI COMMS LINK DOWN.";
+        }
     }
 
     function getDistance(lat1, lon1, lat2, lon2) {
