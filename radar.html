@@ -223,12 +223,21 @@
 
   <!-- 4. AI CONTROLLER SCRIPT -->
   <script>
+    function resolveOllamaUrl() {
+        const saved = localStorage.getItem('ollamaUrl');
+        if (saved) return saved;
+
+        const protocol = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
+        const host = window.location.hostname || '127.0.0.1';
+        return `${protocol}//${host}:11434`;
+    }
+
     const AI_CONFIG = {
-        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data", 
-        ollamaUrl: "http://127.0.0.1:11434", 
+        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data",
+        ollamaUrl: resolveOllamaUrl(),
         ollamaModel: null,
-        myLat: 54.531836, 
-        myLon: -1.087954, 
+        myLat: 54.531836,
+        myLon: -1.087954,
         locationName: "SECTOR", 
         scanInterval: 20000, 
         maxPlanes: 5,
@@ -529,15 +538,21 @@
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
+        aiLog("AI", `Detecting Ollama at ${AI_CONFIG.ollamaUrl}`);
         try {
             const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/tags`);
-            if (!r.ok) throw new Error();
+            if (!r.ok) throw new Error(`Status ${r.status}`);
             const d = await r.json();
             const m = d.models.find(x => x.name.includes('llama3')) || d.models[0];
             AI_CONFIG.ollamaModel = m.name;
             updateAiStatus("ONLINE", "#00ff41");
             return true;
-        } catch (e) { updateAiStatus("ERROR", "#ff3333"); return false; }
+        } catch (e) {
+            console.error("Ollama detection failed", e);
+            aiLog("AI ERROR", `Ollama connection failed: ${e.message || e}`, 'alert');
+            updateAiStatus("ERROR", "#ff3333");
+            return false;
+        }
     }
 
     async function runAiCycle() {
@@ -576,7 +591,11 @@
                 aiLog(isAlert ? "ALERT" : "STATUS", comms, isAlert ? 'alert' : 'normal');
                 speak(comms);
             }
-        } catch (e) { updateAiStatus("DATA ERROR", "#ff3333"); }
+        } catch (e) {
+            console.error("AI processing failed", e);
+            aiLog("AI ERROR", `Processing failed: ${e.message || e}`, 'alert');
+            updateAiStatus("DATA ERROR", "#ff3333");
+        }
         aiProcessing = false;
     }
 
@@ -603,11 +622,19 @@
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
         TASK: Short status update based on Persona. Alerts first. No questions.`;
 
-        const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
-        });
-        return (await r.json()).message.content.trim();
+        try {
+            const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
+            });
+            if (!r.ok) throw new Error(`Status ${r.status}`);
+            return (await r.json()).message.content.trim();
+        } catch (e) {
+            console.error("Ollama chat request failed", e);
+            aiLog("AI ERROR", `Chat request failed: ${e.message || e}`, 'alert');
+            updateAiStatus("ERROR", "#ff3333");
+            return "AI COMMS LINK DOWN.";
+        }
     }
 
     function getDistance(lat1, lon1, lat2, lon2) {
