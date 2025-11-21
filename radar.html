@@ -11,7 +11,7 @@
   
   <!-- AI Styles -->
   <style>
-    /* Interaction Overlay for Audio Permissions */
+    /* Interaction Overlay */
     #interaction-overlay {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background: rgba(5, 5, 5, 0.95); z-index: 9999;
@@ -26,17 +26,74 @@
     }
     @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; text-shadow: 0 0 10px #00ff41; } 100% { opacity: 0.8; } }
     
-    /* Dropdown Styling */
-    .control-select {
-        background: #111; color: #00ff41; border: 1px solid #333;
-        font-family: 'Share Tech Mono', monospace; padding: 5px;
-        width: 100%; text-transform: uppercase;
+    /* --- CUSTOM AI CONTROL STYLES --- */
+    
+    /* Status Row Tweaks */
+    .control-row.ai-status-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
+    .control-value.status-text {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        width: 100%;
+        font-size: 0.85em;
+        line-height: 1.2;
+        color: #00ff41;
+    }
+
+    /* NEW APPROACH: Custom Block Container 
+       We do NOT use .control-row here to avoid fighting the original CSS flex/height rules.
+    */
+    .ai-custom-block {
+        border-bottom: 1px solid #333; /* Mimic original separator if needed */
+        padding: 10px 0;
+        margin-bottom: 5px;
+        display: block;
+    }
+    
+    .ai-label {
+        display: block;
+        font-family: 'Share Tech Mono', monospace;
+        color: #aaa;
+        font-size: 14px;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .control-select {
+        background: #111; 
+        color: #00ff41; 
+        border: 1px solid #444;
+        font-family: 'Share Tech Mono', monospace; 
+        padding: 10px;
+        width: 100%; 
+        text-transform: uppercase;
+        font-size: 14px;
+        cursor: pointer;
+        border-radius: 4px;
+        box-sizing: border-box;
+        appearance: none; 
+        /* Custom Arrow Icon */
+        background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2300ff41%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+        background-repeat: no-repeat;
+        background-position: right 12px top 50%;
+        background-size: 10px auto;
+    }
+    .control-select:focus { outline: 1px solid #00ff41; background-color: #000; }
+    
+    /* Fix button width in status row */
+    .ai-status-row .control-button { min-width: 80px; }
+
   </style>
 </head>
 <body>
 
-  <!-- 1. INITIALIZATION OVERLAY -->
+  <!-- INITIALIZATION OVERLAY -->
   <div id="interaction-overlay" onclick="startSystem()">
     <div id="start-btn">INITIALIZE RADAR</div>
     <div style="margin-top: 20px; color: #888; font-family: monospace;">CLICK TO ACTIVATE AI & AUDIO LINKS</div>
@@ -56,28 +113,26 @@
         <div class="control-panel">
           
           <!-- AI CONTROLS -->
-          <div class="control-row">
+          
+          <!-- 1. STATUS ROW (Standard row but truncated text) -->
+          <div class="control-row ai-status-row">
             <div class="control-info">
               <span class="control-name" style="color:#00ff41">AI Core</span>
-              <span class="control-value" id="ai-status-text">OFFLINE</span>
+              <span class="control-value status-text" id="ai-status-text" title="Status">OFFLINE</span>
             </div>
             <div class="control-buttons">
               <button type="button" class="control-button" id="ai-toggle-btn">RETRY</button>
             </div>
           </div>
 
-          <!-- PERSONA SELECTOR -->
-          <div class="control-row">
-             <div class="control-info">
-                <span class="control-name">AI Persona</span>
-             </div>
-             <div class="control-buttons" style="flex: 2;">
-                <select id="ai-persona-select" class="control-select">
-                    <option value="MILITARY">Tactical Defense</option>
-                    <option value="ATC">Air Traffic Control</option>
-                    <option value="SPOTTER">Plane Spotter</option>
-                </select>
-             </div>
+          <!-- 2. PERSONA SELECTOR (New Custom Block Layout) -->
+          <div class="ai-custom-block">
+             <span class="ai-label">AI Persona Profile</span>
+             <select id="ai-persona-select" class="control-select">
+                <option value="MILITARY">Tactical Defense</option>
+                <option value="ATC">Air Traffic Control</option>
+                <option value="SPOTTER">Plane Spotter</option>
+             </select>
           </div>
 
           <div class="control-row">
@@ -254,18 +309,28 @@
 
     // Prompt Personas
     const PERSONAS = {
-        MILITARY: `You are a TACTICAL DEFENSE COMPUTER. Tone: Cold, precise, military. Focus on threats, velocities, and airspace violations. Do not ask questions. Do not offer assistance. You are a broadcast system only.`,
-        ATC: `You are a CIVILIAN AIR TRAFFIC CONTROLLER. Tone: Professional, calm, authoritative. Use aviation phraseology (Flight Levels, Knots, Vectors). Focus on safety and separation. Do not ask questions. Do not expect a readback. Broadcast information only.`,
-        SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual. Focus on airlines, altitude (low passes), and "cool" aircraft actions. Do not ask questions to the listener. Just narrate what you see.`
+        MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
+        
+        ATC: `You are LONDON CENTER AIR TRAFFIC CONTROL. Tone: Professional, routine, calm, human. Vocabulary: "Traffic", "Flight Level", "Knots", "Descend", "Maintain", "Squawk", "Good evening", "Radar Contact". Focus on safe separation and traffic advisories. Phrase it as a standard radio broadcast to pilots. Output a single advisory line. Do not ask questions.`,
+        
+        SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual, friendly. Focus on airlines ("Oh look, a British Airways!"), altitude (low passes), and "cool" aircraft actions. Do not ask questions to the listener. Just narrate what you see with excitement.`
     };
 
     let aiProcessing = false;
     let systemActive = false;
     let voiceEnabled = true;
     let currentUtterance = null;
+    let isSpeaking = false; // Custom flag for robustness
 
     function startSystem() {
         document.getElementById('interaction-overlay').style.display = 'none';
+        
+        // --- SCROLL RADAR TO CENTER VIEW ---
+        const radar = document.getElementById('radar');
+        if(radar) {
+            radar.scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});
+        }
+
         systemActive = true;
         window.speechSynthesis.resume();
         
@@ -287,13 +352,29 @@
     // --- FETCH OFFICIAL RECEIVER LOCATION ---
     async function updateReceiverLocation() {
         try {
+            // 1. Try DOM Extraction First (Most accurate to what user sees)
+            const domInfo = document.getElementById('receiver-info');
+            if (domInfo && domInfo.innerText.includes('Lat')) {
+                // Example parsing: "Lat: 54.53, Lon: -1.08"
+                const text = domInfo.innerText;
+                const latMatch = text.match(/Lat:?\s*(-?[\d.]+)/);
+                const lonMatch = text.match(/Lon:?\s*(-?[\d.]+)/);
+                if (latMatch && lonMatch) {
+                    AI_CONFIG.myLat = parseFloat(latMatch[1]);
+                    AI_CONFIG.myLon = parseFloat(lonMatch[1]);
+                    console.log(`AI: Synced to UI Location: ${AI_CONFIG.myLat}, ${AI_CONFIG.myLon}`);
+                    return;
+                }
+            }
+
+            // 2. Fallback to Server Config
             const r = await fetch(`${AI_CONFIG.dump1090Base}/receiver.json`);
             if(r.ok) {
                 const d = await r.json();
                 if(d.lat && d.lon) {
                     AI_CONFIG.myLat = d.lat;
                     AI_CONFIG.myLon = d.lon;
-                    console.log(`AI: Synced to Receiver Location: ${d.lat}, ${d.lon}`);
+                    console.log(`AI: Synced to Receiver Config: ${d.lat}, ${d.lon}`);
                 }
             }
         } catch(e) {
@@ -306,6 +387,7 @@
         if(el) {
             el.innerText = msg;
             el.style.color = color || '#fff';
+            el.title = msg; // Tooltip for truncated text
         }
     }
 
@@ -345,8 +427,11 @@
 
     // --- RANGE CHANGE HANDLER ---
     function handleRangeChange() {
+        // Explicit cancellation is allowed for user actions
         window.speechSynthesis.cancel();
         currentUtterance = null;
+        isSpeaking = false;
+        
         updateAiStatus("RANGE UPDATING...", "#ffff00");
         setTimeout(() => {
             aiProcessing = false; 
@@ -361,16 +446,27 @@
     document.getElementById('ai-persona-select').addEventListener('change', (e) => {
         const newMode = e.target.value;
         setCookie("aiPersona", newMode, 365);
+        
+        // Explicit cancellation allowed for user actions
         window.speechSynthesis.cancel();
         currentUtterance = null;
+        isSpeaking = false;
+        
         updateAiStatus("SWITCHING MODE...", "#ffff00");
-        aiProcessing = false; 
-        runAiCycle(); 
+        
+        // 500ms delay to ensure audio buffer flushes completely
+        setTimeout(() => {
+             aiProcessing = false; 
+             runAiCycle(); 
+        }, 500);
     });
 
     function speak(text) {
         if (!voiceEnabled) return;
-        window.speechSynthesis.cancel();
+        
+        // IMPORTANT: Do NOT call cancel() here. 
+        // If previous speech is finishing, let it finish or queue.
+        // runAiCycle() logic prevents us from getting here if channel is busy.
         
         currentUtterance = new SpeechSynthesisUtterance(text);
         const persona = document.getElementById('ai-persona-select').value;
@@ -395,8 +491,23 @@
             if (vDefault) currentUtterance.voice = vDefault;
         }
         
-        currentUtterance.onend = () => { currentUtterance = null; updateAiStatus("ONLINE", "#00ff41"); };
-        updateAiStatus("BROADCASTING...", "#00ff41");
+        // State Management
+        currentUtterance.onstart = () => { 
+            isSpeaking = true; 
+            updateAiStatus("BROADCASTING...", "#00ff41"); 
+        };
+        
+        currentUtterance.onend = () => { 
+            isSpeaking = false; 
+            currentUtterance = null; 
+            updateAiStatus("ONLINE", "#00ff41"); 
+        };
+        
+        currentUtterance.onerror = () => {
+            isSpeaking = false;
+            currentUtterance = null;
+        };
+
         window.speechSynthesis.speak(currentUtterance);
     }
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
@@ -439,7 +550,8 @@
     async function runAiCycle() {
         if (!systemActive || aiProcessing) return;
         
-        if (window.speechSynthesis.speaking) {
+        // --- SPEECH QUEUE CHECK (ROBUST) ---
+        if (window.speechSynthesis.speaking || isSpeaking) {
             console.log("AI: Channel Busy. Skipping scan.");
             return; 
         }
@@ -448,14 +560,19 @@
         
         aiProcessing = true;
         try {
-            // Ensure we update location if it's changed on server
-            // await updateReceiverLocation(); // Uncomment if receiver moves (mobile setup)
+            // Refresh Location info just in case user moved map center
+            await updateReceiverLocation();
 
             const r = await fetch(`${AI_CONFIG.dump1090Base}/aircraft.json`);
             const d = await r.json();
+            
+            // FILTER 1: Valid Position
             const valid = (d.aircraft || []).filter(p => p.lat && p.lon);
             
-            const enriched = valid.map(p => {
+            // FILTER 2: Stale Data (Standard radar rules: Hide if > 60s old)
+            const active = valid.filter(p => (p.seen || 0) < 60);
+
+            const enriched = active.map(p => {
                 const dist = getDistance(AI_CONFIG.myLat, AI_CONFIG.myLon, p.lat, p.lon);
                 return {
                     id: (p.flight || "UFO").trim(),
@@ -468,7 +585,7 @@
                 };
             }).sort((a, b) => a.dist - b.dist);
 
-            // --- DYNAMIC RANGE FILTERING ---
+            // FILTER 3: Range Limit
             const currentMaxRange = getCurrentRangeLimit();
             const inRange = enriched.filter(p => p.dist < currentMaxRange);
             
@@ -530,7 +647,6 @@
         }).join("\n");
         
         const alertSection = alerts.length > 0 ? `CRITICAL ALERTS:\n${alerts.join("\n")}` : "No critical anomalies.";
-        
         const timestamp = new Date().toLocaleString();
 
         const userPrompt = `
