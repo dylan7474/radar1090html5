@@ -230,6 +230,7 @@
         const host = window.location.hostname || '127.0.0.1';
         const primary = `${protocol}//${host}:11434`;
         const originProxy = `${window.location.origin}/ollama`;
+        const originProxySlash = `${window.location.origin}/ollama/`;
 
         // If the dashboard is served via HTTPS but Ollama is only available over HTTP,
         // try the downgraded scheme as a fallback so LAN users still connect.
@@ -240,7 +241,7 @@
 
         // If lighttpd or another reverse proxy exposes Ollama on the same origin
         // (e.g., via "/ollama"), try that path to avoid mixed-content or CORS blocks.
-        candidates.push(originProxy);
+        candidates.push(originProxy, originProxySlash);
 
         return [...new Set(candidates)];
     }
@@ -275,6 +276,9 @@
 
             if (e instanceof TypeError && resource.startsWith('http')) {
                 hints.push('check CORS headers or reverse proxy to same origin');
+                if (resource.includes(':11434')) {
+                    hints.push('if Ollama is running, add Access-Control-Allow-Origin:* (or set up /ollama proxy) so browsers can reach it');
+                }
             }
 
             const hintText = hints.length ? ` Hint: ${hints.join('; ')}.` : '';
@@ -628,6 +632,9 @@
                 lastError = e;
                 console.error(`Ollama detection failed at ${candidate}`, e);
                 aiLog("AI ERROR", `Ollama connection failed at ${candidate}: ${e.message || e}`, 'alert');
+                if ((e.message || '').includes('Status 404') && candidate.includes('/ollama')) {
+                    aiLog('DEBUG', 'Hint: /ollama returned 404 — ensure your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 with trailing slash preservation.', 'debug');
+                }
             }
         }
 

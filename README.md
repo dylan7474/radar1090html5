@@ -88,9 +88,19 @@ dashboard (defaulting to port `11434`). Override the target by setting `localSto
 in your browser (for example, `http://192.168.50.4:11434`). If the dashboard is on HTTPS but
 Ollama only exposes HTTP, the app now automatically retries with `http://` so LAN clients can
 still connect. For lighttpd or other reverse proxies, you can also expose Ollama on the same
-origin at `/ollama` to dodge CORS and mixed-content blocks—the app now tests that path
-automatically. Connection attempts and failures are surfaced in the in-app comms log for quick
-debugging, including hints when the browser blocks HTTP calls from an HTTPS dashboard.
+origin at `/ollama` (or `/ollama/`) to dodge CORS and mixed-content blocks—the app now tests
+both paths automatically and will log a 404 hint if the proxy rule is missing. Connection
+attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
+when the browser blocks HTTP calls from an HTTPS dashboard.
+
+Example lighttpd reverse proxy (requires `mod_proxy`):
+
+```conf
+$HTTP["url"] =~ "^/ollama(/|$)" {
+  proxy.header = ("upgrade" => "enable")
+  proxy.server = ("" => (("host" => "127.0.0.1", "port" => 11434)))
+}
+```
 
 Default receiver coordinates now live in [`config.js`](config.js). Adjust the
 `DEFAULT_RECEIVER_LOCATION` export there to match your station's latitude and longitude.
