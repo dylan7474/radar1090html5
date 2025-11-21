@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.26
+**Current Version:** V1.9.27
 
 ---
 
@@ -124,6 +124,9 @@ the radar rings automatically.
 - Connection issues surface in the message area and in the browser developer console
   (open it with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> or
   <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd> on macOS).
+- Use the **Show Log** button under the AI panel to inspect recent dump1090 and Ollama
+  requests with response codes and durations—handy when requests are routed through
+  `lighttpd` or another reverse proxy.
 - If the audio stream cannot be reached, the app displays a warning message in the sidebar.
 - When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
   or audio endpoints are plain HTTP.

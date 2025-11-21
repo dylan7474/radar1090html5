@@ -44,6 +44,7 @@
     .log-modal-content { background: #0a0a0a; border: 1px solid #00ff41; color: #eee; font-family: 'Share Tech Mono', monospace; max-height: 60vh; overflow-y: auto; padding: 20px; }
     .log-entry { border-bottom: 1px solid #333; padding: 8px 0; font-size: 12px; }
     .log-entry.alert { color: #ff5555; }
+    .log-entry.debug { color: #9ec5ff; }
     .log-timestamp { color: #666; margin-right: 10px; }
   </style>
 </head>
@@ -239,11 +240,20 @@
         return [...new Set(candidates)];
     }
 
-    async function fetchWithTimeout(resource, options = {}, timeoutMs = 8000) {
+    async function fetchWithTimeout(resource, options = {}, timeoutMs = 8000, label = 'fetch') {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const started = performance.now();
+        aiLog('DEBUG', `Requesting ${label} -> ${resource} (timeout ${timeoutMs}ms)`, 'debug');
         try {
-            return await fetch(resource, { ...options, signal: controller.signal });
+            const response = await fetch(resource, { ...options, signal: controller.signal });
+            const elapsed = Math.round(performance.now() - started);
+            aiLog('DEBUG', `Response ${label}: status ${response.status} in ${elapsed}ms`, 'debug');
+            return response;
+        } catch (e) {
+            const elapsed = Math.round(performance.now() - started);
+            aiLog('AI ERROR', `${label} failed after ${elapsed}ms: ${e.message || e}`, 'alert');
+            throw e;
         } finally {
             clearTimeout(timer);
         }
@@ -280,10 +290,11 @@
     let msgHistory = []; 
     let visInterval = null; 
     
-    let carrierNode = null; 
+    let carrierNode = null;
     let carrierGain = null;
     let noiseBuffer = null;
     let monitorInterval = null;
+    let lastAiStatus = { text: null, color: null };
 
     function startSystem() {
         document.getElementById('interaction-overlay').style.display = 'none';
@@ -292,6 +303,8 @@
 
         systemActive = true;
         window.speechSynthesis.resume(); // Force Audio Context Wakeup
+
+        aiLog("DEBUG", `Startup: host=${window.location.hostname} protocol=${window.location.protocol} dump1090=${AI_CONFIG.dump1090Base} ollamaCandidates=${ollamaCandidates.join(', ')}`, 'debug');
         
         try {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -488,14 +501,14 @@
     async function fetchLocalWeather() {
         try {
             const url = `https://api.open-meteo.com/v1/forecast?latitude=${AI_CONFIG.myLat}&longitude=${AI_CONFIG.myLon}&current=temperature_2m,wind_speed_10m,weather_code`;
-            const r = await fetch(url);
+            const r = await fetchWithTimeout(url, {}, 6000, 'local weather');
             const d = await r.json();
             if(d.current) {
                 AI_CONFIG.weatherData = { temp: d.current.temperature_2m, wind: d.current.wind_speed_10m };
                 const el = document.getElementById('weather-display');
                 if(el) el.innerText = `WEATHER: ${AI_CONFIG.weatherData.temp}°C | WIND: ${AI_CONFIG.weatherData.wind} KM/H`;
             }
-        } catch(e) {}
+        } catch(e) { aiLog('DEBUG', `Weather fetch failed: ${e.message || e}`, 'debug'); }
     }
 
     async function updateReceiverLocation() {
@@ -507,26 +520,37 @@
                 const lon = t.match(/Lon:?\s*(-?[\d.]+)/);
                 if (lat && lon) { AI_CONFIG.myLat = parseFloat(lat[1]); AI_CONFIG.myLon = parseFloat(lon[1]); return; }
             }
-            const r = await fetch(`${AI_CONFIG.dump1090Base}/receiver.json`);
+            const r = await fetchWithTimeout(`${AI_CONFIG.dump1090Base}/receiver.json`, {}, 6000, 'dump1090 receiver');
             if(r.ok) {
                 const d = await r.json();
                 if(d.lat && d.lon) { AI_CONFIG.myLat = d.lat; AI_CONFIG.myLon = d.lon; }
             }
-        } catch(e) {}
+        } catch(e) {
+            aiLog("AI ERROR", `Unable to read receiver coordinates: ${e.message || e}`, 'alert');
+        }
     }
 
     function updateAiStatus(msg, color) {
         const el = document.getElementById('ai-status-text');
         if(el) { el.innerText = msg; el.style.color = color || '#fff'; }
+        if (msg !== lastAiStatus.text || color !== lastAiStatus.color) {
+            aiLog('DEBUG', `AI status -> ${msg} (${color || '#fff'})`, 'debug');
+            lastAiStatus = { text: msg, color: color };
+        }
     }
 
     function aiLog(title, text, type = 'normal') {
         const tick = document.getElementById('message-ticker-track');
         const time = new Date().toLocaleTimeString();
         const clean = text.replace(/\n/g, ' ');
-        if(tick) tick.innerText = `[${time}] ${title}: ${clean}`;
+        const payload = `[${time}] ${title}: ${clean}`;
+        if(tick) tick.innerText = payload;
         msgHistory.unshift({time: time, title: title, text: clean, type: type});
-        if(msgHistory.length > 20) msgHistory.pop();
+        if(msgHistory.length > 50) msgHistory.pop();
+
+        if (type === 'alert') console.error(payload);
+        else if (type === 'debug') console.debug(payload);
+        else console.log(payload);
     }
 
     document.getElementById('ai-toggle-btn').addEventListener('click', detectModel);
@@ -557,13 +581,14 @@
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
+        aiLog("DEBUG", `Attempting Ollama detection across ${ollamaCandidates.length} candidates`, 'debug');
 
         let lastError = null;
         for (const candidate of ollamaCandidates) {
             AI_CONFIG.ollamaUrl = candidate;
             aiLog("AI", `Detecting Ollama at ${candidate}`);
             try {
-                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, 6000);
+                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, 6000, `Ollama tags @ ${candidate}`);
                 if (!r.ok) throw new Error(`Status ${r.status}`);
                 const d = await r.json();
                 if (!d.models || d.models.length === 0) throw new Error('No models available');
@@ -591,11 +616,12 @@
         if (!systemActive || aiProcessing) return;
         if (isSpeaking) return; // Watchdog prevents overlap
         if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
-        
+
         aiProcessing = true;
         try {
+            aiLog('DEBUG', `AI cycle start (range=${getCurrentRangeLimit()}km, model=${AI_CONFIG.ollamaModel})`, 'debug');
             await updateReceiverLocation();
-            const r = await fetchWithTimeout(`${AI_CONFIG.dump1090Base}/aircraft.json`, {}, 7000);
+            const r = await fetchWithTimeout(`${AI_CONFIG.dump1090Base}/aircraft.json`, {}, 7000, 'dump1090 aircraft');
             if (!r.ok) throw new Error(`dump1090 status ${r.status}`);
             const d = await r.json();
             const valid = (d.aircraft || []).filter(p => p.lat && p.lon && (p.seen||0)<60);
@@ -630,6 +656,7 @@
             updateAiStatus("DATA ERROR", "#ff3333");
         }
         aiProcessing = false;
+        aiLog('DEBUG', 'AI cycle complete', 'debug');
     }
 
     function analyzeConditions(planes) {
@@ -659,7 +686,7 @@
             const r = await fetchWithTimeout(`${AI_CONFIG.ollamaUrl}/api/chat`, {
                 method: 'POST', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
-            }, 10000);
+            }, 10000, `Ollama chat @ ${AI_CONFIG.ollamaUrl}`);
             if (!r.ok) throw new Error(`Status ${r.status}`);
             return (await r.json()).message.content.trim();
         } catch (e) {
