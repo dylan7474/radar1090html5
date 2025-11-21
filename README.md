@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.35
+**Current Version:** V1.9.36
 
 ---
 
@@ -148,6 +148,9 @@ the radar rings automatically.
 - After a failed detection or self-test, the comms log now prints an "Ollama
   remediation checklist" with the exact proxy/CORS commands to run (including a
   lighttpd snippet and server-side curl tests) based on the observed failures.
+  If you see HTTP 403 in the log, Ollama is rejecting your dashboard origin;
+  set `OLLAMA_ORIGINS` to the URL you use in the browser (e.g.
+  `http://192.168.50.123`) or `*` and restart the service.
 - To verify the server side of Ollama when troubleshooting 404/CORS errors, run these on
   the host that serves the dashboard:
 
@@ -165,8 +168,9 @@ the radar rings automatically.
   Replace `YOUR_DASHBOARD_HOST` with the hostname you load in the browser (e.g.
   `http://192.168.50.123`). Successful calls should return HTTP 200 and include
   an `Access-Control-Allow-Origin` header that permits the dashboard.
-- If direct calls to `http://127.0.0.1:11434` succeed but the browser still fails,
-  enable CORS directly on Ollama before restarting the service:
+- If direct calls to `http://127.0.0.1:11434` succeed but the browser still fails
+  or returns HTTP 403 when an `Origin` header is present, enable CORS directly on
+  Ollama before restarting the service:
 
   ```bash
   export OLLAMA_ORIGINS="*"

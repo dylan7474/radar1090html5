@@ -340,9 +340,11 @@
     let serverDiagnosticsLogged = false;
     let proxyHintLogged = false;
     let corsEnvHintLogged = false;
+    let corsForbiddenHintLogged = false;
     let remediationLogged = false;
     let lastProxy404Candidate = null;
     let lastCorsBlockedCandidate = null;
+    let lastCorsForbiddenCandidate = null;
     let lastOpaqueCandidate = null;
     const corsProbeLogged = {};
 
@@ -358,6 +360,14 @@
         if (lastCorsBlockedCandidate || lastOpaqueCandidate) {
             aiLog('DEBUG', ' - Direct port responded without CORS. Enable Access-Control-Allow-Origin on Ollama or access it via a same-origin /ollama proxy.', 'debug');
             aiLog('DEBUG', '   Example: export OLLAMA_ORIGINS="*" && export OLLAMA_HOST=0.0.0.0 && systemctl restart ollama', 'debug');
+        }
+        if (lastCorsForbiddenCandidate) {
+            aiLog('DEBUG', ' - Ollama returned 403 Forbidden for browser Origin. Set OLLAMA_ORIGINS to your dashboard URL (or "*") and restart.', 'debug');
+            const origin = window.location.origin;
+            aiLog('DEBUG', `   export OLLAMA_ORIGINS="${origin}" && export OLLAMA_HOST=0.0.0.0 && systemctl restart ollama`, 'debug');
+            aiLog('DEBUG', '   (systemd) sudo mkdir -p /etc/systemd/system/ollama.service.d', 'debug');
+            aiLog('DEBUG', `   (systemd) printf "[Service]\nEnvironment=OLLAMA_ORIGINS=${origin}\nEnvironment=OLLAMA_HOST=0.0.0.0\n" | sudo tee /etc/systemd/system/ollama.service.d/override.conf`, 'debug');
+            aiLog('DEBUG', '   (systemd) sudo systemctl daemon-reload && sudo systemctl restart ollama', 'debug');
         }
 
         const origin = window.location.origin;
@@ -690,6 +700,16 @@
                         proxyHintLogged = true;
                     }
                 }
+                if ((e.message || '').includes('Status 403')) {
+                    lastCorsForbiddenCandidate = candidate;
+                    if (!corsForbiddenHintLogged) {
+                        const origin = window.location.origin;
+                        aiLog('DEBUG', `403 Forbidden from ${candidate} — Ollama is rejecting browser Origin. Set OLLAMA_ORIGINS="${origin}" (or your dashboard URL) and restart Ollama.`, 'debug');
+                        aiLog('DEBUG', `Server check: curl -i -H "Origin: ${origin}" http://127.0.0.1:11434/api/tags should return 200 with Access-Control-Allow-Origin`, 'debug');
+                        aiLog('DEBUG', 'If using systemd, add OLLAMA_ORIGINS to /etc/systemd/system/ollama.service.d/override.conf then daemon-reload + restart.', 'debug');
+                        corsForbiddenHintLogged = true;
+                    }
+                }
                 if ((e.message || '').includes('Failed to fetch') && !corsProbeLogged[candidate]) {
                     if (candidate.includes(':11434')) {
                         lastCorsBlockedCandidate = candidate;
@@ -758,7 +778,12 @@
             try {
                 const resp = await fetchWithTimeout(`${candidate}/api/tags`, {}, 5000, `Self-test tags @ ${candidate}`);
                 const summary = `Self-test: ${candidate} responded with status ${resp.status} (type=${resp.type})`;
-                aiLog(resp.ok ? 'AI' : 'DEBUG', summary, resp.ok ? 'normal' : 'debug');
+                if (resp.status === 403) {
+                    lastCorsForbiddenCandidate = candidate;
+                    aiLog('DEBUG', `${summary} — add OLLAMA_ORIGINS for ${window.location.origin} or enable /ollama proxy.`, 'debug');
+                } else {
+                    aiLog(resp.ok ? 'AI' : 'DEBUG', summary, resp.ok ? 'normal' : 'debug');
+                }
             } catch (e) {
                 aiLog('DEBUG', `Self-test (cors) failed at ${candidate}: ${e.message || e}`, 'debug');
             }
