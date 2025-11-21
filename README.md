@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.28
+**Current Version:** V1.9.30
 
 ---
 
@@ -89,7 +89,9 @@ in your browser (for example, `http://192.168.50.4:11434`). If the dashboard is 
 Ollama only exposes HTTP, the app now automatically retries with `http://` so LAN clients can
 still connect. For lighttpd or other reverse proxies, you can also expose Ollama on the same
 origin at `/ollama` (or `/ollama/`) to dodge CORS and mixed-content blocks—the app now tests
-both paths automatically and will log a 404 hint if the proxy rule is missing. Connection
+both paths automatically and will log a 404 hint if the proxy rule is missing. Saved custom
+targets are normalized to strip trailing slashes so `/api/*` requests do not double up and
+return 404s under strict proxies. Connection
 attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
 when the browser blocks HTTP calls from an HTTPS dashboard.
 

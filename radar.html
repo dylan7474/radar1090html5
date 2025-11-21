@@ -224,6 +224,17 @@
 
   <!-- 4. AI CONTROLLER SCRIPT -->
   <script>
+    function normalizeOllamaBase(url) {
+        if (!url) return url;
+        try {
+            const parsed = new URL(url);
+            parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+            return parsed.toString().replace(/\/+$/, '');
+        } catch (e) {
+            return url.replace(/\/+$/, '');
+        }
+    }
+
     function resolveOllamaCandidates() {
         const saved = localStorage.getItem('ollamaUrl');
         const protocol = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
@@ -243,7 +254,7 @@
         // (e.g., via "/ollama"), try that path to avoid mixed-content or CORS blocks.
         candidates.push(originProxy, originProxySlash);
 
-        return [...new Set(candidates)];
+        return [...new Set(candidates.map(normalizeOllamaBase))];
     }
 
     async function fetchWithTimeout(resource, options = {}, timeoutMs = 8000, label = 'fetch') {
