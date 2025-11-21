@@ -27,68 +27,21 @@
     @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; text-shadow: 0 0 10px #00ff41; } 100% { opacity: 0.8; } }
     
     /* --- CUSTOM AI CONTROL STYLES --- */
-    
-    /* Status Row Tweaks */
-    .control-row.ai-status-row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .control-value.status-text {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        display: block;
-        width: 100%;
-        font-size: 0.85em;
-        line-height: 1.2;
-        color: #00ff41;
-    }
-
-    /* NEW APPROACH: Custom Block Container 
-       We do NOT use .control-row here to avoid fighting the original CSS flex/height rules.
-    */
-    .ai-custom-block {
-        border-bottom: 1px solid #333; /* Mimic original separator if needed */
-        padding: 10px 0;
-        margin-bottom: 5px;
-        display: block;
-    }
-    
-    .ai-label {
-        display: block;
-        font-family: 'Share Tech Mono', monospace;
-        color: #aaa;
-        font-size: 14px;
-        margin-bottom: 8px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-
-    .control-select {
-        background: #111; 
-        color: #00ff41; 
-        border: 1px solid #444;
-        font-family: 'Share Tech Mono', monospace; 
-        padding: 10px;
-        width: 100%; 
-        text-transform: uppercase;
-        font-size: 14px;
-        cursor: pointer;
-        border-radius: 4px;
-        box-sizing: border-box;
-        appearance: none; 
-        /* Custom Arrow Icon */
-        background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2300ff41%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
-        background-repeat: no-repeat;
-        background-position: right 12px top 50%;
-        background-size: 10px auto;
-    }
+    .control-row.ai-status-row { display: flex; align-items: center; gap: 10px; }
+    .control-value.status-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; font-size: 0.85em; line-height: 1.2; color: #00ff41; }
+    .ai-custom-block { border-bottom: 1px solid #333; padding: 10px 0; margin-bottom: 5px; display: block; }
+    .ai-label { display: block; font-family: 'Share Tech Mono', monospace; color: #aaa; font-size: 14px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+    .control-select { background: #111; color: #00ff41; border: 1px solid #444; font-family: 'Share Tech Mono', monospace; padding: 10px; width: 100%; text-transform: uppercase; font-size: 14px; cursor: pointer; border-radius: 4px; box-sizing: border-box; appearance: none; background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2300ff41%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E"); background-repeat: no-repeat; background-position: right 12px top 50%; background-size: 10px auto; }
     .control-select:focus { outline: 1px solid #00ff41; background-color: #000; }
-    
-    /* Fix button width in status row */
     .ai-status-row .control-button { min-width: 80px; }
-
+    
+    /* Weather Display (Moved to Data Panel) */
+    #weather-display {
+        color: #a5d6ff;
+        border-left: 3px solid #00ff41;
+        padding-left: 8px;
+        margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
@@ -113,8 +66,6 @@
         <div class="control-panel">
           
           <!-- AI CONTROLS -->
-          
-          <!-- 1. STATUS ROW (Standard row but truncated text) -->
           <div class="control-row ai-status-row">
             <div class="control-info">
               <span class="control-name" style="color:#00ff41">AI Core</span>
@@ -125,7 +76,7 @@
             </div>
           </div>
 
-          <!-- 2. PERSONA SELECTOR (New Custom Block Layout) -->
+          <!-- PERSONA SELECTOR -->
           <div class="ai-custom-block">
              <span class="ai-label">AI Persona Profile</span>
              <select id="ai-persona-select" class="control-select">
@@ -247,6 +198,9 @@
     <section class="sidebar data-panel" id="data-panel">
       <h2>Live Data</h2>
       <div class="info-stack">
+        <!-- WEATHER MOVED HERE -->
+        <div class="info-block" id="weather-display">Weather Data Pending...</div>
+        
         <div class="info-block" id="aircraft-info"></div>
         <div class="info-block" id="range-info"></div>
         <div class="info-block" id="receiver-info" aria-live="polite"></div>
@@ -297,30 +251,36 @@
   <!-- 4. AI CONTROLLER SCRIPT -->
   <script>
     const AI_CONFIG = {
-        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data", // Base URL for data
+        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data", 
         ollamaUrl: "http://127.0.0.1:11434", 
         ollamaModel: null,
-        // Default location (Fallback)
         myLat: 54.531836, 
         myLon: -1.087954, 
         scanInterval: 20000, 
-        maxPlanes: 5
+        maxPlanes: 5,
+        weatherData: null // Store weather here
     };
 
-    // Prompt Personas
     const PERSONAS = {
         MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
-        
         ATC: `You are LONDON CENTER AIR TRAFFIC CONTROL. Tone: Professional, routine, calm, human. Vocabulary: "Traffic", "Flight Level", "Knots", "Descend", "Maintain", "Squawk", "Good evening", "Radar Contact". Focus on safe separation and traffic advisories. Phrase it as a standard radio broadcast to pilots. Output a single advisory line. Do not ask questions.`,
-        
         SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual, friendly. Focus on airlines ("Oh look, a British Airways!"), altitude (low passes), and "cool" aircraft actions. Do not ask questions to the listener. Just narrate what you see with excitement.`
+    };
+
+    // Aircraft Type Mapping (Partial)
+    const AIRCRAFT_TYPES = {
+        "B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777",
+        "B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172",
+        "B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet",
+        "F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter"
     };
 
     let aiProcessing = false;
     let systemActive = false;
     let voiceEnabled = true;
     let currentUtterance = null;
-    let isSpeaking = false; // Custom flag for robustness
+    let isSpeaking = false;
+    let audioContext = null; // For SFX
 
     function startSystem() {
         document.getElementById('interaction-overlay').style.display = 'none';
@@ -334,52 +294,165 @@
         systemActive = true;
         window.speechSynthesis.resume();
         
-        // Restore Cookie
+        // Init Audio Context for SFX
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioContext = new AudioContext();
+        } catch(e) { console.warn("Web Audio API not supported"); }
+
         const savedPersona = getCookie("aiPersona");
         if(savedPersona && PERSONAS[savedPersona]) {
             document.getElementById('ai-persona-select').value = savedPersona;
         }
 
-        // 1. Sync Location with Receiver
         updateReceiverLocation().then(() => {
+            // Fetch Weather after location found
+            fetchLocalWeather();
             updateAiStatus("INITIALIZING...", "#ffff00");
+            
+            // Play start sound
             speak("System Online. Sensors Calibrated.");
+            
             detectModel();
             setInterval(runAiCycle, AI_CONFIG.scanInterval);
+            // Refresh weather every 30 mins
+            setInterval(fetchLocalWeather, 30 * 60 * 1000);
         });
     }
 
-    // --- FETCH OFFICIAL RECEIVER LOCATION ---
+    // --- SFX: RADIO STATIC & ROGER BEEP ---
+    // Using a unified helper for static to ensure consistency
+    function playStaticBurst(startTime, duration) {
+        if (!audioContext) return;
+        
+        const bufferSize = audioContext.sampleRate * duration;
+        const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+        const noise = audioContext.createBufferSource();
+        noise.buffer = buffer;
+        
+        // Bandpass filter (1200Hz) for radio sound
+        const filter = audioContext.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = 1200;
+        filter.Q.value = 1;
+
+        const gain = audioContext.createGain();
+        // Proper Envelope: Fade In (Attack) -> Sustain -> Fade Out (Release)
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.15, startTime + 0.05); // Attack
+        gain.gain.linearRampToValueAtTime(0.1, startTime + duration - 0.05); // Sustain
+        gain.gain.linearRampToValueAtTime(0, startTime + duration); // Release
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioContext.destination);
+        noise.start(startTime);
+    }
+
+    function playRadioSound(type) {
+        if (!voiceEnabled || !audioContext) return;
+        if (audioContext.state === 'suspended') audioContext.resume();
+
+        const t = audioContext.currentTime;
+
+        if (type === 'OPEN') {
+            // --- OPENING STATIC ---
+            playStaticBurst(t, 0.4);
+        } 
+        else if (type === 'CLOSE') {
+            // --- MORSE "K" ROGER BEEP (-.-) ---
+            const osc = audioContext.createOscillator();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(1500, t); // 1.5kHz tone
+            
+            const gain = audioContext.createGain();
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            
+            const dot = 0.08; // duration of a dot
+            const dash = 0.24; // duration of a dash (3x dot)
+            const gap = 0.08; // duration of gap
+            const vol = 0.1; // Volume
+
+            // DASH 1
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(vol, t + 0.01);
+            gain.gain.setValueAtTime(vol, t + dash);
+            gain.gain.linearRampToValueAtTime(0, t + dash + 0.01);
+
+            // DOT
+            const t2 = t + dash + gap;
+            gain.gain.setValueAtTime(0, t2);
+            gain.gain.linearRampToValueAtTime(vol, t2 + 0.01);
+            gain.gain.setValueAtTime(vol, t2 + dot);
+            gain.gain.linearRampToValueAtTime(0, t2 + dot + 0.01);
+
+            // DASH 2
+            const t3 = t2 + dot + gap;
+            gain.gain.setValueAtTime(0, t3);
+            gain.gain.linearRampToValueAtTime(vol, t3 + 0.01);
+            gain.gain.setValueAtTime(vol, t3 + dash);
+            gain.gain.linearRampToValueAtTime(0, t3 + dash + 0.01);
+
+            osc.start(t);
+            const endTime = t3 + dash + 0.05;
+            osc.stop(endTime);
+            
+            // --- TAIL STATIC (SQUELCH) ---
+            // Using the EXACT SAME function as the opening to ensure it matches perfectly
+            playStaticBurst(endTime, 0.3);
+        }
+    }
+
+    // --- WEATHER INTEGRATION ---
+    async function fetchLocalWeather() {
+        try {
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${AI_CONFIG.myLat}&longitude=${AI_CONFIG.myLon}&current=temperature_2m,wind_speed_10m,weather_code`;
+            const r = await fetch(url);
+            const data = await r.json();
+            if(data.current) {
+                AI_CONFIG.weatherData = {
+                    temp: data.current.temperature_2m,
+                    wind: data.current.wind_speed_10m,
+                    code: data.current.weather_code
+                };
+                // Moved target to the new location
+                const display = document.getElementById('weather-display');
+                if(display) {
+                    display.innerText = `WEATHER: ${AI_CONFIG.weatherData.temp}°C | WIND: ${AI_CONFIG.weatherData.wind} KM/H`;
+                }
+            }
+        } catch(e) {
+            console.log("Weather fetch failed");
+        }
+    }
+
+    // --- FETCH RECEIVER LOC ---
     async function updateReceiverLocation() {
         try {
-            // 1. Try DOM Extraction First (Most accurate to what user sees)
             const domInfo = document.getElementById('receiver-info');
             if (domInfo && domInfo.innerText.includes('Lat')) {
-                // Example parsing: "Lat: 54.53, Lon: -1.08"
                 const text = domInfo.innerText;
                 const latMatch = text.match(/Lat:?\s*(-?[\d.]+)/);
                 const lonMatch = text.match(/Lon:?\s*(-?[\d.]+)/);
                 if (latMatch && lonMatch) {
                     AI_CONFIG.myLat = parseFloat(latMatch[1]);
                     AI_CONFIG.myLon = parseFloat(lonMatch[1]);
-                    console.log(`AI: Synced to UI Location: ${AI_CONFIG.myLat}, ${AI_CONFIG.myLon}`);
                     return;
                 }
             }
-
-            // 2. Fallback to Server Config
             const r = await fetch(`${AI_CONFIG.dump1090Base}/receiver.json`);
             if(r.ok) {
                 const d = await r.json();
                 if(d.lat && d.lon) {
                     AI_CONFIG.myLat = d.lat;
                     AI_CONFIG.myLon = d.lon;
-                    console.log(`AI: Synced to Receiver Config: ${d.lat}, ${d.lon}`);
                 }
             }
-        } catch(e) {
-            console.log("AI: Could not fetch receiver.json, using fallback location.");
-        }
+        } catch(e) { console.log("Location sync failed"); }
     }
 
     function updateAiStatus(msg, color) {
@@ -387,7 +460,7 @@
         if(el) {
             el.innerText = msg;
             el.style.color = color || '#fff';
-            el.title = msg; // Tooltip for truncated text
+            el.title = msg;
         }
     }
 
@@ -396,7 +469,6 @@
         const tickerContainer = document.getElementById('message-ticker');
         const time = new Date().toLocaleTimeString();
         const cleanText = text.replace(/\n/g, ' ');
-        
         if(ticker) ticker.innerText = `[${time}] ${title}: ${cleanText}`;
         
         if (type === 'alert' && tickerContainer) {
@@ -409,7 +481,6 @@
     }
 
     document.getElementById('ai-toggle-btn').addEventListener('click', detectModel);
-    
     document.getElementById('tts-mute-toggle').addEventListener('click', () => {
         voiceEnabled = !voiceEnabled;
         const btn = document.getElementById('tts-mute-toggle');
@@ -417,6 +488,7 @@
         if(voiceEnabled) {
             btn.innerText = "MUTE";
             status.innerText = "ACTIVE";
+            // No static here, just resume
             speak("Voice enabled.");
         } else {
             btn.innerText = "UNMUTE";
@@ -425,105 +497,71 @@
         }
     });
 
-    // --- RANGE CHANGE HANDLER ---
     function handleRangeChange() {
-        // Explicit cancellation is allowed for user actions
         window.speechSynthesis.cancel();
         currentUtterance = null;
         isSpeaking = false;
-        
         updateAiStatus("RANGE UPDATING...", "#ffff00");
-        setTimeout(() => {
-            aiProcessing = false; 
-            runAiCycle();
-        }, 500);
+        setTimeout(() => { aiProcessing = false; runAiCycle(); }, 500);
     }
-    
     document.getElementById('range-increase').addEventListener('click', handleRangeChange);
     document.getElementById('range-decrease').addEventListener('click', handleRangeChange);
 
-    // --- PERSONA CHANGED HANDLER ---
     document.getElementById('ai-persona-select').addEventListener('change', (e) => {
         const newMode = e.target.value;
         setCookie("aiPersona", newMode, 365);
-        
-        // Explicit cancellation allowed for user actions
         window.speechSynthesis.cancel();
         currentUtterance = null;
         isSpeaking = false;
-        
         updateAiStatus("SWITCHING MODE...", "#ffff00");
-        
-        // 500ms delay to ensure audio buffer flushes completely
-        setTimeout(() => {
-             aiProcessing = false; 
-             runAiCycle(); 
-        }, 500);
+        setTimeout(() => { aiProcessing = false; runAiCycle(); }, 500);
     });
 
     function speak(text) {
         if (!voiceEnabled) return;
         
-        // IMPORTANT: Do NOT call cancel() here. 
-        // If previous speech is finishing, let it finish or queue.
-        // runAiCycle() logic prevents us from getting here if channel is busy.
-        
+        // Don't play static here. Wait for onstart.
+
         currentUtterance = new SpeechSynthesisUtterance(text);
         const persona = document.getElementById('ai-persona-select').value;
         currentUtterance.rate = persona === 'ATC' ? 1.0 : 1.1;
         
         const voices = window.speechSynthesis.getVoices();
-        
-        // --- VOICE SELECTION (UK PRIORITY) ---
-        const v = voices.find(v => 
-            v.lang === 'en-GB' || 
-            v.name.includes("UK English") || 
-            v.name.includes("Daniel") || 
-            v.name.includes("Arthur") || 
-            v.name.includes("Martha")
-        );
-        
-        if (v) {
-            currentUtterance.voice = v;
-        } else {
-            // Fallback
+        const v = voices.find(v => v.lang === 'en-GB' || v.name.includes("UK English") || v.name.includes("Daniel"));
+        if (v) currentUtterance.voice = v;
+        else {
             const vDefault = voices.find(v => v.name.includes("Google US English") || v.name.includes("Samantha"));
             if (vDefault) currentUtterance.voice = vDefault;
         }
         
-        // State Management
         currentUtterance.onstart = () => { 
             isSpeaking = true; 
-            updateAiStatus("BROADCASTING...", "#00ff41"); 
+            updateAiStatus("BROADCASTING...", "#00ff41");
+            // SYNC FIX: Play static EXACTLY when browser reports speech is starting
+            playRadioSound('OPEN'); 
         };
         
         currentUtterance.onend = () => { 
             isSpeaking = false; 
             currentUtterance = null; 
             updateAiStatus("ONLINE", "#00ff41"); 
+            playRadioSound('CLOSE');
         };
-        
-        currentUtterance.onerror = () => {
-            isSpeaking = false;
-            currentUtterance = null;
-        };
+        currentUtterance.onerror = () => { isSpeaking = false; currentUtterance = null; };
 
+        // Call speak immediately
         window.speechSynthesis.speak(currentUtterance);
     }
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
 
-    // --- HELPER TO GET UI RANGE ---
     function getCurrentRangeLimit() {
         const el = document.getElementById('range-value');
         if (el) {
-            // Robust parsing to handle "50 km", "50km", " 50 "
             const text = el.innerText || "";
             const match = text.match(/(\d+)/);
-            if (match) {
-                return parseInt(match[0], 10);
-            }
+            if (match) return parseInt(match[0], 10);
         }
-        return 50; // Fallback
+        return 50; 
     }
 
     async function detectModel() {
@@ -534,7 +572,6 @@
             const d = await r.json();
             const models = d.models || [];
             if(models.length === 0) throw new Error("No Models");
-            
             const m = models.find(x => x.name.includes('llama3')) || models.find(x => x.name.includes('mistral')) || models[0];
             AI_CONFIG.ollamaModel = m.name;
             updateAiStatus("ONLINE", "#00ff41");
@@ -542,40 +579,29 @@
             return true;
         } catch (e) {
             updateAiStatus("ERROR", "#ff3333");
-            console.error("Ollama connection failed", e);
             return false;
         }
     }
 
     async function runAiCycle() {
         if (!systemActive || aiProcessing) return;
-        
-        // --- SPEECH QUEUE CHECK (ROBUST) ---
-        if (window.speechSynthesis.speaking || isSpeaking) {
-            console.log("AI: Channel Busy. Skipping scan.");
-            return; 
-        }
-
+        if (window.speechSynthesis.speaking || isSpeaking) { console.log("AI: Channel Busy. Skipping scan."); return; }
         if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
         
         aiProcessing = true;
         try {
-            // Refresh Location info just in case user moved map center
             await updateReceiverLocation();
-
             const r = await fetch(`${AI_CONFIG.dump1090Base}/aircraft.json`);
             const d = await r.json();
-            
-            // FILTER 1: Valid Position
             const valid = (d.aircraft || []).filter(p => p.lat && p.lon);
-            
-            // FILTER 2: Stale Data (Standard radar rules: Hide if > 60s old)
             const active = valid.filter(p => (p.seen || 0) < 60);
 
             const enriched = active.map(p => {
                 const dist = getDistance(AI_CONFIG.myLat, AI_CONFIG.myLon, p.lat, p.lon);
                 return {
                     id: (p.flight || "UFO").trim(),
+                    type: p.t || "Unknown", // Aircraft Type code
+                    squawk: p.squawk || "0000",
                     alt: p.alt_baro || 0,
                     speed: p.gs || 0,
                     lat: p.lat, lon: p.lon,
@@ -585,36 +611,34 @@
                 };
             }).sort((a, b) => a.dist - b.dist);
 
-            // FILTER 3: Range Limit
             const currentMaxRange = getCurrentRangeLimit();
             const inRange = enriched.filter(p => p.dist < currentMaxRange);
             
             if (inRange.length > 0) {
                 updateAiStatus("ANALYZING...", "#ffff00");
-                
                 const alerts = analyzeConditions(inRange);
                 const top = inRange.slice(0, AI_CONFIG.maxPlanes);
                 const commentary = await generateCommentary(top, inRange.length, alerts);
                 
                 const isAlert = alerts.length > 0 || top[0].dist < 15;
                 const header = isAlert ? `ALERT` : `STATUS`;
-                
                 aiLog(header, commentary, isAlert ? 'alert' : 'normal');
                 speak(commentary);
             }
-        } catch (e) {
-            console.error("AI Cycle Error", e);
-            updateAiStatus("DATA ERROR", "#ff3333");
-        }
+        } catch (e) { updateAiStatus("DATA ERROR", "#ff3333"); }
         aiProcessing = false;
     }
 
-    // --- TELEMETRY ANALYSIS ENGINE ---
     function analyzeConditions(planes) {
         let detected = [];
         const scope = planes.slice(0, 5);
         
         scope.forEach(p => {
+            // SQUAWK CODES (Emergency)
+            if(p.squawk === '7700') detected.push(`EMERGENCY DETECTED: ${p.id} squawking 7700 (General Emergency).`);
+            if(p.squawk === '7600') detected.push(`ALERT: ${p.id} squawking 7600 (Radio Failure).`);
+            if(p.squawk === '7500') detected.push(`SECURITY ALERT: ${p.id} squawking 7500.`);
+
             const bearingToMe = calculateBearing(p.lat, p.lon, AI_CONFIG.myLat, AI_CONFIG.myLon);
             let diff = Math.abs(p.track - bearingToMe);
             if (diff > 180) diff = 360 - diff;
@@ -639,24 +663,37 @@
 
     async function generateCommentary(targets, count, alerts) {
         const personaKey = document.getElementById('ai-persona-select').value;
-        const basePersona = PERSONAS[personaKey];
+        let basePersona = PERSONAS[personaKey];
+        
+        // DYNAMIC LOCATION NAME INJECTION FOR ATC
+        if (personaKey === 'ATC' && AI_CONFIG.locationName) {
+            basePersona = basePersona.replace("LONDON CENTER", `${AI_CONFIG.locationName} RADAR`);
+        }
 
         const report = targets.map(p => {
             let altDesc = p.alt < 1000 ? "LOW" : "HIGH";
-            return `${p.id}: Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft, Spd ${p.speed}kts, Trk ${p.track}°.`;
+            // Expand Type Code if known
+            let typeName = AIRCRAFT_TYPES[p.type] || p.type;
+            return `${p.id} (${typeName}): Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft, Spd ${p.speed}kts.`;
         }).join("\n");
         
         const alertSection = alerts.length > 0 ? `CRITICAL ALERTS:\n${alerts.join("\n")}` : "No critical anomalies.";
         const timestamp = new Date().toLocaleString();
+        
+        let weatherStr = "Unknown";
+        if (AI_CONFIG.weatherData) {
+            weatherStr = `Temp ${AI_CONFIG.weatherData.temp}C, Wind ${AI_CONFIG.weatherData.wind}km/h`;
+        }
 
         const userPrompt = `
-            CURRENT TIME: ${timestamp}
+            TIME: ${timestamp}
+            WEATHER: ${weatherStr}
             RADAR SUMMARY: ${count} contacts in range.
             CLOSEST TRAFFIC:
             ${report}
             ${alertSection}
             
-            INSTRUCTION: Provide a concise status update based on your Persona. If there are Alerts, prioritize them. DO NOT ASK QUESTIONS. DO NOT OFFER ASSISTANCE.
+            INSTRUCTION: Provide a concise status update based on your Persona. Mention weather if relevant to flight operations. If there are Alerts, prioritize them. DO NOT ASK QUESTIONS.
         `;
 
         const res = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
@@ -672,7 +709,6 @@
         return data.message.content.trim();
     }
 
-    // Math Helpers
     function getDistance(lat1, lon1, lat2, lon2) {
         const R = 6371; 
         const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -688,7 +724,6 @@
         return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
     }
 
-    // Cookie Helpers
     function setCookie(name, value, days) {
         let expires = "";
         if (days) {
