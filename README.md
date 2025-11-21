@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.27
+**Current Version:** V1.9.28
 
 ---
 
@@ -87,8 +87,10 @@ The AI assistant attempts to reach an Ollama instance on the same host that serv
 dashboard (defaulting to port `11434`). Override the target by setting `localStorage.ollamaUrl`
 in your browser (for example, `http://192.168.50.4:11434`). If the dashboard is on HTTPS but
 Ollama only exposes HTTP, the app now automatically retries with `http://` so LAN clients can
-still connect. Connection attempts and failures are surfaced in the in-app comms log for quick
-debugging.
+still connect. For lighttpd or other reverse proxies, you can also expose Ollama on the same
+origin at `/ollama` to dodge CORS and mixed-content blocks—the app now tests that path
+automatically. Connection attempts and failures are surfaced in the in-app comms log for quick
+debugging, including hints when the browser blocks HTTP calls from an HTTPS dashboard.
 
 Default receiver coordinates now live in [`config.js`](config.js). Adjust the
 `DEFAULT_RECEIVER_LOCATION` export there to match your station's latitude and longitude.

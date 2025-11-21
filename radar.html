@@ -229,6 +229,7 @@
         const protocol = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
         const host = window.location.hostname || '127.0.0.1';
         const primary = `${protocol}//${host}:11434`;
+        const originProxy = `${window.location.origin}/ollama`;
 
         // If the dashboard is served via HTTPS but Ollama is only available over HTTP,
         // try the downgraded scheme as a fallback so LAN users still connect.
@@ -237,6 +238,10 @@
             candidates.push(`http://${host}:11434`);
         }
 
+        // If lighttpd or another reverse proxy exposes Ollama on the same origin
+        // (e.g., via "/ollama"), try that path to avoid mixed-content or CORS blocks.
+        candidates.push(originProxy);
+
         return [...new Set(candidates)];
     }
 
@@ -244,6 +249,12 @@
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         const started = performance.now();
+        const isMixedContentRisk = window.location.protocol === 'https:' && resource.startsWith('http:');
+
+        if (isMixedContentRisk) {
+            aiLog('DEBUG', `Mixed-content risk: page is https but request is http -> ${resource}`, 'debug');
+        }
+
         aiLog('DEBUG', `Requesting ${label} -> ${resource} (timeout ${timeoutMs}ms)`, 'debug');
         try {
             const response = await fetch(resource, { ...options, signal: controller.signal });
@@ -252,7 +263,22 @@
             return response;
         } catch (e) {
             const elapsed = Math.round(performance.now() - started);
-            aiLog('AI ERROR', `${label} failed after ${elapsed}ms: ${e.message || e}`, 'alert');
+            const hints = [];
+
+            if (e.name === 'AbortError') {
+                hints.push('request timed out');
+            }
+
+            if (isMixedContentRisk) {
+                hints.push('browser may block HTTP calls from HTTPS pages');
+            }
+
+            if (e instanceof TypeError && resource.startsWith('http')) {
+                hints.push('check CORS headers or reverse proxy to same origin');
+            }
+
+            const hintText = hints.length ? ` Hint: ${hints.join('; ')}.` : '';
+            aiLog('AI ERROR', `${label} failed after ${elapsed}ms: ${e.message || e}.${hintText}`, 'alert');
             throw e;
         } finally {
             clearTimeout(timer);
