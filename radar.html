@@ -339,7 +339,6 @@
 
     let carrierNode = null;
     let carrierGain = null;
-    let noiseBuffer = null;
     let monitorInterval = null;
     let lastAiStatus = { text: null, color: null };
     let serverDiagnosticsLogged = false;
@@ -402,9 +401,6 @@
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             audioContext = new AudioContext();
             if(audioContext.state === 'suspended') audioContext.resume();
-            noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 5, audioContext.sampleRate);
-            const data = noiseBuffer.getChannelData(0);
-            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
         } catch(e) { console.warn("Web Audio API not supported"); }
 
         const savedPersona = getCookie("aiPersona");
@@ -418,9 +414,7 @@
 
             updateAiStatus("INITIALIZING...", "#ffff00");
             
-            // BOOT SEQUENCE: Play static, THEN speak (SERIALIZED)
-            playStaticBurst(audioContext.currentTime, 0.5);
-            
+            // BOOT SEQUENCE: Start with a clear chime before the first broadcast
             setTimeout(() => {
                  speak("System Online. Sensors Calibrated.");
                  detectModel();
@@ -432,40 +426,33 @@
 
     // --- AUDIO ENGINE ---
     function startCarrier() {
-        if (!audioContext || !voiceEnabled || !noiseBuffer) return;
+        if (!audioContext || !voiceEnabled) return;
         if (audioContext.state === 'suspended') audioContext.resume();
-        if (carrierNode) return; 
+        if (carrierNode) return;
 
-        carrierNode = audioContext.createBufferSource();
-        carrierNode.buffer = noiseBuffer;
-        carrierNode.loop = true;
-
-        const filter = audioContext.createBiquadFilter();
-        filter.type = "bandpass"; filter.frequency.value = 1000; filter.Q.value = 0.8;
+        carrierNode = audioContext.createOscillator();
+        carrierNode.type = "sine";
+        carrierNode.frequency.setValueAtTime(750, audioContext.currentTime);
 
         carrierGain = audioContext.createGain();
         const t = audioContext.currentTime;
         carrierGain.gain.setValueAtTime(0, t);
-        carrierGain.gain.linearRampToValueAtTime(0.08, t + 0.1);
+        carrierGain.gain.linearRampToValueAtTime(0.05, t + 0.05);
 
-        carrierNode.connect(filter); filter.connect(carrierGain); carrierGain.connect(audioContext.destination);
+        carrierNode.connect(carrierGain); carrierGain.connect(audioContext.destination);
         carrierNode.start(t);
     }
 
     function stopCarrier() {
         if (!carrierNode || !carrierGain) return;
         const t = audioContext.currentTime;
-        
-        // Keep carrier alive for K-Tone duration (approx 0.8s)
-        const toneDuration = 0.8;
-        const fadeStart = t + toneDuration;
-        
-        carrierGain.gain.setValueAtTime(carrierGain.gain.value, fadeStart);
-        carrierGain.gain.linearRampToValueAtTime(0, fadeStart + 0.2);
-        carrierNode.stop(fadeStart + 0.3);
-        
-        const oldNode = carrierNode; 
-        setTimeout(() => { if(oldNode) try{oldNode.disconnect();}catch(e){} }, (toneDuration + 0.4) * 1000);
+
+        carrierGain.gain.setValueAtTime(carrierGain.gain.value, t);
+        carrierGain.gain.linearRampToValueAtTime(0, t + 0.2);
+        carrierNode.stop(t + 0.25);
+
+        const oldNode = carrierNode;
+        setTimeout(() => { if(oldNode) try{oldNode.disconnect();}catch(e){} }, 400);
 
         carrierNode = null; carrierGain = null;
 
@@ -496,21 +483,6 @@
         osc.start(t); osc.stop(t3 + dash + 0.1);
     }
     
-    function playStaticBurst(startTime, duration) {
-        if (!audioContext || !noiseBuffer) return;
-        const noise = audioContext.createBufferSource();
-        noise.buffer = noiseBuffer;
-        const filter = audioContext.createBiquadFilter();
-        filter.type = "bandpass"; filter.frequency.value = 1200; filter.Q.value = 1;
-        const gain = audioContext.createGain();
-        gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.15, startTime + 0.05);
-        gain.gain.setValueAtTime(0.15, startTime + duration - 0.05);
-        gain.gain.linearRampToValueAtTime(0, startTime + duration);
-        noise.connect(filter); filter.connect(gain); gain.connect(audioContext.destination);
-        noise.start(startTime); noise.stop(startTime + duration + 0.1);
-    }
-
     // --- CORE LOGIC ---
     function speak(text) {
         if (!voiceEnabled) return;
