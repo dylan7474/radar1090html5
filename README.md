@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.32
+**Current Version:** V1.9.33
 
 ---
 
@@ -141,6 +141,10 @@ the radar rings automatically.
 - Use the **Show Log** button under the AI panel to inspect recent dump1090 and Ollama
   requests with response codes and durations—handy when requests are routed through
   `lighttpd` or another reverse proxy.
+- Click **Run AI Self-Test** in the sidebar to fire CORS and no-cors probes against all
+  detected Ollama endpoints. The results land in the comms log so you can tell whether
+  the browser is blocked by CORS, hitting a proxy 404, or actually reaching the
+  service.
 - To verify the server side of Ollama when troubleshooting 404/CORS errors, run these on
   the host that serves the dashboard:
 
