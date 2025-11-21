@@ -223,18 +223,37 @@
 
   <!-- 4. AI CONTROLLER SCRIPT -->
   <script>
-    function resolveOllamaUrl() {
+    function resolveOllamaCandidates() {
         const saved = localStorage.getItem('ollamaUrl');
-        if (saved) return saved;
-
         const protocol = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
         const host = window.location.hostname || '127.0.0.1';
-        return `${protocol}//${host}:11434`;
+        const primary = `${protocol}//${host}:11434`;
+
+        // If the dashboard is served via HTTPS but Ollama is only available over HTTP,
+        // try the downgraded scheme as a fallback so LAN users still connect.
+        const candidates = saved ? [saved] : [primary];
+        if (!saved && protocol === 'https:') {
+            candidates.push(`http://${host}:11434`);
+        }
+
+        return [...new Set(candidates)];
     }
+
+    async function fetchWithTimeout(resource, options = {}, timeoutMs = 8000) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(resource, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    const ollamaCandidates = resolveOllamaCandidates();
 
     const AI_CONFIG = {
         dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data",
-        ollamaUrl: resolveOllamaUrl(),
+        ollamaUrl: ollamaCandidates[0],
         ollamaModel: null,
         myLat: 54.531836,
         myLon: -1.087954,
@@ -538,21 +557,34 @@
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
-        aiLog("AI", `Detecting Ollama at ${AI_CONFIG.ollamaUrl}`);
-        try {
-            const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/tags`);
-            if (!r.ok) throw new Error(`Status ${r.status}`);
-            const d = await r.json();
-            const m = d.models.find(x => x.name.includes('llama3')) || d.models[0];
-            AI_CONFIG.ollamaModel = m.name;
-            updateAiStatus("ONLINE", "#00ff41");
-            return true;
-        } catch (e) {
-            console.error("Ollama detection failed", e);
-            aiLog("AI ERROR", `Ollama connection failed: ${e.message || e}`, 'alert');
-            updateAiStatus("ERROR", "#ff3333");
-            return false;
+
+        let lastError = null;
+        for (const candidate of ollamaCandidates) {
+            AI_CONFIG.ollamaUrl = candidate;
+            aiLog("AI", `Detecting Ollama at ${candidate}`);
+            try {
+                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, 6000);
+                if (!r.ok) throw new Error(`Status ${r.status}`);
+                const d = await r.json();
+                if (!d.models || d.models.length === 0) throw new Error('No models available');
+
+                const m = d.models.find(x => x.name.includes('llama3')) || d.models[0];
+                AI_CONFIG.ollamaModel = m.name;
+                aiLog("AI", `Connected to ${candidate} using ${AI_CONFIG.ollamaModel}`);
+                updateAiStatus("ONLINE", "#00ff41");
+                return true;
+            } catch (e) {
+                lastError = e;
+                console.error(`Ollama detection failed at ${candidate}`, e);
+                aiLog("AI ERROR", `Ollama connection failed at ${candidate}: ${e.message || e}`, 'alert');
+            }
         }
+
+        updateAiStatus("ERROR", "#ff3333");
+        if (lastError) {
+            aiLog("AI ERROR", `No Ollama endpoint reachable (${lastError.message || lastError}).`, 'alert');
+        }
+        return false;
     }
 
     async function runAiCycle() {
@@ -563,7 +595,8 @@
         aiProcessing = true;
         try {
             await updateReceiverLocation();
-            const r = await fetch(`${AI_CONFIG.dump1090Base}/aircraft.json`);
+            const r = await fetchWithTimeout(`${AI_CONFIG.dump1090Base}/aircraft.json`, {}, 7000);
+            if (!r.ok) throw new Error(`dump1090 status ${r.status}`);
             const d = await r.json();
             const valid = (d.aircraft || []).filter(p => p.lat && p.lon && (p.seen||0)<60);
             const enriched = valid.map(p => ({
@@ -576,7 +609,7 @@
 
             const limit = getCurrentRangeLimit();
             const inRange = enriched.filter(p => p.dist < limit);
-            
+
             if (inRange.length > 0) {
                 updateAiStatus("ANALYZING...", "#ffff00");
                 const alerts = analyzeConditions(inRange);
@@ -623,10 +656,10 @@
         TASK: Short status update based on Persona. Alerts first. No questions.`;
 
         try {
-            const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
+            const r = await fetchWithTimeout(`${AI_CONFIG.ollamaUrl}/api/chat`, {
                 method: 'POST', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
-            });
+            }, 10000);
             if (!r.ok) throw new Error(`Status ${r.status}`);
             return (await r.json()).message.content.trim();
         } catch (e) {
