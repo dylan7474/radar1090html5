@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.33
+**Current Version:** V1.9.34
 
 ---
 
@@ -162,6 +162,24 @@ the radar rings automatically.
   Replace `YOUR_DASHBOARD_HOST` with the hostname you load in the browser (e.g.
   `http://192.168.50.123`). Successful calls should return HTTP 200 and include
   an `Access-Control-Allow-Origin` header that permits the dashboard.
+- If direct calls to `http://127.0.0.1:11434` succeed but the browser still fails,
+  enable CORS directly on Ollama before restarting the service:
+
+  ```bash
+  export OLLAMA_ORIGINS="*"
+  export OLLAMA_HOST=0.0.0.0
+  systemctl restart ollama
+  ```
+
+  For a persistent change on systemd installs, add these lines to
+  `/etc/systemd/system/ollama.service.d/override.conf` under `[Service]`:
+
+  ```conf
+  Environment=OLLAMA_ORIGINS=*
+  Environment=OLLAMA_HOST=0.0.0.0
+  ```
+
+  Then run `systemctl daemon-reload && systemctl restart ollama`.
 - If the in-app log shows `opaque/no-cors` probe results for Ollama, the browser could
   reach the service but was blocked by missing CORS headers or proxy rules; add
   `Access-Control-Allow-Origin:*` on Ollama or forward `/ollama/*` to the service on

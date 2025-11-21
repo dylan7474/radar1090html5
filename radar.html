@@ -338,6 +338,8 @@
     let monitorInterval = null;
     let lastAiStatus = { text: null, color: null };
     let serverDiagnosticsLogged = false;
+    let proxyHintLogged = false;
+    let corsEnvHintLogged = false;
     const corsProbeLogged = {};
 
     function startSystem() {
@@ -650,11 +652,20 @@
                 console.error(`Ollama detection failed at ${candidate}`, e);
                 aiLog("AI ERROR", `Ollama connection failed at ${candidate}: ${e.message || e}`, 'alert');
                 if ((e.message || '').includes('Status 404') && candidate.includes('/ollama')) {
-                    aiLog('DEBUG', 'Hint: /ollama returned 404 — ensure your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 with trailing slash preservation.', 'debug');
+                    if (!proxyHintLogged) {
+                        aiLog('DEBUG', 'Hint: /ollama returned 404 — ensure your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 with trailing slash preservation. Example:', 'debug');
+                        aiLog('DEBUG', 'lighttpd snippet ->   $HTTP["url"].startswith("/ollama/") { proxy.server  =  ("" => (( "host" => "127.0.0.1", "port" => 11434 ))) }', 'debug');
+                        proxyHintLogged = true;
+                    }
                 }
                 if ((e.message || '').includes('Failed to fetch') && !corsProbeLogged[candidate]) {
                     corsProbeLogged[candidate] = true;
                     probeOllamaReachability(candidate);
+                    if (candidate.includes(':11434') && !corsEnvHintLogged) {
+                        aiLog('DEBUG', 'If direct port 11434 is reachable but blocked by the browser, set OLLAMA_ORIGINS="*" (or your dashboard URL) before starting Ollama, e.g.:', 'debug');
+                        aiLog('DEBUG', '  export OLLAMA_ORIGINS="*" && export OLLAMA_HOST=0.0.0.0 && systemctl restart ollama', 'debug');
+                        corsEnvHintLogged = true;
+                    }
                 }
                 if (!serverDiagnosticsLogged) {
                     const origin = window.location.origin;
