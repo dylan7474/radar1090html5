@@ -1,840 +1,627 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>radar1090 // AI ENHANCED</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>radar1090 // AI ENHANCED</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  
+  <style>
+    /* Interaction Overlay */
+    #interaction-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(5, 5, 5, 0.95); z-index: 9999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      cursor: pointer; backdrop-filter: blur(5px);
+    }
+    #start-btn {
+      border: 2px solid #00ff41; color: #00ff41; background: transparent;
+      padding: 20px 40px; font-family: 'Share Tech Mono', monospace;
+      font-size: 24px; letter-spacing: 4px; text-transform: uppercase;
+      box-shadow: 0 0 20px rgba(0, 255, 65, 0.2); animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; text-shadow: 0 0 10px #00ff41; } 100% { opacity: 0.8; } }
+    
+    /* --- CUSTOM AI CONTROL STYLES --- */
+    .control-row.ai-status-row { display: flex; align-items: center; gap: 10px; }
+    .control-value.status-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; font-size: 0.85em; line-height: 1.2; color: #00ff41; }
+    .ai-custom-block { border-bottom: 1px solid #333; padding: 10px 0; margin-bottom: 5px; display: block; }
+    .ai-label { display: block; font-family: 'Share Tech Mono', monospace; color: #aaa; font-size: 14px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+    .control-select { background: #111; color: #00ff41; border: 1px solid #444; font-family: 'Share Tech Mono', monospace; padding: 10px; width: 100%; text-transform: uppercase; font-size: 14px; cursor: pointer; border-radius: 4px; box-sizing: border-box; appearance: none; background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2300ff41%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E"); background-repeat: no-repeat; background-position: right 12px top 50%; background-size: 10px auto; }
+    .control-select:focus { outline: 1px solid #00ff41; background-color: #000; }
+    .ai-status-row .control-button { min-width: 80px; }
+    
+    #weather-display { color: #a5d6ff; border-left: 3px solid #00ff41; padding-left: 8px; margin-bottom: 10px; }
+    #voice-visualizer { width: 100%; height: 4px; background: #111; margin-top: 5px; position: relative; overflow: hidden; }
+    #voice-bar { width: 0%; height: 100%; background: #00ff41; box-shadow: 0 0 10px #00ff41; transition: width 0.05s ease-out; }
 
-<!-- AI Styles -->
-<style>
-/* Interaction Overlay */
-#interaction-overlay {
-position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-background: rgba(5, 5, 5, 0.95); z-index: 9999;
-display: flex; flex-direction: column; align-items: center; justify-content: center;
-cursor: pointer; backdrop-filter: blur(5px);
-}
-#start-btn {
-border: 2px solid #00ff41; color: #00ff41; background: transparent;
-padding: 20px 40px; font-family: 'Share Tech Mono', monospace;
-font-size: 24px; letter-spacing: 4px; text-transform: uppercase;
-box-shadow: 0 0 20px rgba(0, 255, 65, 0.2); animation: pulse 2s infinite;
-}
-@keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; text-shadow: 0 0 10px #00ff41; } 100% { opacity: 0.8; } }
+    body.emergency-active::before { content: ""; position: fixed; top:0; left:0; right:0; bottom:0; border: 4px solid red; pointer-events: none; z-index: 9998; animation: emergencyFlash 1s infinite; }
+    @keyframes emergencyFlash { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 
-/* --- CUSTOM AI CONTROL STYLES --- */
-.control-row.ai-status-row { display: flex; align-items: center; gap: 10px; }
-.control-value.status-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; font-size: 0.85em; line-height: 1.2; color: #00ff41; }
-.ai-custom-block { border-bottom: 1px solid #333; padding: 10px 0; margin-bottom: 5px; display: block; }
-.ai-label { display: block; font-family: 'Share Tech Mono', monospace; color: #aaa; font-size: 14px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
-.control-select { background: #111; color: #00ff41; border: 1px solid #444; font-family: 'Share Tech Mono', monospace; padding: 10px; width: 100%; text-transform: uppercase; font-size: 14px; cursor: pointer; border-radius: 4px; box-sizing: border-box; appearance: none; background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2300ff41%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E"); background-repeat: no-repeat; background-position: right 12px top 50%; background-size: 10px auto; }
-.control-select:focus { outline: 1px solid #00ff41; background-color: #000; }
-.ai-status-row .control-button { min-width: 80px; }
-
-/* Weather Display */
-#weather-display { color: #a5d6ff; border-left: 3px solid #00ff41; padding-left: 8px; margin-bottom: 10px; }
-
-/* VISUALIZER BAR */
-#voice-visualizer { width: 100%; height: 4px; background: #111; margin-top: 5px; position: relative; overflow: hidden; }
-#voice-bar { width: 0%; height: 100%; background: #00ff41; box-shadow: 0 0 10px #00ff41; transition: width 0.05s ease-out; }
-
-/* EMERGENCY ALERT BORDER */
-body.emergency-active::before { content: ""; position: fixed; top:0; left:0; right:0; bottom:0; border: 4px solid red; pointer-events: none; z-index: 9998; animation: emergencyFlash 1s infinite; }
-@keyframes emergencyFlash { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
-
-/* LOG MODAL OVERRIDES */
-.log-modal-content { background: #0a0a0a; border: 1px solid #00ff41; color: #eee; font-family: 'Share Tech Mono', monospace; max-height: 60vh; overflow-y: auto; padding: 20px; }
-.log-entry { border-bottom: 1px solid #333; padding: 8px 0; font-size: 12px; }
-.log-entry.alert { color: #ff5555; }
-.log-timestamp { color: #666; margin-right: 10px; }
-</style>
+    .log-modal-content { background: #0a0a0a; border: 1px solid #00ff41; color: #eee; font-family: 'Share Tech Mono', monospace; max-height: 60vh; overflow-y: auto; padding: 20px; }
+    .log-entry { border-bottom: 1px solid #333; padding: 8px 0; font-size: 12px; }
+    .log-entry.alert { color: #ff5555; }
+    .log-timestamp { color: #666; margin-right: 10px; }
+  </style>
 </head>
 <body>
 
-<!-- INITIALIZATION OVERLAY -->
-<div id="interaction-overlay" onclick="startSystem()">
-<div id="start-btn">INITIALIZE RADAR</div>
-<div style="margin-top: 20px; color: #888; font-family: monospace;">CLICK TO ACTIVATE AI & AUDIO LINKS</div>
-</div>
-
-<main class="app">
-<div class="panel-toggle-bar" role="group" aria-label="Layout controls">
-<button type="button" class="control-button panel-toggle-button" id="controls-panel-toggle" aria-controls="controls-panel" aria-expanded="true" aria-pressed="true">Hide Controls</button>
-<button type="button" class="control-button panel-toggle-button" id="data-panel-toggle" aria-controls="data-panel" aria-expanded="true" aria-pressed="true">Hide Data</button>
-</div>
-
-<section class="sidebar controls-panel" id="controls-panel">
-<h1>radar1090 <span style="font-size:0.5em; color:#00ff41;">AI</span></h1>
-<div class="status" id="status"></div>
-<section class="controls">
-<h2>Controls</h2>
-<div class="control-panel">
-
-<!-- AI CONTROLS -->
-<div class="control-row ai-status-row">
-<div class="control-info">
-<span class="control-name" style="color:#00ff41">AI Core</span>
-<span class="control-value status-text" id="ai-status-text" title="Status">OFFLINE</span>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button" id="ai-toggle-btn">RETRY</button>
-</div>
-</div>
-
-<!-- PERSONA SELECTOR -->
-<div class="ai-custom-block">
-<span class="ai-label">AI Persona Profile</span>
-<select id="ai-persona-select" class="control-select">
-<option value="MILITARY">Tactical Defense</option>
-<option value="ATC">Air Traffic Control</option>
-<option value="SPOTTER">Plane Spotter</option>
-</select>
-</div>
-
-<div class="control-row">
-<div class="control-info">
-<span class="control-name">Commentary</span>
-<span class="control-value" id="tts-status">ACTIVE</span>
-<!-- VISUALIZER -->
-<div id="voice-visualizer"><div id="voice-bar"></div></div>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button" id="tts-mute-toggle">MUTE</button>
-</div>
-</div>
-
-<!-- LOG BUTTON -->
-<div class="control-row control-row--single">
-<div class="control-buttons">
-<button type="button" class="control-button" id="show-log-btn">VIEW COMMS LOG</button>
-</div>
-</div>
-<!-- END AI CONTROLS -->
-
-<!-- ORIGINAL CONTROLS -->
-<div class="control-row">
-<div class="control-info">
-<span class="control-name" id="volume-label">Volume</span>
-<span class="control-value" id="volume-value">10</span>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button control-button--square" id="volume-decrease" aria-label="Decrease volume">&minus;</button>
-<button type="button" class="control-button control-button--square" id="volume-increase" aria-label="Increase volume">+</button>
-</div>
-</div>
-
-<div class="control-row">
-<div class="control-info">
-<span class="control-name">Radar Range</span>
-<span class="control-value" id="range-value">50 km</span>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button control-button--square" id="range-decrease" aria-label="Decrease range">&minus;</button>
-<button type="button" class="control-button control-button--square" id="range-increase" aria-label="Increase range">+</button>
-</div>
-</div>
-
-<div class="control-row">
-<div class="control-info">
-<span class="control-name">Base Alert Range</span>
-<span class="control-value" id="alert-range-value">15 km</span>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button control-button--square" id="alert-range-decrease" aria-label="Decrease base alert range">&minus;</button>
-<button type="button" class="control-button control-button--square" id="alert-range-increase" aria-label="Increase base alert range">+</button>
-</div>
-</div>
-
-<div class="control-row">
-<div class="control-info">
-<span class="control-name">Rotate Radar</span>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button" id="radar-rotate" aria-label="Rotate radar clockwise">Rotate</button>
-</div>
-</div>
-
-<div class="control-row control-row--single">
-<div class="control-buttons">
-<button type="button" class="control-button" id="center-on-location" aria-label="Center radar on your current location">Use My Location</button>
-</div>
-</div>
-
-<div class="control-row control-row--single">
-<div class="control-buttons">
-<button type="button" class="control-button" id="manual-location" aria-label="Open the manual receiver location picker">Set Location Manually</button>
-</div>
-</div>
-
-<div class="control-row">
-<div class="control-info">
-<span class="control-name">Aircraft Labels</span>
-<span class="control-value" id="aircraft-details-state">Hidden</span>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button" id="aircraft-details-toggle" aria-pressed="false" aria-label="Toggle aircraft labels">Show</button>
-</div>
-</div>
-
-<div class="control-row">
-<div class="control-info">
-<span class="control-name">OpenStreetMap Overlay</span>
-<span class="control-value" id="openstreetmap-overlay-state">Hidden</span>
-</div>
-<div class="control-buttons">
-<button type="button" class="control-button" id="openstreetmap-overlay-toggle" aria-pressed="false" aria-label="Toggle OpenStreetMap overlay">Show</button>
-</div>
-</div>
-</div>
-</section>
-
-<section class="audio">
-<h2>Live Audio</h2>
-<p class="hint">The local airband feed plays automatically—use mute if you need quiet.</p>
-<div class="audio-actions">
-<button type="button" class="control-button" id="audio-mute-toggle" aria-pressed="false" aria-label="Toggle audio mute">Mute</button>
-<span class="audio-status" id="audio-status">Connecting…</span>
-</div>
-<audio id="airband-stream" preload="none" autoplay muted playsinline>
-Your browser does not support the audio element.
-</audio>
-</section>
-</section>
-
-<section class="radar-container">
-<div class="version-chip" id="version" aria-label="Application version"></div>
-<div class="openstreetmap-overlay" id="openstreetmap-overlay" hidden aria-hidden="true">
-<iframe id="openstreetmap-frame" title="OpenStreetMap overlay" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
-</div>
-<canvas id="radar" width="960" height="640" aria-label="Radar display"></canvas>
-</section>
-
-<section class="sidebar data-panel" id="data-panel">
-<h2>Live Data</h2>
-<div class="info-stack">
-<!-- WEATHER -->
-<div class="info-block" id="weather-display">Weather Data Pending...</div>
-
-<div class="info-block" id="aircraft-info"></div>
-<div class="info-block" id="range-info"></div>
-<div class="info-block" id="receiver-info" aria-live="polite"></div>
-</div>
-<!-- Ticker used by AI -->
-<div class="message-ticker" id="message-ticker" aria-live="polite">
-<span class="message-ticker__track" id="message-ticker-track"></span>
-</div>
-<div class="message" id="message"></div>
-</section>
-</main>
-
-<!-- MODALS -->
-<div class="modal" id="geolocation-permission-modal" hidden aria-hidden="true">
-<div class="modal__backdrop" id="geolocation-permission-backdrop" role="presentation"></div>
-<section class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="geolocation-permission-title">
-<h2 id="geolocation-permission-title">Enable location access</h2>
-<p>Location sharing is currently blocked for radar1090. Follow the steps below to allow precise positioning so the radar can center on you automatically.</p>
-<ul class="modal__list">
-<li><strong>Chrome / Edge:</strong> Select the lock icon beside the address bar, open <em>Site settings</em>, set <em>Location</em> to <em>Allow</em>, then reload the page.</li>
-<li><strong>Firefox:</strong> Click the shield icon, choose <em>Allow location access</em>, or clear the block under <em>Permissions</em> in Settings → Privacy &amp; Security.</li>
-<li><strong>Safari:</strong> Open Settings → Privacy &amp; Security → Location Services, allow Safari (and this site), then reload.</li>
-</ul>
-<p class="modal__hint">After updating permissions, reload radar1090 and press “Use My Location” again.</p>
-<div class="modal__actions">
-<button type="button" class="control-button primary" id="geolocation-permission-close">Got it</button>
-</div>
-</section>
-</div>
-
-<div class="modal" id="manual-location-modal" hidden aria-hidden="true">
-<div class="modal__backdrop" id="manual-location-backdrop" role="presentation"></div>
-<section class="modal__dialog modal__dialog--wide manual-location-modal" role="dialog" aria-modal="true" aria-labelledby="manual-location-title">
-<h2 id="manual-location-title">Set receiver location</h2>
-<p>Pan and zoom the map, then click to drop the marker where your receiver is located. You can drag the marker afterward for fine adjustments.</p>
-<div class="manual-location__map" id="manual-location-map" role="presentation"></div>
-<p class="manual-location__coordinates" id="manual-location-coordinates">Click the map to drop the marker.</p>
-<p class="manual-location__status" id="manual-location-status" hidden aria-live="polite"></p>
-<div class="modal__actions">
-<button type="button" class="control-button" id="manual-location-cancel">Cancel</button>
-<button type="button" class="control-button primary" id="manual-location-confirm" disabled>Use This Location</button>
-</div>
-</section>
-</div>
-
-<!-- NEW LOG MODAL -->
-<div class="modal" id="ai-log-modal" hidden aria-hidden="true">
-<div class="modal__backdrop" id="ai-log-backdrop" role="presentation"></div>
-<section class="modal__dialog" role="dialog" aria-modal="true">
-<h2>Tactical Comms Log</h2>
-<div id="ai-log-content" class="log-modal-content">
-<!-- History populated here -->
-</div>
-<div class="modal__actions">
-<button type="button" class="control-button" id="ai-log-close">Close</button>
-</div>
-</section>
-</div>
-
-<script type="module" src="app.js"></script>
-
-<!-- 4. AI CONTROLLER SCRIPT -->
-<script>
-const AI_CONFIG = {
-dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data",
-ollamaUrl: "http://127.0.0.1:11434",
-ollamaModel: null,
-myLat: 54.531836,
-myLon: -1.087954,
-locationName: "SECTOR",
-scanInterval: 20000,
-maxPlanes: 5,
-weatherData: null
-};
-
-const PERSONAS = {
-MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
-ATC: `You are LONDON CENTER AIR TRAFFIC CONTROL. Tone: Professional, routine, calm, human. Vocabulary: "Traffic", "Flight Level", "Knots", "Descend", "Maintain", "Squawk", "Good evening", "Radar Contact". Focus on safe separation and traffic advisories. Phrase it as a standard radio broadcast topilots. Output a single advisory line. Do not ask questions.`,
-SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual, friendly. Focus on airlines ("Oh look, a British Airways!"), altitude (low passes), and "cool" aircraft actions. Do not ask questions to the listener. Just narrate what you see with excitement.`
-};
-
-const AIRCRAFT_TYPES = {
-"B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777",
-"B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172",
-"B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet",
-"F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter"
-};
-
-let aiProcessing = false;
-let systemActive = false;
-let voiceEnabled = true;
-let currentUtterance = null;
-let isSpeaking = false;
-let audioContext = null;
-let msgHistory = [];
-let visInterval = null;
-
-// Audio Engine Globals
-let carrierNode = null;
-let carrierGain = null;
-let noiseBuffer = null;
-
-function startSystem() {
-document.getElementById('interaction-overlay').style.display = 'none';
-
-const radar = document.getElementById('radar');
-if(radar) radar.scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});
-
-systemActive = true;
-window.speechSynthesis.resume();
-
-try {
-const AudioContext = window.AudioContext || window.webkitAudioContext;
-audioContext = new AudioContext();
-if(audioContext.state === 'suspended') audioContext.resume();
-
-// Pre-fill noise buffer
-noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 2, audioContext.sampleRate);
-const data = noiseBuffer.getChannelData(0);
-for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-
-} catch(e) { console.warn("Web Audio API not supported"); }
-
-const savedPersona = getCookie("aiPersona");
-if(savedPersona && PERSONAS[savedPersona]) {
-document.getElementById('ai-persona-select').value = savedPersona;
-}
-
-updateReceiverLocation().then(() => {
-fetchLocalWeather();
-fetchLocationName(AI_CONFIG.myLat, AI_CONFIG.myLon).then(name => {
-AI_CONFIG.locationName = name;
-console.log(`AI: Location ID set to ${name}`);
-});
-
-updateAiStatus("INITIALIZING...", "#ffff00");
-
-// Just speak - the speak function handles the carrier start/stop
-speak("System Online. Sensors Calibrated.");
-
-detectModel();
-setInterval(runAiCycle, AI_CONFIG.scanInterval);
-setInterval(fetchLocalWeather, 30 * 60 * 1000);
-});
-}
-
-// --- VISUALIZER LOGIC ---
-function startVisualizer() {
-if(visInterval) clearInterval(visInterval);
-const bar = document.getElementById('voice-bar');
-visInterval = setInterval(() => {
-if(isSpeaking) bar.style.width = Math.floor(Math.random() * 80 + 20) + "%";
-else bar.style.width = "0%";
-}, 100);
-}
-
-// --- LOG MODAL LOGIC ---
-const logModal = document.getElementById('ai-log-modal');
-const logContent = document.getElementById('ai-log-content');
-document.getElementById('show-log-btn').addEventListener('click', () => {
-logContent.innerHTML = msgHistory.map(entry =>
-`<div class="log-entry ${entry.type}">
-<span class="log-timestamp">[${entry.time}]</span>
-<strong>${entry.title}:</strong> ${entry.text}
-</div>`
-).join('');
-logModal.hidden = false;
-});
-document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
-document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
-
-// --- GEOLOCATION ---
-async function fetchLocationName(lat, lon) {
-try {
-const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`);
-const d = await r.json();
-const addr = d.address || {};
-return (addr.city || addr.town || addr.municipality || addr.county || "SECTOR").toUpperCase();
-} catch(e) { return "SECTOR"; }
-}
-
-// --- AUDIO ENGINE 5.0: CONTINUOUS HISS + TONE ---
-
-function startCarrier() {
-if (!audioContext || !voiceEnabled || !noiseBuffer) return;
-if (audioContext.state === 'suspended') audioContext.resume();
-if (carrierNode) return; // Already running
-
-carrierNode = audioContext.createBufferSource();
-carrierNode.buffer = noiseBuffer;
-carrierNode.loop = true;
-
-const filter = audioContext.createBiquadFilter();
-filter.type = "bandpass";
-filter.frequency.value = 1000;
-filter.Q.value = 0.8;
-
-carrierGain = audioContext.createGain();
-const t = audioContext.currentTime;
-
-carrierGain.gain.setValueAtTime(0, t);
-carrierGain.gain.linearRampToValueAtTime(0.08, t + 0.1);
-
-carrierNode.connect(filter);
-filter.connect(carrierGain);
-carrierGain.connect(audioContext.destination);
-
-carrierNode.start(t);
-}
-
-function stopCarrier() {
-if (!carrierNode || !carrierGain) return;
-
-const t = audioContext.currentTime;
-
-// Fade Out Hiss
-carrierGain.gain.setValueAtTime(carrierGain.gain.value, t);
-carrierGain.gain.linearRampToValueAtTime(0, t + 0.1);
-
-// Keep carrier alive just until fade ends (no hard stop needed for tone mix)
-carrierNode.stop(t + 0.2);
-
-// Play K-Tone immediately after fade starts
-playKToneSequence(t + 0.1);
-
-// Cleanup references
-carrierNode = null;
-carrierGain = null;
-}
-
-function playKToneSequence(startTime) {
-if (!audioContext) return;
-
-const t = startTime;
-const osc = audioContext.createOscillator();
-osc.type = "sine";
-osc.frequency.setValueAtTime(1500, t);
-
-const gain = audioContext.createGain();
-osc.connect(gain);
-gain.connect(audioContext.destination);
-
-const dot = 0.08; const dash = 0.24; const gap = 0.08; const vol = 0.1;
-
-// DASH 1
-gain.gain.setValueAtTime(0, t);
-gain.gain.linearRampToValueAtTime(vol, t + 0.01);
-gain.gain.setValueAtTime(vol, t + dash - 0.01);
-gain.gain.linearRampToValueAtTime(0, t + dash);
-
-// DOT
-const t2 = t + dash + gap;
-gain.gain.setValueAtTime(0, t2);
-gain.gain.linearRampToValueAtTime(vol, t2 + 0.01);
-gain.gain.setValueAtTime(vol, t2 + dot - 0.01);
-gain.gain.linearRampToValueAtTime(0, t2 + dot);
-
-// DASH 2
-const t3 = t2 + dot + gap;
-gain.gain.setValueAtTime(0, t3);
-gain.gain.linearRampToValueAtTime(vol, t3 + 0.01);
-gain.gain.setValueAtTime(vol, t3 + dash - 0.01);
-gain.gain.linearRampToValueAtTime(0, t3 + dash);
-
-osc.start(t);
-// Total duration = dash(0.24)+gap(0.08)+dot(0.08)+gap(0.08)+dash(0.24) = 0.72s
-const toneEndTime = t3 + dash + 0.05;
-osc.stop(toneEndTime);
-}
-
-// --- WEATHER & LOCATION ---
-async function fetchLocalWeather() {
-try {
-const url = `https://api.open-meteo.com/v1/forecast?latitude=${AI_CONFIG.myLat}&longitude=${AI_CONFIG.myLon}&current=temperature_2m,wind_speed_10m,weather_code`;
-const r = await fetch(url);
-const data = await r.json();
-if(data.current) {
-AI_CONFIG.weatherData = {
-temp: data.current.temperature_2m,
-wind: data.current.wind_speed_10m,
-code: data.current.weather_code
-};
-const display = document.getElementById('weather-display');
-if(display) display.innerText = `WEATHER: ${AI_CONFIG.weatherData.temp}°C | WIND: ${AI_CONFIG.weatherData.wind} KM/H`;
-}
-} catch(e) {}
-}
-
-async function updateReceiverLocation() {
-try {
-const domInfo = document.getElementById('receiver-info');
-if (domInfo && domInfo.innerText.includes('Lat')) {
-const text = domInfo.innerText;
-const latMatch = text.match(/Lat:?\s*(-?[\d.]+)/);
-const lonMatch = text.match(/Lon:?\s*(-?[\d.]+)/);
-if (latMatch && lonMatch) {
-AI_CONFIG.myLat = parseFloat(latMatch[1]);
-AI_CONFIG.myLon = parseFloat(lonMatch[1]);
-return;
-}
-}
-const r = await fetch(`${AI_CONFIG.dump1090Base}/receiver.json`);
-if(r.ok) {
-const d = await r.json();
-if(d.lat && d.lon) {
-AI_CONFIG.myLat = d.lat;
-AI_CONFIG.myLon = d.lon;
-}
-}
-} catch(e) { console.log("Location sync failed"); }
-}
-
-function updateAiStatus(msg, color) {
-const el = document.getElementById('ai-status-text');
-if(el) {
-el.innerText = msg;
-el.style.color = color || '#fff';
-el.title = msg;
-}
-}
-
-function aiLog(title, text, type = 'normal') {
-const ticker = document.getElementById('message-ticker-track');
-const tickerContainer = document.getElementById('message-ticker');
-const time = new Date().toLocaleTimeString();
-const cleanText = text.replace(/\n/g, ' ');
-if(ticker) ticker.innerText = `[${time}] ${title}: ${cleanText}`;
-
-if (type === 'alert' && tickerContainer) {
-tickerContainer.style.backgroundColor = 'rgba(255, 50, 50, 0.25)';
-tickerContainer.style.border = '1px solid #ff3333';
-} else if (tickerContainer) {
-tickerContainer.style.backgroundColor = '';
-tickerContainer.style.border = '';
-}
-
-msgHistory.unshift({time: time, title: title, text: cleanText, type: type});
-if(msgHistory.length > 20) msgHistory.pop();
-}
-
-document.getElementById('ai-toggle-btn').addEventListener('click', detectModel);
-document.getElementById('tts-mute-toggle').addEventListener('click', () => {
-voiceEnabled = !voiceEnabled;
-const btn = document.getElementById('tts-mute-toggle');
-const status = document.getElementById('tts-status');
-if(voiceEnabled) {
-btn.innerText = "MUTE";
-status.innerText = "ACTIVE";
-speak("Voice enabled.");
-} else {
-btn.innerText = "UNMUTE";
-status.innerText = "MUTED";
-window.speechSynthesis.cancel();
-}
-});
-
-function handleRangeChange() {
-window.speechSynthesis.cancel();
-currentUtterance = null;
-isSpeaking = false;
-updateAiStatus("RANGE UPDATING...", "#ffff00");
-setTimeout(() => { aiProcessing = false; runAiCycle(); }, 500);
-}
-document.getElementById('range-increase').addEventListener('click', handleRangeChange);
-document.getElementById('range-decrease').addEventListener('click', handleRangeChange);
-
-document.getElementById('ai-persona-select').addEventListener('change', (e) => {
-const newMode = e.target.value;
-setCookie("aiPersona", newMode, 365);
-window.speechSynthesis.cancel();
-currentUtterance = null;
-isSpeaking = false;
-updateAiStatus("SWITCHING MODE...", "#ffff00");
-setTimeout(() => { aiProcessing = false; runAiCycle(); }, 500);
-});
-
-function speak(text) {
-if (!voiceEnabled) return;
-
-startVisualizer();
-
-currentUtterance = new SpeechSynthesisUtterance(text);
-const persona = document.getElementById('ai-persona-select').value;
-currentUtterance.rate = persona === 'ATC' ? 1.0 : 1.1;
-
-const voices = window.speechSynthesis.getVoices();
-const v = voices.find(v => v.lang === 'en-GB' || v.name.includes("UK English") || v.name.includes("Daniel"));
-if (v) currentUtterance.voice = v;
-else {
-const vDefault = voices.find(v => v.name.includes("Google US English") || v.name.includes("Samantha"));
-if (vDefault) currentUtterance.voice = vDefault;
-}
-
-currentUtterance.onstart = () => {
-isSpeaking = true;
-updateAiStatus("BROADCASTING...", "#00ff41");
-startCarrier();
-};
-
-currentUtterance.onend = () => {
-isSpeaking = false;
-currentUtterance = null;
-updateAiStatus("ONLINE", "#00ff41");
-// DELAY TO SIMULATE PTT RELEASE
-setTimeout(() => stopCarrier(), 400);
-};
-currentUtterance.onerror = () => {
-isSpeaking = false;
-currentUtterance = null;
-if(carrierNode) stopCarrier();
-};
-
-// Small delay to allow carrier to start
-setTimeout(() => window.speechSynthesis.speak(currentUtterance), 150);
-}
-window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-
-function getCurrentRangeLimit() {
-const el = document.getElementById('range-value');
-if (el) {
-const text = el.innerText || "";
-const match = text.match(/(\d+)/);
-if (match) return parseInt(match[0], 10);
-}
-return 50;
-}
-
-async function detectModel() {
-updateAiStatus("CONNECTING...", "#ffff00");
-try {
-const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/tags`);
-if (!r.ok) throw new Error("Failed");
-const d = await r.json();
-const models = d.models || [];
-if(models.length === 0) throw new Error("No Models");
-const m = models.find(x => x.name.includes('llama3')) || models.find(x => x.name.includes('mistral')) || models[0];
-AI_CONFIG.ollamaModel = m.name;
-updateAiStatus("ONLINE", "#00ff41");
-console.log(`AI SYSTEM: Connected to ${m.name}`);
-return true;
-} catch (e) {
-updateAiStatus("ERROR", "#ff3333");
-return false;
-}
-}
-
-async function runAiCycle() {
-if (!systemActive || aiProcessing) return;
-if (window.speechSynthesis.speaking || isSpeaking) { console.log("AI: Channel Busy. Skipping scan."); return; }
-if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
-
-aiProcessing = true;
-try {
-await updateReceiverLocation();
-const r = await fetch(`${AI_CONFIG.dump1090Base}/aircraft.json`);
-const d = await r.json();
-const valid = (d.aircraft || []).filter(p => p.lat && p.lon);
-const active = valid.filter(p => (p.seen || 0) < 60);
-
-const enriched = active.map(p => {
-const dist = getDistance(AI_CONFIG.myLat, AI_CONFIG.myLon, p.lat, p.lon);
-return {
-id: (p.flight || "UFO").trim(),
-type: p.t || "Unknown",
-squawk: p.squawk || "0000",
-alt: p.alt_baro || 0,
-speed: p.gs || 0,
-lat: p.lat, lon: p.lon,
-track: p.track || 0,
-vertRate: p.baro_rate || 0,
-dist: dist
-};
-}).sort((a, b) => a.dist - b.dist);
-
-const currentMaxRange = getCurrentRangeLimit();
-const inRange = enriched.filter(p => p.dist < currentMaxRange);
-
-if (inRange.length > 0) {
-updateAiStatus("ANALYZING...", "#ffff00");
-const alerts = analyzeConditions(inRange);
-const top = inRange.slice(0, AI_CONFIG.maxPlanes);
-const commentary = await generateCommentary(top, inRange.length, alerts);
-
-const isAlert = alerts.length > 0 || top[0].dist < 15;
-const header = isAlert ? `ALERT` : `STATUS`;
-
-if(commentary.includes("7700")) {
-document.body.classList.add('emergency-active');
-setTimeout(() => document.body.classList.remove('emergency-active'), 5000);
-}
-
-aiLog(header, commentary, isAlert ? 'alert' : 'normal');
-speak(commentary);
-}
-} catch (e) { updateAiStatus("DATA ERROR", "#ff3333"); }
-aiProcessing = false;
-}
-
-function analyzeConditions(planes) {
-let detected = [];
-const scope = planes.slice(0, 5);
-
-scope.forEach(p => {
-if(p.squawk === '7700') detected.push(`EMERGENCY DETECTED: ${p.id} squawking 7700 (General Emergency).`);
-if(p.squawk === '7600') detected.push(`ALERT: ${p.id} squawking 7600 (Radio Failure).`);
-if(p.squawk === '7500') detected.push(`SECURITY ALERT: ${p.id} squawking 7500.`);
-
-const bearingToMe = calculateBearing(p.lat, p.lon, AI_CONFIG.myLat, AI_CONFIG.myLon);
-let diff = Math.abs(p.track - bearingToMe);
-if (diff > 180) diff = 360 - diff;
-
-if (diff < 20 && p.dist < 50) detected.push(`Target ${p.id} is INBOUND on approach vector.`);
-if (p.vertRate > 2000) detected.push(`Target ${p.id} performing RAPID CLIMB.`);
-if (p.vertRate < -2000) detected.push(`Target ${p.id} performing RAPID DESCENT.`);
-if (p.alt < 1000 && p.dist < 20) detected.push(`Target ${p.id} at LOW ALTITUDE.`);
-});
-
-for(let i=0; i<scope.length; i++) {
-for(let j=i+1; j<scope.length; j++) {
-const p1 = scope[i];
-const p2 = scope[j];
-const d = getDistance(p1.lat, p1.lon, p2.lat, p2.lon);
-const altDiff = Math.abs(p1.alt - p2.alt);
-if (d < 5 && altDiff < 1000) detected.push(`TRAFFIC ALERT: ${p1.id} and ${p2.id} in CLOSE PROXIMITY.`);
-}
-}
-return detected;
-}
-
-async function generateCommentary(targets, count, alerts) {
-const personaKey = document.getElementById('ai-persona-select').value;
-let basePersona = PERSONAS[personaKey];
-
-if (personaKey === 'ATC' && AI_CONFIG.locationName) {
-basePersona = basePersona.replace("LONDON CENTER", `${AI_CONFIG.locationName} RADAR`);
-}
-
-const report = targets.map(p => {
-let altDesc = p.alt < 1000 ? "LOW" : "HIGH";
-let typeName = AIRCRAFT_TYPES[p.type] || p.type;
-return `${p.id} (${typeName}): Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft, Spd ${p.speed}kts.`;
-}).join("\n");
-
-const alertSection = alerts.length > 0 ? `CRITICAL ALERTS:\n${alerts.join("\n")}` : "No critical anomalies.";
-const timestamp = new Date().toLocaleString();
-
-let weatherStr = "Unknown";
-if (AI_CONFIG.weatherData) {
-weatherStr = `Temp ${AI_CONFIG.weatherData.temp}C, Wind ${AI_CONFIG.weatherData.wind}km/h`;
-}
-
-const currentRange = getCurrentRangeLimit();
-const densityScore = count * Math.pow(50 / currentRange, 2);
-let densityContext = "Traffic is LIGHT.";
-if (densityScore > 15) densityContext = "Traffic is HEAVY/CONGESTED.";
-else if (densityScore > 5) densityContext = "Traffic is MODERATE.";
-
-const userPrompt = `
-TIME: ${timestamp}
-WEATHER: ${weatherStr}
-RADAR SUMMARY: ${count} contacts in range.
-DENSITY ASSESSMENT: ${densityContext}
-CLOSEST TRAFFIC:
-${report}
-${alertSection}
-
-INSTRUCTION: Provide a concise status update based on your Persona. Use the provided Density Assessment to describe the traffic level (don'thallucinate congestion if traffic is light). Mention weather if relevant. If there are Alerts, prioritize them. DO NOT ASK QUESTIONS.
-`;
-
-const res = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({
-model: AI_CONFIG.ollamaModel,
-messages: [{role: "system", content: basePersona}, {role: "user", content: userPrompt}],
-stream: false
-})
-});
-const data = await res.json();
-return data.message.content.trim();
-}
-
-function getDistance(lat1, lon1, lat2, lon2) {
-const R = 6371;
-const dLat = (lat2 - lat1) * Math.PI / 180;
-const dLon = (lon2 - lon1) * Math.PI / 180;
-const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
-}
-
-function calculateBearing(lat1, lon1, lat2, lon2) {
-const y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
-const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
-Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos((lon2 - lon1) * Math.PI / 180);
-return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-}
-
-function setCookie(name, value, days) {
-let expires = "";
-if (days) {
-const date = new Date();
-date.setTime(date.getTime() + (days*24*60*60*1000));
-expires = "; expires=" + date.toUTCString();
-}
-document.cookie = name + "=" + (value || "")  + expires + "; path=/";
-}
-function getCookie(name) {
-const nameEQ = name + "=";
-const ca = document.cookie.split(';');
-for(let i=0;i < ca.length;i++) {
-let c = ca[i];
-while (c.charAt(0)==' ') c = c.substring(1,c.length);
-if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
-}
-return null;
-}
-</script>
+  <!-- INITIALIZATION OVERLAY -->
+  <div id="interaction-overlay" onclick="startSystem()">
+    <div id="start-btn">INITIALIZE RADAR</div>
+    <div style="margin-top: 20px; color: #888; font-family: monospace;">CLICK TO ACTIVATE AI & AUDIO LINKS</div>
+  </div>
+
+  <main class="app">
+    <div class="panel-toggle-bar" role="group" aria-label="Layout controls">
+      <button type="button" class="control-button panel-toggle-button" id="controls-panel-toggle" aria-controls="controls-panel" aria-expanded="true" aria-pressed="true">Hide Controls</button>
+      <button type="button" class="control-button panel-toggle-button" id="data-panel-toggle" aria-controls="data-panel" aria-expanded="true" aria-pressed="true">Hide Data</button>
+    </div>
+
+    <section class="sidebar controls-panel" id="controls-panel">
+      <h1>radar1090 <span style="font-size:0.5em; color:#00ff41;">AI</span></h1>
+      <div class="status" id="status"></div>
+      <section class="controls">
+        <h2>Controls</h2>
+        <div class="control-panel">
+          
+          <!-- AI CONTROLS -->
+          <div class="control-row ai-status-row">
+            <div class="control-info">
+              <span class="control-name" style="color:#00ff41">AI Core</span>
+              <span class="control-value status-text" id="ai-status-text" title="Status">OFFLINE</span>
+            </div>
+            <div class="control-buttons">
+              <button type="button" class="control-button" id="ai-toggle-btn">RETRY</button>
+            </div>
+          </div>
+
+          <div class="ai-custom-block">
+             <span class="ai-label">AI Persona Profile</span>
+             <select id="ai-persona-select" class="control-select">
+                <option value="MILITARY">Tactical Defense</option>
+                <option value="ATC">Air Traffic Control</option>
+                <option value="SPOTTER">Plane Spotter</option>
+             </select>
+          </div>
+
+          <div class="control-row">
+            <div class="control-info">
+              <span class="control-name">Commentary</span>
+              <span class="control-value" id="tts-status">ACTIVE</span>
+              <div id="voice-visualizer"><div id="voice-bar"></div></div>
+            </div>
+            <div class="control-buttons">
+               <button type="button" class="control-button" id="tts-mute-toggle">MUTE</button>
+            </div>
+          </div>
+          
+          <div class="control-row control-row--single">
+             <div class="control-buttons">
+                <button type="button" class="control-button" id="show-log-btn">VIEW COMMS LOG</button>
+             </div>
+          </div>
+          
+          <!-- ORIGINAL CONTROLS -->
+          <div class="control-row">
+            <div class="control-info">
+              <span class="control-name" id="volume-label">Volume</span>
+              <span class="control-value" id="volume-value">10</span>
+            </div>
+            <div class="control-buttons">
+              <button type="button" class="control-button control-button--square" id="volume-decrease" aria-label="Decrease volume">&minus;</button>
+              <button type="button" class="control-button control-button--square" id="volume-increase" aria-label="Increase volume">+</button>
+            </div>
+          </div>
+
+          <div class="control-row">
+            <div class="control-info">
+              <span class="control-name">Radar Range</span>
+              <span class="control-value" id="range-value">50 km</span>
+            </div>
+            <div class="control-buttons">
+              <button type="button" class="control-button control-button--square" id="range-decrease" aria-label="Decrease range">&minus;</button>
+              <button type="button" class="control-button control-button--square" id="range-increase" aria-label="Increase range">+</button>
+            </div>
+          </div>
+
+          <!-- Additional Controls (Base Alert, Rotate, Location, Labels, OSM) Preserved below -->
+          <div class="control-row">
+            <div class="control-info"><span class="control-name">Base Alert Range</span><span class="control-value" id="alert-range-value">15 km</span></div>
+            <div class="control-buttons">
+              <button type="button" class="control-button control-button--square" id="alert-range-decrease">&minus;</button>
+              <button type="button" class="control-button control-button--square" id="alert-range-increase">+</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-info"><span class="control-name">Rotate Radar</span></div>
+            <div class="control-buttons"><button type="button" class="control-button" id="radar-rotate">Rotate</button></div>
+          </div>
+          <div class="control-row control-row--single">
+            <div class="control-buttons"><button type="button" class="control-button" id="center-on-location">Use My Location</button></div>
+          </div>
+          <div class="control-row control-row--single">
+            <div class="control-buttons"><button type="button" class="control-button" id="manual-location">Set Location Manually</button></div>
+          </div>
+          <div class="control-row">
+            <div class="control-info"><span class="control-name">Aircraft Labels</span><span class="control-value" id="aircraft-details-state">Hidden</span></div>
+            <div class="control-buttons"><button type="button" class="control-button" id="aircraft-details-toggle">Show</button></div>
+          </div>
+          <div class="control-row">
+            <div class="control-info"><span class="control-name">OpenStreetMap Overlay</span><span class="control-value" id="openstreetmap-overlay-state">Hidden</span></div>
+            <div class="control-buttons"><button type="button" class="control-button" id="openstreetmap-overlay-toggle">Show</button></div>
+          </div>
+
+        </div>
+      </section>
+      
+      <section class="audio">
+        <h2>Live Audio</h2>
+        <p class="hint">The local airband feed plays automatically—use mute if you need quiet.</p>
+        <div class="audio-actions">
+          <button type="button" class="control-button" id="audio-mute-toggle" aria-pressed="false" aria-label="Toggle audio mute">Mute</button>
+          <span class="audio-status" id="audio-status">Connecting…</span>
+        </div>
+        <audio id="airband-stream" preload="none" autoplay muted playsinline></audio>
+      </section>
+    </section>
+
+    <section class="radar-container">
+      <div class="version-chip" id="version" aria-label="Application version"></div>
+      <div class="openstreetmap-overlay" id="openstreetmap-overlay" hidden aria-hidden="true">
+        <iframe id="openstreetmap-frame" title="OpenStreetMap overlay" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+      </div>
+      <canvas id="radar" width="960" height="640" aria-label="Radar display"></canvas>
+    </section>
+
+    <section class="sidebar data-panel" id="data-panel">
+      <h2>Live Data</h2>
+      <div class="info-stack">
+        <div class="info-block" id="weather-display">Weather Data Pending...</div>
+        <div class="info-block" id="aircraft-info"></div>
+        <div class="info-block" id="range-info"></div>
+        <div class="info-block" id="receiver-info" aria-live="polite"></div>
+      </div>
+      <div class="message-ticker" id="message-ticker" aria-live="polite">
+        <span class="message-ticker__track" id="message-ticker-track"></span>
+      </div>
+      <div class="message" id="message"></div>
+    </section>
+  </main>
+
+  <!-- MODALS -->
+  <div class="modal" id="geolocation-permission-modal" hidden aria-hidden="true">
+    <div class="modal__backdrop" id="geolocation-permission-backdrop"></div>
+    <section class="modal__dialog" role="dialog"><h2 id="geolocation-permission-title">Enable location access</h2><div class="modal__actions"><button type="button" class="control-button primary" id="geolocation-permission-close">Got it</button></div></section>
+  </div>
+  <div class="modal" id="manual-location-modal" hidden aria-hidden="true">
+    <div class="modal__backdrop" id="manual-location-backdrop"></div>
+    <section class="modal__dialog modal__dialog--wide manual-location-modal" role="dialog">
+      <h2 id="manual-location-title">Set receiver location</h2>
+      <div class="manual-location__map" id="manual-location-map"></div>
+      <p class="manual-location__coordinates" id="manual-location-coordinates"></p>
+      <div class="modal__actions">
+        <button type="button" class="control-button" id="manual-location-cancel">Cancel</button>
+        <button type="button" class="control-button primary" id="manual-location-confirm" disabled>Use This Location</button>
+      </div>
+    </section>
+  </div>
+  <!-- LOG MODAL -->
+  <div class="modal" id="ai-log-modal" hidden aria-hidden="true">
+    <div class="modal__backdrop" id="ai-log-backdrop"></div>
+    <section class="modal__dialog" role="dialog" aria-modal="true">
+      <h2>Tactical Comms Log</h2>
+      <div id="ai-log-content" class="log-modal-content"></div>
+      <div class="modal__actions"><button type="button" class="control-button" id="ai-log-close">Close</button></div>
+    </section>
+  </div>
+
+  <script type="module" src="app.js"></script>
+
+  <!-- 4. AI CONTROLLER SCRIPT -->
+  <script>
+    const AI_CONFIG = {
+        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data", 
+        ollamaUrl: "http://127.0.0.1:11434", 
+        ollamaModel: null,
+        myLat: 54.531836, 
+        myLon: -1.087954, 
+        locationName: "SECTOR", 
+        scanInterval: 20000, 
+        maxPlanes: 5,
+        weatherData: null 
+    };
+
+    const PERSONAS = {
+        MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
+        ATC: `You are LONDON CENTER AIR TRAFFIC CONTROL. Tone: Professional, routine, calm, human. Vocabulary: "Traffic", "Flight Level", "Knots", "Descend", "Maintain", "Squawk", "Good evening", "Radar Contact". Focus on safe separation and traffic advisories. Phrase it as a standard radio broadcast to pilots. Output a single advisory line. Do not ask questions.`,
+        SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual, friendly. Focus on airlines ("Oh look, a British Airways!"), altitude (low passes), and "cool" aircraft actions. Do not ask questions to the listener. Just narrate what you see with excitement.`
+    };
+
+    const AIRCRAFT_TYPES = { "B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777", "B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172", "B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet", "F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter" };
+
+    let aiProcessing = false;
+    let systemActive = false;
+    let voiceEnabled = true;
+    let currentUtterance = null;
+    let isSpeaking = false;
+    let audioContext = null; 
+    let msgHistory = []; 
+    let visInterval = null; 
+    
+    let carrierNode = null; 
+    let carrierGain = null;
+    let noiseBuffer = null;
+    let monitorInterval = null;
+
+    function startSystem() {
+        document.getElementById('interaction-overlay').style.display = 'none';
+        const radar = document.getElementById('radar');
+        if(radar) radar.scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});
+
+        systemActive = true;
+        window.speechSynthesis.resume(); // Force Audio Context Wakeup
+        
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioContext = new AudioContext();
+            if(audioContext.state === 'suspended') audioContext.resume();
+            noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 5, audioContext.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        } catch(e) { console.warn("Web Audio API not supported"); }
+
+        const savedPersona = getCookie("aiPersona");
+        if(savedPersona && PERSONAS[savedPersona]) document.getElementById('ai-persona-select').value = savedPersona;
+
+        updateReceiverLocation().then(() => {
+            fetchLocalWeather();
+            fetchLocationName(AI_CONFIG.myLat, AI_CONFIG.myLon).then(name => {
+                AI_CONFIG.locationName = name;
+            });
+
+            updateAiStatus("INITIALIZING...", "#ffff00");
+            
+            // BOOT SEQUENCE: Play static, THEN speak (SERIALIZED)
+            playStaticBurst(audioContext.currentTime, 0.5);
+            
+            setTimeout(() => {
+                 speak("System Online. Sensors Calibrated.");
+                 detectModel();
+                 setInterval(runAiCycle, AI_CONFIG.scanInterval);
+                 setInterval(fetchLocalWeather, 30 * 60 * 1000);
+            }, 800);
+        });
+    }
+
+    // --- AUDIO ENGINE ---
+    function startCarrier() {
+        if (!audioContext || !voiceEnabled || !noiseBuffer) return;
+        if (audioContext.state === 'suspended') audioContext.resume();
+        if (carrierNode) return; 
+
+        carrierNode = audioContext.createBufferSource();
+        carrierNode.buffer = noiseBuffer;
+        carrierNode.loop = true;
+
+        const filter = audioContext.createBiquadFilter();
+        filter.type = "bandpass"; filter.frequency.value = 1000; filter.Q.value = 0.8;
+
+        carrierGain = audioContext.createGain();
+        const t = audioContext.currentTime;
+        carrierGain.gain.setValueAtTime(0, t);
+        carrierGain.gain.linearRampToValueAtTime(0.08, t + 0.1);
+
+        carrierNode.connect(filter); filter.connect(carrierGain); carrierGain.connect(audioContext.destination);
+        carrierNode.start(t);
+    }
+
+    function stopCarrier() {
+        if (!carrierNode || !carrierGain) return;
+        const t = audioContext.currentTime;
+        
+        // Keep carrier alive for K-Tone duration (approx 0.8s)
+        const toneDuration = 0.8;
+        const fadeStart = t + toneDuration;
+        
+        carrierGain.gain.setValueAtTime(carrierGain.gain.value, fadeStart);
+        carrierGain.gain.linearRampToValueAtTime(0, fadeStart + 0.2);
+        carrierNode.stop(fadeStart + 0.3);
+        
+        const oldNode = carrierNode; 
+        setTimeout(() => { if(oldNode) try{oldNode.disconnect();}catch(e){} }, (toneDuration + 0.4) * 1000);
+
+        carrierNode = null; carrierGain = null;
+
+        playKToneSequence(t);
+    }
+
+    function playKToneSequence(startTime) {
+        if (!audioContext) return;
+        const t = startTime;
+        const osc = audioContext.createOscillator();
+        osc.type = "sine"; osc.frequency.setValueAtTime(1500, t); 
+        const gain = audioContext.createGain();
+        osc.connect(gain); gain.connect(audioContext.destination);
+        
+        const dot = 0.08; const dash = 0.24; const gap = 0.08; const vol = 0.1; 
+        // Dash 1
+        gain.gain.setValueAtTime(0, t); gain.gain.linearRampToValueAtTime(vol, t + 0.01);
+        gain.gain.setValueAtTime(vol, t + dash - 0.01); gain.gain.linearRampToValueAtTime(0, t + dash);
+        // Dot
+        const t2 = t + dash + gap;
+        gain.gain.setValueAtTime(0, t2); gain.gain.linearRampToValueAtTime(vol, t2 + 0.01);
+        gain.gain.setValueAtTime(vol, t2 + dot - 0.01); gain.gain.linearRampToValueAtTime(0, t2 + dot);
+        // Dash 2
+        const t3 = t2 + dot + gap;
+        gain.gain.setValueAtTime(0, t3); gain.gain.linearRampToValueAtTime(vol, t3 + 0.01);
+        gain.gain.setValueAtTime(vol, t3 + dash - 0.01); gain.gain.linearRampToValueAtTime(0, t3 + dash);
+
+        osc.start(t); osc.stop(t3 + dash + 0.1);
+    }
+    
+    function playStaticBurst(startTime, duration) {
+        if (!audioContext || !noiseBuffer) return;
+        const noise = audioContext.createBufferSource();
+        noise.buffer = noiseBuffer;
+        const filter = audioContext.createBiquadFilter();
+        filter.type = "bandpass"; filter.frequency.value = 1200; filter.Q.value = 1;
+        const gain = audioContext.createGain();
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.15, startTime + 0.05);
+        gain.gain.setValueAtTime(0.15, startTime + duration - 0.05);
+        gain.gain.linearRampToValueAtTime(0, startTime + duration);
+        noise.connect(filter); filter.connect(gain); gain.connect(audioContext.destination);
+        noise.start(startTime); noise.stop(startTime + duration + 0.1);
+    }
+
+    // --- CORE LOGIC ---
+    function speak(text) {
+        if (!voiceEnabled) return;
+        startVisualizer();
+        
+        // Stop any existing speech first
+        window.speechSynthesis.cancel();
+
+        currentUtterance = new SpeechSynthesisUtterance(text);
+        const persona = document.getElementById('ai-persona-select').value;
+        currentUtterance.rate = persona === 'ATC' ? 1.0 : 1.1;
+        
+        const voices = window.speechSynthesis.getVoices();
+        const v = voices.find(v => v.lang === 'en-GB' || v.name.includes("UK English") || v.name.includes("Daniel"));
+        if (v) currentUtterance.voice = v;
+        
+        // START SEQUENCE
+        startCarrier();
+        isSpeaking = true;
+        updateAiStatus("BROADCASTING...", "#00ff41");
+        
+        // WATCHDOG: Force stop if speech hangs
+        let watchdog = setTimeout(() => {
+            if(isSpeaking) {
+                console.warn("AI Watchdog: Speech timed out.");
+                stopSpeechSequence();
+            }
+        }, 15000); // 15s safety limit
+
+        currentUtterance.onend = () => { 
+            clearTimeout(watchdog);
+            stopSpeechSequence();
+        };
+        
+        // Small delay to ensure carrier is audible before voice
+        setTimeout(() => window.speechSynthesis.speak(currentUtterance), 150);
+    }
+    
+    function stopSpeechSequence() {
+        isSpeaking = false; 
+        currentUtterance = null; 
+        updateAiStatus("ONLINE", "#00ff41"); 
+        stopCarrier();
+    }
+
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+
+    // [Rest of helper functions: startVisualizer, detectModel, runAiCycle, etc. remain unchanged]
+    // ... (Re-inserting existing helpers below for completeness)
+    
+    function startVisualizer() {
+        if(visInterval) clearInterval(visInterval);
+        const bar = document.getElementById('voice-bar');
+        visInterval = setInterval(() => {
+            if(isSpeaking) bar.style.width = Math.floor(Math.random() * 80 + 20) + "%";
+            else bar.style.width = "0%";
+        }, 100);
+    }
+
+    const logModal = document.getElementById('ai-log-modal');
+    const logContent = document.getElementById('ai-log-content');
+    document.getElementById('show-log-btn').addEventListener('click', () => {
+        logContent.innerHTML = msgHistory.map(e => 
+            `<div class="log-entry ${e.type}"><span class="log-timestamp">[${e.time}]</span><strong>${e.title}:</strong> ${e.text}</div>`
+        ).join('');
+        logModal.hidden = false;
+    });
+    document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
+    document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
+
+    async function fetchLocationName(lat, lon) {
+        try {
+            const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`);
+            const d = await r.json();
+            const addr = d.address || {};
+            return (addr.city || addr.town || addr.municipality || addr.county || "SECTOR").toUpperCase();
+        } catch(e) { return "SECTOR"; }
+    }
+
+    async function fetchLocalWeather() {
+        try {
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${AI_CONFIG.myLat}&longitude=${AI_CONFIG.myLon}&current=temperature_2m,wind_speed_10m,weather_code`;
+            const r = await fetch(url);
+            const d = await r.json();
+            if(d.current) {
+                AI_CONFIG.weatherData = { temp: d.current.temperature_2m, wind: d.current.wind_speed_10m };
+                const el = document.getElementById('weather-display');
+                if(el) el.innerText = `WEATHER: ${AI_CONFIG.weatherData.temp}°C | WIND: ${AI_CONFIG.weatherData.wind} KM/H`;
+            }
+        } catch(e) {}
+    }
+
+    async function updateReceiverLocation() {
+        try {
+            const dom = document.getElementById('receiver-info');
+            if (dom && dom.innerText.includes('Lat')) {
+                const t = dom.innerText;
+                const lat = t.match(/Lat:?\s*(-?[\d.]+)/);
+                const lon = t.match(/Lon:?\s*(-?[\d.]+)/);
+                if (lat && lon) { AI_CONFIG.myLat = parseFloat(lat[1]); AI_CONFIG.myLon = parseFloat(lon[1]); return; }
+            }
+            const r = await fetch(`${AI_CONFIG.dump1090Base}/receiver.json`);
+            if(r.ok) {
+                const d = await r.json();
+                if(d.lat && d.lon) { AI_CONFIG.myLat = d.lat; AI_CONFIG.myLon = d.lon; }
+            }
+        } catch(e) {}
+    }
+
+    function updateAiStatus(msg, color) {
+        const el = document.getElementById('ai-status-text');
+        if(el) { el.innerText = msg; el.style.color = color || '#fff'; }
+    }
+
+    function aiLog(title, text, type = 'normal') {
+        const tick = document.getElementById('message-ticker-track');
+        const time = new Date().toLocaleTimeString();
+        const clean = text.replace(/\n/g, ' ');
+        if(tick) tick.innerText = `[${time}] ${title}: ${clean}`;
+        msgHistory.unshift({time: time, title: title, text: clean, type: type});
+        if(msgHistory.length > 20) msgHistory.pop();
+    }
+
+    document.getElementById('ai-toggle-btn').addEventListener('click', detectModel);
+    document.getElementById('tts-mute-toggle').addEventListener('click', () => {
+        voiceEnabled = !voiceEnabled;
+        const btn = document.getElementById('tts-mute-toggle');
+        const st = document.getElementById('tts-status');
+        if(voiceEnabled) { btn.innerText = "MUTE"; st.innerText = "ACTIVE"; speak("Voice enabled."); } 
+        else { btn.innerText = "UNMUTE"; st.innerText = "MUTED"; window.speechSynthesis.cancel(); }
+    });
+    document.getElementById('range-increase').addEventListener('click', () => setTimeout(() => { aiProcessing=false; runAiCycle(); }, 500));
+    document.getElementById('range-decrease').addEventListener('click', () => setTimeout(() => { aiProcessing=false; runAiCycle(); }, 500));
+    document.getElementById('ai-persona-select').addEventListener('change', (e) => {
+        setCookie("aiPersona", e.target.value, 365);
+        window.speechSynthesis.cancel();
+        updateAiStatus("SWITCHING MODE...", "#ffff00");
+        setTimeout(() => { aiProcessing=false; runAiCycle(); }, 500);
+    });
+
+    function getCurrentRangeLimit() {
+        const el = document.getElementById('range-value');
+        if (el) {
+            const m = el.innerText.match(/(\d+)/);
+            if (m) return parseInt(m[0], 10);
+        }
+        return 50; 
+    }
+
+    async function detectModel() {
+        updateAiStatus("CONNECTING...", "#ffff00");
+        try {
+            const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/tags`);
+            if (!r.ok) throw new Error();
+            const d = await r.json();
+            const m = d.models.find(x => x.name.includes('llama3')) || d.models[0];
+            AI_CONFIG.ollamaModel = m.name;
+            updateAiStatus("ONLINE", "#00ff41");
+            return true;
+        } catch (e) { updateAiStatus("ERROR", "#ff3333"); return false; }
+    }
+
+    async function runAiCycle() {
+        if (!systemActive || aiProcessing) return;
+        if (isSpeaking) return; // Watchdog prevents overlap
+        if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
+        
+        aiProcessing = true;
+        try {
+            await updateReceiverLocation();
+            const r = await fetch(`${AI_CONFIG.dump1090Base}/aircraft.json`);
+            const d = await r.json();
+            const valid = (d.aircraft || []).filter(p => p.lat && p.lon && (p.seen||0)<60);
+            const enriched = valid.map(p => ({
+                id: (p.flight || "UFO").trim(),
+                type: p.t || "Unknown", squawk: p.squawk || "0000",
+                alt: p.alt_baro || 0, speed: p.gs || 0,
+                lat: p.lat, lon: p.lon, track: p.track || 0, vertRate: p.baro_rate || 0,
+                dist: getDistance(AI_CONFIG.myLat, AI_CONFIG.myLon, p.lat, p.lon)
+            })).sort((a, b) => a.dist - b.dist);
+
+            const limit = getCurrentRangeLimit();
+            const inRange = enriched.filter(p => p.dist < limit);
+            
+            if (inRange.length > 0) {
+                updateAiStatus("ANALYZING...", "#ffff00");
+                const alerts = analyzeConditions(inRange);
+                const top = inRange.slice(0, AI_CONFIG.maxPlanes);
+                const comms = await generateCommentary(top, inRange.length, alerts);
+                
+                const isAlert = alerts.length > 0 || top[0].dist < 15;
+                if(comms.includes("7700")) {
+                    document.body.classList.add('emergency-active');
+                    setTimeout(() => document.body.classList.remove('emergency-active'), 5000);
+                }
+                aiLog(isAlert ? "ALERT" : "STATUS", comms, isAlert ? 'alert' : 'normal');
+                speak(comms);
+            }
+        } catch (e) { updateAiStatus("DATA ERROR", "#ff3333"); }
+        aiProcessing = false;
+    }
+
+    function analyzeConditions(planes) {
+        let detected = [];
+        planes.slice(0,5).forEach(p => {
+            if(p.squawk === '7700') detected.push(`EMERGENCY: ${p.id} 7700.`);
+            const b = calculateBearing(p.lat, p.lon, AI_CONFIG.myLat, AI_CONFIG.myLon);
+            let d = Math.abs(p.track - b); if(d>180) d=360-d;
+            if(d<20 && p.dist<50) detected.push(`${p.id} INBOUND.`);
+        });
+        return detected;
+    }
+
+    async function generateCommentary(targets, count, alerts) {
+        const key = document.getElementById('ai-persona-select').value;
+        let persona = PERSONAS[key];
+        if(key==='ATC' && AI_CONFIG.locationName) persona = persona.replace("LONDON CENTER", `${AI_CONFIG.locationName} RADAR`);
+        
+        const report = targets.map(p => `${p.id}: Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft.`).join("\n");
+        const density = count > 15 ? "HEAVY" : count > 5 ? "MODERATE" : "LIGHT";
+        
+        const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}. 
+        TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
+        TASK: Short status update based on Persona. Alerts first. No questions.`;
+
+        const r = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
+        });
+        return (await r.json()).message.content.trim();
+    }
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+    function calculateBearing(lat1, lon1, lat2, lon2) {
+        const y = Math.sin((lon2-lon1)*Math.PI/180) * Math.cos(lat2*Math.PI/180);
+        const x = Math.cos(lat1*Math.PI/180)*Math.sin(lat2*Math.PI/180) - Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos((lon2-lon1)*Math.PI/180);
+        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+    function setCookie(n, v, d) { document.cookie = n + "=" + (v||"") + "; path=/"; }
+    function getCookie(n) { const m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? m[2] : null; }
+  </script>
 </body>
 </html>
