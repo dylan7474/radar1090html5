@@ -255,7 +255,8 @@
         ollamaUrl: "http://127.0.0.1:11434", 
         ollamaModel: null,
         myLat: 54.531836, 
-        myLon: -1.087954, 
+        myLon: -1.087954,
+        locationName: "SECTOR", 
         scanInterval: 20000, 
         maxPlanes: 5,
         weatherData: null // Store weather here
@@ -308,9 +309,16 @@
         updateReceiverLocation().then(() => {
             // Fetch Weather after location found
             fetchLocalWeather();
+            // Fetch Location Name (City)
+            fetchLocationName(AI_CONFIG.myLat, AI_CONFIG.myLon).then(name => {
+                AI_CONFIG.locationName = name;
+                console.log(`AI: Location ID set to ${name}`);
+            });
+
             updateAiStatus("INITIALIZING...", "#ffff00");
             
             // Play start sound
+            playRadioSound('OPEN');
             speak("System Online. Sensors Calibrated.");
             
             detectModel();
@@ -320,8 +328,21 @@
         });
     }
 
+    // --- GEOLOCATION: GET CITY NAME ---
+    async function fetchLocationName(lat, lon) {
+        try {
+            // OpenStreetMap Nominatim (Free, requires attribution in app)
+            const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`);
+            const d = await r.json();
+            const addr = d.address || {};
+            const name = addr.city || addr.town || addr.municipality || addr.county || "SECTOR";
+            return name.toUpperCase();
+        } catch(e) {
+            return "SECTOR";
+        }
+    }
+
     // --- SFX: RADIO STATIC & ROGER BEEP ---
-    // Using a unified helper for static to ensure consistency
     function playStaticBurst(startTime, duration) {
         if (!audioContext) return;
         
@@ -333,7 +354,6 @@
         const noise = audioContext.createBufferSource();
         noise.buffer = buffer;
         
-        // Bandpass filter (1200Hz) for radio sound
         const filter = audioContext.createBiquadFilter();
         filter.type = "bandpass";
         filter.frequency.value = 1200;
@@ -359,23 +379,21 @@
         const t = audioContext.currentTime;
 
         if (type === 'OPEN') {
-            // --- OPENING STATIC ---
             playStaticBurst(t, 0.4);
         } 
         else if (type === 'CLOSE') {
-            // --- MORSE "K" ROGER BEEP (-.-) ---
             const osc = audioContext.createOscillator();
             osc.type = "sine";
-            osc.frequency.setValueAtTime(1500, t); // 1.5kHz tone
+            osc.frequency.setValueAtTime(1500, t); 
             
             const gain = audioContext.createGain();
             osc.connect(gain);
             gain.connect(audioContext.destination);
             
-            const dot = 0.08; // duration of a dot
-            const dash = 0.24; // duration of a dash (3x dot)
-            const gap = 0.08; // duration of gap
-            const vol = 0.1; // Volume
+            const dot = 0.08; 
+            const dash = 0.24; 
+            const gap = 0.08; 
+            const vol = 0.1; 
 
             // DASH 1
             gain.gain.setValueAtTime(0, t);
@@ -402,7 +420,6 @@
             osc.stop(endTime);
             
             // --- TAIL STATIC (SQUELCH) ---
-            // Using the EXACT SAME function as the opening to ensure it matches perfectly
             playStaticBurst(endTime, 0.3);
         }
     }
@@ -419,7 +436,6 @@
                     wind: data.current.wind_speed_10m,
                     code: data.current.weather_code
                 };
-                // Moved target to the new location
                 const display = document.getElementById('weather-display');
                 if(display) {
                     display.innerText = `WEATHER: ${AI_CONFIG.weatherData.temp}°C | WIND: ${AI_CONFIG.weatherData.wind} KM/H`;
@@ -488,7 +504,7 @@
         if(voiceEnabled) {
             btn.innerText = "MUTE";
             status.innerText = "ACTIVE";
-            // No static here, just resume
+            playRadioSound('OPEN');
             speak("Voice enabled.");
         } else {
             btn.innerText = "UNMUTE";
@@ -513,6 +529,7 @@
         window.speechSynthesis.cancel();
         currentUtterance = null;
         isSpeaking = false;
+        playRadioSound('OPEN'); 
         updateAiStatus("SWITCHING MODE...", "#ffff00");
         setTimeout(() => { aiProcessing = false; runAiCycle(); }, 500);
     });
@@ -579,6 +596,7 @@
             return true;
         } catch (e) {
             updateAiStatus("ERROR", "#ff3333");
+            console.error("Ollama connection failed", e);
             return false;
         }
     }
@@ -685,15 +703,25 @@
             weatherStr = `Temp ${AI_CONFIG.weatherData.temp}C, Wind ${AI_CONFIG.weatherData.wind}km/h`;
         }
 
+        // NEW: DENSITY CHECK TO PREVENT HALLUCINATION
+        // Calculate standard density score normalized to 50km radius
+        const currentRange = getCurrentRangeLimit();
+        const densityScore = count * Math.pow(50 / currentRange, 2);
+        
+        let densityContext = "Traffic is LIGHT.";
+        if (densityScore > 15) densityContext = "Traffic is HEAVY/CONGESTED.";
+        else if (densityScore > 5) densityContext = "Traffic is MODERATE.";
+
         const userPrompt = `
             TIME: ${timestamp}
             WEATHER: ${weatherStr}
             RADAR SUMMARY: ${count} contacts in range.
+            DENSITY ASSESSMENT: ${densityContext}
             CLOSEST TRAFFIC:
             ${report}
             ${alertSection}
             
-            INSTRUCTION: Provide a concise status update based on your Persona. Mention weather if relevant to flight operations. If there are Alerts, prioritize them. DO NOT ASK QUESTIONS.
+            INSTRUCTION: Provide a concise status update based on your Persona. Use the provided Density Assessment to describe the traffic level (don't hallucinate congestion if traffic is light). Mention weather if relevant. If there are Alerts, prioritize them. DO NOT ASK QUESTIONS.
         `;
 
         const res = await fetch(`${AI_CONFIG.ollamaUrl}/api/chat`, {
