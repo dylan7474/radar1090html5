@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.31
+**Current Version:** V1.9.32
 
 ---
 
@@ -158,6 +158,10 @@ the radar rings automatically.
   Replace `YOUR_DASHBOARD_HOST` with the hostname you load in the browser (e.g.
   `http://192.168.50.123`). Successful calls should return HTTP 200 and include
   an `Access-Control-Allow-Origin` header that permits the dashboard.
+- If the in-app log shows `opaque/no-cors` probe results for Ollama, the browser could
+  reach the service but was blocked by missing CORS headers or proxy rules; add
+  `Access-Control-Allow-Origin:*` on Ollama or forward `/ollama/*` to the service on
+  the same origin to resolve it.
 - If the audio stream cannot be reached, the app displays a warning message in the sidebar.
 - When self-hosting over HTTPS, ensure mixed content is allowed if your `dump1090-fa`
   or audio endpoints are plain HTTP.

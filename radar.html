@@ -337,6 +337,7 @@
     let monitorInterval = null;
     let lastAiStatus = { text: null, color: null };
     let serverDiagnosticsLogged = false;
+    const corsProbeLogged = {};
 
     function startSystem() {
         document.getElementById('interaction-overlay').style.display = 'none';
@@ -647,6 +648,10 @@
                 if ((e.message || '').includes('Status 404') && candidate.includes('/ollama')) {
                     aiLog('DEBUG', 'Hint: /ollama returned 404 — ensure your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 with trailing slash preservation.', 'debug');
                 }
+                if ((e.message || '').includes('Failed to fetch') && !corsProbeLogged[candidate]) {
+                    corsProbeLogged[candidate] = true;
+                    probeOllamaReachability(candidate);
+                }
                 if (!serverDiagnosticsLogged) {
                     const origin = window.location.origin;
                     let proxyPath = '/ollama';
@@ -669,6 +674,27 @@
             aiLog("AI ERROR", `No Ollama endpoint reachable (${lastError.message || lastError}).`, 'alert');
         }
         return false;
+    }
+
+    async function probeOllamaReachability(candidate) {
+        const url = `${candidate}/api/tags`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const started = performance.now();
+        try {
+            aiLog('DEBUG', `Probing reachability without CORS @ ${url}`, 'debug');
+            const resp = await fetch(url, { mode: 'no-cors', signal: controller.signal });
+            const elapsed = Math.round(performance.now() - started);
+            clearTimeout(timer);
+            if (resp && resp.type === 'opaque') {
+                aiLog('DEBUG', `Ollama responded (opaque/no-cors) in ${elapsed}ms — service reachable but CORS/proxy headers are missing. Add Access-Control-Allow-Origin:* on Ollama or forward /ollama/* via lighttpd.`, 'debug');
+            } else {
+                aiLog('DEBUG', `No-cors probe returned type=${resp && resp.type}, status=${resp && resp.status} in ${elapsed}ms`, 'debug');
+            }
+        } catch (probeErr) {
+            clearTimeout(timer);
+            aiLog('DEBUG', `No-cors probe failed at ${candidate}: ${probeErr.message || probeErr}`, 'debug');
+        }
     }
 
     async function runAiCycle() {
