@@ -309,11 +309,16 @@
         ollamaModel: null,
         myLat: 54.531836,
         myLon: -1.087954,
-        locationName: "SECTOR", 
-        scanInterval: 20000, 
+        locationName: "SECTOR",
+        scanInterval: 20000,
         maxPlanes: 5,
-        weatherData: null 
+        weatherData: null
     };
+
+    // Slow hosts can take a while to load or answer Ollama requests; allow up to 60s.
+    const OLLAMA_DISCOVERY_TIMEOUT_MS = 60000;
+    const OLLAMA_SELF_TEST_TIMEOUT_MS = 60000;
+    const OLLAMA_CHAT_TIMEOUT_MS = 60000;
 
     const PERSONAS = {
         MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
@@ -678,7 +683,7 @@
             AI_CONFIG.ollamaUrl = candidate;
             aiLog("AI", `Detecting Ollama at ${candidate}`);
             try {
-                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, 12000, `Ollama tags @ ${candidate}`);
+                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_DISCOVERY_TIMEOUT_MS, `Ollama tags @ ${candidate}`);
                 if (!r.ok) throw new Error(`Status ${r.status}`);
                 const d = await r.json();
                 if (!d.models || d.models.length === 0) throw new Error('No models available');
@@ -778,7 +783,7 @@
 
         for (const candidate of candidates) {
             try {
-                const resp = await fetchWithTimeout(`${candidate}/api/tags`, {}, 10000, `Self-test tags @ ${candidate}`);
+                const resp = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_SELF_TEST_TIMEOUT_MS, `Self-test tags @ ${candidate}`);
                 const summary = `Self-test: ${candidate} responded with status ${resp.status} (type=${resp.type})`;
                 if (resp.status === 403) {
                     lastCorsForbiddenCandidate = candidate;
@@ -871,7 +876,7 @@
             const r = await fetchWithTimeout(`${AI_CONFIG.ollamaUrl}/api/chat`, {
                 method: 'POST', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
-            }, 10000, `Ollama chat @ ${AI_CONFIG.ollamaUrl}`);
+            }, OLLAMA_CHAT_TIMEOUT_MS, `Ollama chat @ ${AI_CONFIG.ollamaUrl}`);
             if (!r.ok) throw new Error(`Status ${r.status}`);
             return (await r.json()).message.content.trim();
         } catch (e) {

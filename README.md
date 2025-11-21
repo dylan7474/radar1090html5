@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.37
+**Current Version:** V1.9.38
 
 ---
 
@@ -198,11 +198,11 @@ the radar rings automatically.
 
   This helps on older Ollama builds that ignore `*` for security reasons. Use the
   dashboard URL(s) you actually load in the browser.
-- On low-spec hosts, Ollama can take longer than 10 seconds to respond during
-  discovery. The app now waits up to 12 seconds for tag discovery and 10 seconds
-  during self-tests, but if you still see timeouts immediately after booting,
-  wait for the Ollama service to finish loading models before refreshing the
-  dashboard.
+- On low-spec hosts, Ollama can take significantly longer to respond during
+  discovery and chat. The app now waits up to 60 seconds for tag discovery,
+  self-tests, and chat requests. If you still see timeouts immediately after
+  booting, wait for the Ollama service to finish loading models before
+  refreshing the dashboard.
 - If the in-app log shows `opaque/no-cors` probe results for Ollama, the browser could
   reach the service but was blocked by missing CORS headers or proxy rules; add
   `Access-Control-Allow-Origin:*` on Ollama or forward `/ollama/*` to the service on
