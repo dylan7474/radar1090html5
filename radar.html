@@ -315,10 +315,10 @@
         weatherData: null
     };
 
-    // Slow hosts can take a while to load or answer Ollama requests; allow up to 60s.
-    const OLLAMA_DISCOVERY_TIMEOUT_MS = 60000;
-    const OLLAMA_SELF_TEST_TIMEOUT_MS = 60000;
-    const OLLAMA_CHAT_TIMEOUT_MS = 60000;
+    // Slow hosts can take a while to load or answer Ollama requests; allow up to 120s.
+    const OLLAMA_DISCOVERY_TIMEOUT_MS = 120000;
+    const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
+    const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
     const PERSONAS = {
         MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
