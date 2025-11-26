@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.56
+**Current Version:** V1.9.57
 
 ---
 
@@ -44,6 +44,8 @@ from any modern browser.
 - Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
 - Live data ticker surfaces timely operational notes—now repeating automated rapid-descent and inbound-base alerts until the triggering aircraft clears.
 - AI comms log updates live while open so new dump1090 and Ollama events stream in without reopening the modal.
+- Optional Ollama discovery feed merges additional endpoints into the startup scan and prioritizes the lowest-latency host for
+  AI commentary without manual retargeting.
 - Alerted contacts pulse directly on the radar so the subject aircraft stands out the moment a ticker warning fires.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click the same blip again to spotlight it as the only rendered target while
@@ -98,6 +100,21 @@ targets are normalized to strip trailing slashes so `/api/*` requests do not dou
 return 404s under strict proxies. Connection
 attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
 when the browser blocks HTTP calls from an HTTPS dashboard.
+
+If you run a small discovery helper that scans your LAN for Ollama instances, point the
+dashboard at it with `localStorage.ollamaDiscoveryUrl` (e.g., `http://192.168.50.5:8081/ollama/discovery`).
+The feed can return either a raw array of URLs or objects that include latency hints:
+
+```json
+[
+  "http://192.168.50.10:11434",
+  { "url": "http://192.168.50.11:11434", "latencyMs": 120 }
+]
+```
+
+Any discovery host on the same origin will also be tried automatically at `/ollama/discovery`,
+`/ollama/hosts`, and `/ollama-discovery.json`. Discovered hosts are merged into the default
+candidate list and tried from fastest to slowest during startup.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 
