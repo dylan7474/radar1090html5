@@ -361,7 +361,7 @@
         }
 
         const seenTargets = new Set();
-        const discovered = [];
+        const discoveredByUrl = new Map();
 
         for (const target of discoveryTargets) {
             if (!target || seenTargets.has(target)) continue;
@@ -380,10 +380,13 @@
                 const hosts = extractDiscoveryHosts(payload);
                 hosts.forEach((host) => {
                     if (!host?.url) return;
-                    discovered.push({
-                        url: normalizeOllamaBase(host.url),
-                        latencyMs: Number.isFinite(host.latencyMs) ? host.latencyMs : elapsed,
-                    });
+                    const normalizedUrl = normalizeOllamaBase(host.url);
+                    const latencyMs = Number.isFinite(host.latencyMs) ? host.latencyMs : elapsed;
+                    const bestKnown = discoveredByUrl.get(normalizedUrl)?.latencyMs ?? Number.MAX_SAFE_INTEGER;
+
+                    if (latencyMs < bestKnown) {
+                        discoveredByUrl.set(normalizedUrl, { url: normalizedUrl, latencyMs });
+                    }
                 });
             } catch (err) {
                 aiLog('DEBUG', `Discovery probe failed @ ${target}: ${err.message || err}`, 'debug');
@@ -392,7 +395,7 @@
             }
         }
 
-        return discovered;
+        return Array.from(discoveredByUrl.values());
     }
 
     function mergeOllamaCandidates(base, discovered) {
