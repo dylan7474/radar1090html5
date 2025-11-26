@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.53
+**Current Version:** V1.9.54
 
 ---
 
@@ -42,6 +42,7 @@ from any modern browser.
 - Rotate the scope in 90° increments with the sidebar control to quickly reorient the display.
 - Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
 - Live data ticker surfaces timely operational notes—now repeating automated rapid-descent and inbound-base alerts until the triggering aircraft clears.
+- AI comms log updates live while open so new dump1090 and Ollama events stream in without reopening the modal.
 - Alerted contacts pulse directly on the radar so the subject aircraft stands out the moment a ticker warning fires.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click the same blip again to spotlight it as the only rendered target while

@@ -592,10 +592,14 @@
 
     const logModal = document.getElementById('ai-log-modal');
     const logContent = document.getElementById('ai-log-content');
-    document.getElementById('show-log-btn').addEventListener('click', () => {
+    const renderLogEntries = () => {
+        if (!logContent) return;
         logContent.innerHTML = msgHistory.map(e =>
             `<div class="log-entry ${e.type}"><span class="log-timestamp">[${e.time}]</span><strong>${e.title}:</strong> ${e.text}</div>`
         ).join('');
+    };
+    document.getElementById('show-log-btn').addEventListener('click', () => {
+        renderLogEntries();
         logModal.hidden = false;
     });
     document.getElementById('ai-self-test-btn').addEventListener('click', () => {
@@ -662,6 +666,10 @@
         if(tick) tick.innerText = payload;
         msgHistory.unshift({time: time, title: title, text: clean, type: type});
         if(msgHistory.length > 50) msgHistory.pop();
+
+        if (!logModal.hidden) {
+            renderLogEntries();
+        }
 
         if (type === 'alert') console.error(payload);
         else if (type === 'debug') console.debug(payload);
