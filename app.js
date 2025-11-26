@@ -15,7 +15,13 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.42';
+const AUDIO_SILENCE_THRESHOLD = 0.015;
+const AUDIO_SILENCE_HOLD_MS = 3500;
+const AUDIO_PULSE_PERIOD_MS = 1400;
+const AUDIO_PULSE_RING_COUNT = 3;
+const AUDIO_PULSE_BASE_RADIUS_RATIO = 0.08;
+const AUDIO_PULSE_SPREAD_RATIO = 0.18;
+const APP_VERSION = 'V1.9.44';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1105,6 +1111,13 @@ let desiredAudioMuted = false;
 let pendingAutoUnmute = false;
 let audioRetryTimer = null;
 let autoplayHintShown = false;
+let audioAnalyserContext = null;
+let audioAnalyser = null;
+let audioAnalyserSource = null;
+let audioAnalyserData = null;
+let audioSilenceSinceMs = 0;
+let audioMonitorFrame = null;
+let audioSignalState = 'unknown';
 
 function updateAudioStatus(text) {
   if (!audioStatusEl) {
@@ -1114,12 +1127,118 @@ function updateAudioStatus(text) {
   audioStatusEl.textContent = text;
 }
 
+function updateAudioSignalState(nextState) {
+  if (audioSignalState === nextState) {
+    return;
+  }
+
+  audioSignalState = nextState;
+  refreshAudioStreamControls();
+}
+
+function ensureAudioAnalyser() {
+  if (!audioStreamEl || audioAnalyser) {
+    return audioAnalyser;
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return null;
+  }
+
+  audioAnalyserContext = audioAnalyserContext ?? new AudioContextCtor();
+  if (audioAnalyserContext.state === 'suspended') {
+    audioAnalyserContext.resume().catch(() => {});
+  }
+
+  try {
+    audioAnalyser = audioAnalyserContext.createAnalyser();
+    audioAnalyser.fftSize = 2048;
+    audioAnalyser.smoothingTimeConstant = 0.85;
+    audioAnalyserData = new Uint8Array(audioAnalyser.fftSize);
+
+    if (!audioAnalyserSource) {
+      audioAnalyserSource = audioAnalyserContext.createMediaElementSource(audioStreamEl);
+      audioAnalyserSource.connect(audioAnalyser);
+      audioAnalyser.connect(audioAnalyserContext.destination);
+    }
+  } catch (error) {
+    console.warn('Unable to initialize audio analyser', error);
+    audioAnalyser = null;
+    audioAnalyserSource = null;
+    audioAnalyserData = null;
+    return null;
+  }
+
+  return audioAnalyser;
+}
+
+function stopAudioSilenceMonitor(nextState = 'unknown') {
+  if (audioMonitorFrame !== null) {
+    window.cancelAnimationFrame(audioMonitorFrame);
+    audioMonitorFrame = null;
+  }
+
+  audioSilenceSinceMs = 0;
+  updateAudioSignalState(nextState);
+}
+
+function startAudioSilenceMonitor() {
+  const analyser = ensureAudioAnalyser();
+  if (!analyser || desiredAudioMuted || audioStreamError || audioStreamEl.paused) {
+    stopAudioSilenceMonitor(desiredAudioMuted ? 'muted' : 'unknown');
+    return;
+  }
+
+  if (audioMonitorFrame !== null) {
+    return;
+  }
+
+  const sampleLevel = () => {
+    if (!audioAnalyser) {
+      stopAudioSilenceMonitor('unknown');
+      return;
+    }
+
+    if (desiredAudioMuted || audioStreamError || audioStreamEl.paused) {
+      stopAudioSilenceMonitor(desiredAudioMuted ? 'muted' : 'unknown');
+      return;
+    }
+
+    analyser.getByteTimeDomainData(audioAnalyserData);
+    let sumSquares = 0;
+    for (const sample of audioAnalyserData) {
+      const centered = (sample - 128) / 128;
+      sumSquares += centered * centered;
+    }
+
+    const rms = Math.sqrt(sumSquares / audioAnalyserData.length);
+    const now = performance.now();
+    const belowThreshold = rms < AUDIO_SILENCE_THRESHOLD;
+
+    if (!belowThreshold) {
+      audioSilenceSinceMs = 0;
+      updateAudioSignalState('active');
+    } else if (audioSilenceSinceMs === 0) {
+      audioSilenceSinceMs = now;
+      updateAudioSignalState('active');
+    } else if (now - audioSilenceSinceMs >= AUDIO_SILENCE_HOLD_MS) {
+      updateAudioSignalState('silent');
+    }
+
+    audioMonitorFrame = window.requestAnimationFrame(sampleLevel);
+  };
+
+  audioMonitorFrame = window.requestAnimationFrame(sampleLevel);
+}
+
 function refreshAudioStreamControls() {
   if (!audioStreamEl) {
     return;
   }
 
   const isMuted = desiredAudioMuted;
+  const signalState = audioSignalState;
   if (audioMuteToggleBtn) {
     audioMuteToggleBtn.textContent = isMuted ? 'Unmute' : 'Mute';
     audioMuteToggleBtn.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
@@ -1158,7 +1277,17 @@ function refreshAudioStreamControls() {
     return;
   }
 
-  updateAudioStatus('Live');
+  if (signalState === 'silent') {
+    updateAudioStatus('Live – silent');
+    return;
+  }
+
+  if (signalState === 'active') {
+    updateAudioStatus('Live');
+    return;
+  }
+
+  updateAudioStatus('Live – monitoring');
 }
 
 function refreshAircraftDetailsControls() {
@@ -1277,6 +1406,7 @@ function handleAudioPlaybackSuccess() {
   pendingAutoUnmute = false;
   clearAudioRetryTimer();
   refreshAudioStreamControls();
+  startAudioSilenceMonitor();
 }
 
 function handleAudioPlaybackFailure(error) {
@@ -1293,6 +1423,7 @@ function handleAudioPlaybackFailure(error) {
     scheduleAudioRetry();
   }
   refreshAudioStreamControls();
+  stopAudioSilenceMonitor('unknown');
 }
 
 function attemptAudioPlayback() {
@@ -1425,10 +1556,12 @@ if (audioStreamEl) {
   if ('playsInline' in audioStreamEl) {
     audioStreamEl.playsInline = true;
   }
+  audioStreamEl.crossOrigin = 'anonymous';
   audioStreamEl.src = AUDIO_STREAM_URL;
   const savedMuted = readCookie(AUDIO_MUTED_STORAGE_KEY);
   desiredAudioMuted = savedMuted === 'true';
   pendingAutoUnmute = !desiredAudioMuted;
+  audioSignalState = desiredAudioMuted ? 'muted' : 'unknown';
 
   refreshAudioStreamControls();
 
@@ -1437,9 +1570,11 @@ if (audioStreamEl) {
     audioAutoplayBlocked = false;
     clearAudioRetryTimer();
     refreshAudioStreamControls();
+    startAudioSilenceMonitor();
   });
 
   audioStreamEl.addEventListener('pause', () => {
+    stopAudioSilenceMonitor(desiredAudioMuted ? 'muted' : 'unknown');
     if (!audioStreamEl.muted) {
       refreshAudioStreamControls();
     }
@@ -1456,11 +1591,13 @@ if (audioStreamEl) {
   });
 
   audioStreamEl.addEventListener('ended', () => {
+    stopAudioSilenceMonitor('unknown');
     attemptAudioPlayback();
   });
 
   audioStreamEl.addEventListener('error', (event) => {
     audioStreamError = true;
+    stopAudioSilenceMonitor('unknown');
     refreshAudioStreamControls();
     showMessage('Audio stream unavailable. Check the receiver.', {
       duration: DISPLAY_TIMEOUT_MS * 2,
@@ -1505,12 +1642,14 @@ audioMuteToggleBtn?.addEventListener('click', () => {
   }
 
   if (shouldMute) {
+    stopAudioSilenceMonitor('muted');
     refreshAudioStreamControls();
     return;
   }
 
   audioStreamError = false;
   refreshAudioStreamControls();
+  startAudioSilenceMonitor();
 
   if (audioStreamEl.paused) {
     attemptAudioPlayback();
@@ -4064,6 +4203,62 @@ function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radar
   return reservedPlacements;
 }
 
+function drawAudioSignalIndicator(centerX, centerY, radarRadius) {
+  const unavailable = desiredAudioMuted || audioStreamError || audioAutoplayBlocked;
+  const signalState = audioSignalState;
+  const showActive = !unavailable && signalState === 'active';
+  const showSilent = !unavailable && signalState === 'silent';
+
+  if (!showActive && !showSilent) {
+    return;
+  }
+
+  const coreRadius = radarRadius * AUDIO_PULSE_BASE_RADIUS_RATIO;
+  const lineWidth = Math.max(1.1, radarRadius * 0.0032);
+
+  ctx.save();
+  ctx.translate(centerX, centerY);
+
+  if (showSilent) {
+    ctx.setLineDash([radarRadius * 0.012, radarRadius * 0.02]);
+    ctx.strokeStyle = 'rgba(255, 191, 71, 0.55)';
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.arc(0, 0, coreRadius * 1.35, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  if (showActive) {
+    const phase = (performance.now() % AUDIO_PULSE_PERIOD_MS) / AUDIO_PULSE_PERIOD_MS;
+    const spread = radarRadius * AUDIO_PULSE_SPREAD_RATIO;
+
+    for (let i = 0; i < AUDIO_PULSE_RING_COUNT; i += 1) {
+      const offset = i / AUDIO_PULSE_RING_COUNT;
+      const progress = (phase + offset) % 1;
+      const radius = coreRadius + spread * progress;
+      const alpha = Math.max(0, 0.45 - progress * 0.45);
+
+      ctx.setLineDash([]);
+      ctx.strokeStyle = `rgba(82, 255, 194, ${alpha.toFixed(3)})`;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    const glowRadius = coreRadius * 1.8;
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+    glow.addColorStop(0, 'rgba(82, 255, 194, 0.35)');
+    glow.addColorStop(1, 'rgba(82, 255, 194, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function drawRadar(deltaTime) {
   resizeCanvas();
   const { width, height } = canvas;
@@ -4137,8 +4332,10 @@ function drawRadar(deltaTime) {
   }
   ctx.restore();
 
-  const reservedLabelPlacements =
-    drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt) || [];
+  drawAudioSignalIndicator(centerX, centerY, radarRadius);
+
+  const reservedLabelPlacements =
+    drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt) || [];
 
   // sweep update
   const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;

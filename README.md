@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.42
+**Current Version:** V1.9.44
 
 ---
 
@@ -24,6 +24,8 @@ from any modern browser.
 - Retro-styled radar display that connects to a `dump1090-fa` server hosted at `http://192.168.50.100:8080`.
 - Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
+- Live audio status flags when the feed is silent versus carrying radio traffic by sampling the stream through a Web Audio
+  analyser, plus a pulsing ring on the radar scope itself so you can see radio activity without the sidebar.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
 - One-tap "Use My Location" control recenters the radar on your current coordinates and keeps them stored for future visits.
