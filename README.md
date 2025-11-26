@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.56
+**Current Version:** V1.9.61
 
 ---
 
@@ -44,6 +44,8 @@ from any modern browser.
 - Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
 - Live data ticker surfaces timely operational notes—now repeating automated rapid-descent and inbound-base alerts until the triggering aircraft clears.
 - AI comms log updates live while open so new dump1090 and Ollama events stream in without reopening the modal.
+- Optional Ollama discovery feed merges additional endpoints into the startup scan and prioritizes the lowest-latency host for
+  AI commentary without manual retargeting. A bundled helper can scan your LAN and serve the feed automatically.
 - Alerted contacts pulse directly on the radar so the subject aircraft stands out the moment a ticker warning fires.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click the same blip again to spotlight it as the only rendered target while
@@ -98,6 +100,70 @@ targets are normalized to strip trailing slashes so `/api/*` requests do not dou
 return 404s under strict proxies. Connection
 attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
 when the browser blocks HTTP calls from an HTTPS dashboard.
+
+If you run a discovery helper that scans your LAN for Ollama instances, point the
+dashboard at it with `localStorage.ollamaDiscoveryUrl` (e.g., `http://192.168.50.5:8081/ollama/discovery`).
+The feed can return either a raw array of URLs or objects that include latency hints:
+
+```json
+[
+  "http://192.168.50.10:11434",
+  { "url": "http://192.168.50.11:11434", "latencyMs": 120 }
+]
+```
+
+### Ollama LAN discovery helper
+
+The repo now includes `ollama-discovery-helper.js`, a tiny Node service that scans a
+configurable subnet for Ollama instances and exposes the discovery feed the dashboard
+expects (`/ollama/discovery`, `/ollama/hosts`, and `/ollama-discovery.json`).
+
+Run it from this repo with:
+
+```bash
+node ollama-discovery-helper.js --cidr 192.168.50.0/24 --port 8081
+```
+
+Key flags and environment overrides:
+
+- `--cidr` / `SCAN_CIDR` – subnet to scan (defaults to the first private interface).
+- `--hosts` / `EXTRA_HOSTS` – comma-separated hosts to probe in addition to the CIDR
+  range.
+- `--ollama-port` / `OLLAMA_PORT` – port that Ollama listens on (default `11434`).
+- `--timeout-ms` / `PROBE_TIMEOUT_MS` – per-host timeout for the `/api/tags` probe.
+- `--max-hosts` / `MAX_HOSTS` – cap the number of hosts per scan (defaults to `512`).
+- `--once` – run one scan and print JSON results instead of starting the server.
+
+The helper rescans every two minutes by default (`--rescan-ms 120000`) so the feed keeps up with
+new or transient Ollama hosts. Each sweep now prints the discovered URLs (with latency hints) and a
+summary of how many hosts were unreachable, instead of logging every failed probe.
+
+Point the dashboard at the helper with a one-time browser console command:
+
+```js
+localStorage.ollamaDiscoveryUrl = 'http://192.168.50.5:8081/ollama/discovery'
+```
+
+The helper returns a JSON object shaped like:
+
+```json
+{
+  "endpoints": [
+    { "url": "http://192.168.50.10:11434", "latencyMs": 85 },
+    { "url": "http://192.168.50.11:11434", "latencyMs": 120 }
+  ],
+  "meta": { "cidr": "192.168.50.0/24", "probed": 256, "durationMs": 3100, "completedAt": "2024-05-01T20:15:12.000Z" }
+}
+```
+
+The radar will merge these endpoints into its candidate list, prioritizing the fastest
+response first.
+
+Any discovery host on the same origin will also be tried automatically at `/ollama/discovery`,
+`/ollama/hosts`, and `/ollama-discovery.json`. The dashboard also probes a helper on
+`<hostname>:8081` by default so the bundled discovery server works without configuration.
+Discovered hosts are merged into the default candidate list and tried from fastest to
+slowest during startup.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 
@@ -240,6 +306,8 @@ deployments alike include:
 - **In-app server configuration UI** – allow operators to adjust the dump1090 host,
   port, and base path from the sidebar instead of editing `app.js` or clearing
   cookies between sites.
+- **Ollama host picker** – surface discovered AI endpoints in the UI with latency
+  hints and a manual override instead of relying solely on `localStorage` settings.
 - **Improved offline handling** – surface cached aircraft history or a dedicated
   "standby" screen when the JSON endpoints are unreachable for multiple refresh
   intervals.

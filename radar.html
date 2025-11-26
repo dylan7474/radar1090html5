@@ -236,6 +236,10 @@
         }
     }
 
+    const OLLAMA_DISCOVERY_STORAGE_KEY = 'ollamaDiscoveryUrl';
+    const OLLAMA_DISCOVERY_PATHS = ['/ollama/discovery', '/ollama/hosts', '/ollama-discovery.json'];
+    const OLLAMA_DISCOVERY_PROBE_TIMEOUT_MS = 5000;
+
     function resolveOllamaCandidates() {
         const saved = localStorage.getItem('ollamaUrl');
         const protocol = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
@@ -301,11 +305,12 @@
         }
     }
 
-    const ollamaCandidates = resolveOllamaCandidates();
+    let ollamaCandidates = resolveOllamaCandidates();
+    const defaultOllamaUrl = ollamaCandidates[0] || null;
 
     const AI_CONFIG = {
         dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data",
-        ollamaUrl: ollamaCandidates[0],
+        ollamaUrl: defaultOllamaUrl,
         ollamaModel: null,
         myLat: 54.531836,
         myLon: -1.087954,
@@ -322,6 +327,106 @@
     const OLLAMA_DISCOVERY_TIMEOUT_MS = 120000;
     const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
+
+    function extractDiscoveryHosts(payload) {
+        const rawList = Array.isArray(payload)
+            ? payload
+            : payload?.endpoints || payload?.hosts || payload?.candidates || [];
+
+        const hosts = [];
+        for (const entry of rawList) {
+            if (typeof entry === 'string') {
+                hosts.push({ url: entry, latencyMs: null });
+                continue;
+            }
+
+            if (entry && typeof entry.url === 'string') {
+                hosts.push({
+                    url: entry.url,
+                    latencyMs: Number.isFinite(entry.latencyMs) ? entry.latencyMs : null,
+                });
+            }
+        }
+        return hosts;
+    }
+
+    async function fetchDiscoveredOllamaEndpoints() {
+        const configured = localStorage.getItem(OLLAMA_DISCOVERY_STORAGE_KEY);
+        const discoveryTargets = configured ? [configured] : [];
+        const locationHost = window.location.hostname || 'localhost';
+        const preferredScheme = window.location.protocol === 'https:' ? 'https' : 'http';
+        for (const path of OLLAMA_DISCOVERY_PATHS) {
+            discoveryTargets.push(`${window.location.origin}${path}`);
+            discoveryTargets.push(`${preferredScheme}://${locationHost}:8081${path}`);
+        }
+
+        const seenTargets = new Set();
+        const discoveredByUrl = new Map();
+
+        for (const target of discoveryTargets) {
+            if (!target || seenTargets.has(target)) continue;
+            seenTargets.add(target);
+
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), OLLAMA_DISCOVERY_PROBE_TIMEOUT_MS);
+            const started = performance.now();
+            try {
+                const resp = await fetch(target, { signal: controller.signal });
+                const elapsed = Math.round(performance.now() - started);
+                aiLog('DEBUG', `Discovery probe ${target} -> status ${resp.status} in ${elapsed}ms`, 'debug');
+                if (!resp.ok) continue;
+
+                const payload = await resp.json();
+                const hosts = extractDiscoveryHosts(payload);
+                hosts.forEach((host) => {
+                    if (!host?.url) return;
+                    const normalizedUrl = normalizeOllamaBase(host.url);
+                    const latencyMs = Number.isFinite(host.latencyMs) ? host.latencyMs : elapsed;
+                    const bestKnown = discoveredByUrl.get(normalizedUrl)?.latencyMs ?? Number.MAX_SAFE_INTEGER;
+
+                    if (latencyMs < bestKnown) {
+                        discoveredByUrl.set(normalizedUrl, { url: normalizedUrl, latencyMs });
+                    }
+                });
+            } catch (err) {
+                aiLog('DEBUG', `Discovery probe failed @ ${target}: ${err.message || err}`, 'debug');
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        return Array.from(discoveredByUrl.values());
+    }
+
+    function mergeOllamaCandidates(base, discovered) {
+        const prioritized = [...discovered]
+            .sort((a, b) => (a.latencyMs ?? Number.MAX_SAFE_INTEGER) - (b.latencyMs ?? Number.MAX_SAFE_INTEGER))
+            .map((entry) => entry.url);
+        const merged = [...prioritized, ...base];
+        return [...new Set(merged.map(normalizeOllamaBase))];
+    }
+
+    let discoveryWarmup = null;
+
+    async function primeDiscoveryCandidates() {
+        if (discoveryWarmup) return discoveryWarmup;
+        discoveryWarmup = (async () => {
+            const discovered = await fetchDiscoveredOllamaEndpoints();
+            if (!discovered.length) {
+                aiLog('DEBUG', 'Discovery found no additional Ollama hosts; using defaults.', 'debug');
+                return ollamaCandidates;
+            }
+
+            ollamaCandidates = mergeOllamaCandidates(ollamaCandidates, discovered);
+            AI_CONFIG.ollamaUrl = ollamaCandidates[0];
+            aiLog('AI', `Discovery found ${discovered.length} Ollama host(s); prioritizing ${AI_CONFIG.ollamaUrl}`, 'normal');
+            return ollamaCandidates;
+        })();
+
+        return discoveryWarmup;
+    }
+
+    primeDiscoveryCandidates();
 
     const voiceNameMatches = (voice, hints) => {
         const name = (voice.name || '').toLowerCase();
@@ -434,7 +539,8 @@
         aiLog('DEBUG', 'If the proxy curl returns 404, the rule is missing. If the Origin curl lacks Access-Control-Allow-Origin, enable CORS or proxy.', 'debug');
     }
 
-    function startSystem() {
+    async function startSystem() {
+        await primeDiscoveryCandidates();
         document.getElementById('interaction-overlay').style.display = 'none';
         const radar = document.getElementById('radar');
         if(radar) radar.scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});
@@ -757,6 +863,13 @@
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
+        await primeDiscoveryCandidates();
+        if (!ollamaCandidates.length) {
+            aiLog('AI ERROR', 'No Ollama endpoints configured. Set localStorage.ollamaUrl or provide a discovery feed.', 'alert');
+            updateAiStatus("NO HOSTS", "#ff3333");
+            return false;
+        }
+
         aiLog("DEBUG", `Attempting Ollama detection across ${ollamaCandidates.length} candidates`, 'debug');
 
         let lastError = null;
@@ -859,7 +972,8 @@
     }
 
     async function runAiSelfTest() {
-        const candidates = resolveOllamaCandidates();
+        await primeDiscoveryCandidates();
+        const candidates = [...ollamaCandidates];
         aiLog('DEBUG', `Self-test: checking ${candidates.length} Ollama candidate(s): ${candidates.join(', ')}`, 'debug');
 
         for (const candidate of candidates) {
