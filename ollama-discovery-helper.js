@@ -7,7 +7,7 @@ const os = require('os');
 const DEFAULT_PORT = Number.parseInt(process.env.PORT || process.env.LISTEN_PORT || '8081', 10);
 const DEFAULT_OLLAMA_PORT = Number.parseInt(process.env.OLLAMA_PORT || '11434', 10);
 const DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.PROBE_TIMEOUT_MS || '2500', 10);
-const DEFAULT_RESCAN_MS = Number.parseInt(process.env.RESCAN_INTERVAL_MS || `${5 * 60 * 1000}`, 10);
+const DEFAULT_RESCAN_MS = Number.parseInt(process.env.RESCAN_INTERVAL_MS || `${2 * 60 * 1000}`, 10);
 const DEFAULT_CONCURRENCY = Number.parseInt(process.env.PROBE_CONCURRENCY || '20', 10);
 const DEFAULT_CIDR = process.env.SCAN_CIDR || null;
 const DEFAULT_MAX_HOSTS = Number.parseInt(process.env.MAX_HOSTS || '512', 10);
@@ -105,13 +105,13 @@ const parseArgs = (argv) => {
 const printUsage = () => {
   console.log(`Ollama LAN discovery helper\n\n` +
     `Usage: node ollama-discovery-helper.js [--cidr 192.168.50.0/24] [--hosts 192.168.50.10,192.168.50.11]\\\n` +
-    `       [--port 8081] [--ollama-port 11434] [--timeout-ms 2500] [--rescan-ms 300000] [--concurrency 20] [--max-hosts 512] [--once]\n\n` +
+    `       [--port 8081] [--ollama-port 11434] [--timeout-ms 2500] [--rescan-ms 120000] [--concurrency 20] [--max-hosts 512] [--once]\n\n` +
     `Environment overrides:\n` +
     `  LISTEN_PORT / PORT   Port to serve the discovery feed (default 8081)\n` +
     `  OLLAMA_PORT          Port to probe for Ollama (default 11434)\n` +
     `  SCAN_CIDR            CIDR range to scan if --cidr not set\n` +
     `  EXTRA_HOSTS          Comma-separated host list added to the probe set\n` +
-    `  RESCAN_INTERVAL_MS   How often to rescan when running the server (default 300000)\n` +
+    `  RESCAN_INTERVAL_MS   How often to rescan when running the server (default 120000)\n` +
     `  PROBE_TIMEOUT_MS     Per-host timeout when calling /api/tags (default 2500)\n` +
     `  PROBE_CONCURRENCY    Parallel probes to run at once (default 20)\n` +
     `  MAX_HOSTS            Maximum hosts to probe per scan (default 512)\n`);
@@ -182,11 +182,9 @@ const probeHost = async (host, config) => {
     if (resp.ok) {
       return { url: base, latencyMs };
     }
-    console.warn(`Probe returned status ${resp.status} for ${base}`);
+    return null;
   } catch (err) {
-    if (err?.name !== 'AbortError') {
-      console.warn(`Probe failed for ${base}: ${err.message || err}`);
-    }
+    // Ignore individual probe failures to keep output focused on discovered hosts.
   } finally {
     clearTimeout(timer);
   }
@@ -219,15 +217,32 @@ const discoverOllamaHosts = async (config) => {
 
   console.log(`Probing ${candidates.length} host(s) for Ollama on port ${config.ollamaPort}...`);
   const started = Date.now();
-  const responses = await mapWithConcurrency(candidates, config.concurrency, (host) => probeHost(host, config));
-  const endpoints = responses.filter(Boolean).sort((a, b) => (a.latencyMs || 0) - (b.latencyMs || 0));
+  const responses = await mapWithConcurrency(candidates, config.concurrency, async (host) => ({
+    host,
+    result: await probeHost(host, config),
+  }));
+  const endpoints = responses
+    .map((entry) => entry.result)
+    .filter(Boolean)
+    .sort((a, b) => (a.latencyMs || 0) - (b.latencyMs || 0));
+  const failures = candidates.length - endpoints.length;
   const durationMs = Date.now() - started;
-  console.log(`Finished probe: ${endpoints.length} host(s) responded in ${durationMs}ms.`);
+  if (endpoints.length) {
+    const prettyList = endpoints
+      .map((endpoint) => `${endpoint.url}${endpoint.latencyMs != null ? ` (${endpoint.latencyMs}ms)` : ''}`)
+      .join(', ');
+    console.log(`Discovered ${endpoints.length} Ollama host(s): ${prettyList}`);
+  } else {
+    console.warn('No Ollama hosts discovered.');
+  }
+  console.log(`Finished probe: ${endpoints.length} responsive, ${failures} unreachable in ${durationMs}ms.`);
   return {
     endpoints,
     meta: {
       cidr: cidr || 'unknown',
       probed: candidates.length,
+      responsive: endpoints.length,
+      unreachable: failures,
       durationMs,
       completedAt: new Date().toISOString(),
     },

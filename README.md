@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.59
+**Current Version:** V1.9.60
 
 ---
 
@@ -133,6 +133,10 @@ Key flags and environment overrides:
 - `--timeout-ms` / `PROBE_TIMEOUT_MS` – per-host timeout for the `/api/tags` probe.
 - `--max-hosts` / `MAX_HOSTS` – cap the number of hosts per scan (defaults to `512`).
 - `--once` – run one scan and print JSON results instead of starting the server.
+
+The helper rescans every two minutes by default (`--rescan-ms 120000`) so the feed keeps up with
+new or transient Ollama hosts. Each sweep now prints the discovered URLs (with latency hints) and a
+summary of how many hosts were unreachable, instead of logging every failed probe.
 
 Point the dashboard at the helper with a one-time browser console command:
 
