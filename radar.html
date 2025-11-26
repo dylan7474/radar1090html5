@@ -324,9 +324,9 @@
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
     const PERSONAS = {
-        MILITARY: `You are an AIR DEFENSE EARLY WARNING SYSTEM. Tone: Clinical, curt, professional, authoritative. Vocabulary: "Contact", "Bearing", "Range", "Angels" (Altitude), "Speed", "Track", "Sector Status". Priority: Reporting tactical data and sector safety. Do not roleplay a character. Simply report the situation. Output a single, concise status update. Do not ask questions.`,
-        ATC: `You are LONDON CENTER AIR TRAFFIC CONTROL. Tone: Professional, routine, calm, human. Vocabulary: "Traffic", "Flight Level", "Knots", "Descend", "Maintain", "Squawk", "Good evening", "Radar Contact". Focus on safe separation and traffic advisories. Phrase it as a standard radio broadcast to pilots. Output a single advisory line. Do not ask questions.`,
-        SPOTTER: `You are an ENTHUSIASTIC PLANE SPOTTER at an airshow. Tone: Excited, casual, friendly. Focus on airlines ("Oh look, a British Airways!"), altitude (low passes), and "cool" aircraft actions. Do not ask questions to the listener. Just narrate what you see with excitement.`
+        MILITARY: `Role: air defense early warning operator. Tone: clipped, authoritative. Priorities: threats and sector safety. Use bearing, range, angels/altitude, speed/trend. Deliver one tactical status line with the most critical contact first. No chatter or questions.`,
+        ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide a single transmission to pilots: lead with conflicts or alerts, give concise traffic advisories with altitudes and headings, and keep phraseology standard. No greetings or questions.`,
+        SPOTTER: `Role: excited plane spotter. Tone: upbeat and observational. Call out interesting liveries/types and notable maneuvers or low passes. Keep it to one lively sentence without giving instructions or asking questions.`
     };
 
     const AIRCRAFT_TYPES = { "B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777", "B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172", "B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet", "F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter" };
@@ -802,14 +802,14 @@
     async function generateCommentary(targets, count, alerts) {
         const key = document.getElementById('ai-persona-select').value;
         let persona = PERSONAS[key];
-        if(key==='ATC' && AI_CONFIG.locationName) persona = persona.replace("LONDON CENTER", `${AI_CONFIG.locationName} RADAR`);
+        if(key==='ATC' && AI_CONFIG.locationName) persona = persona.replace("{LOCATION}", AI_CONFIG.locationName.toUpperCase());
         
         const report = targets.map(p => `${p.id}: Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft.`).join("\n");
         const density = count > 15 ? "HEAVY" : count > 5 ? "MODERATE" : "LIGHT";
         
-        const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}. 
+        const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}.
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
-        TASK: Short status update based on Persona. Alerts first. No questions.`;
+        TASK: One persona-tuned line under 40 words. Lead with alerts, then nearest contacts with range/altitude/heading or trend. Note overall density briefly. No greetings, filler, or questions.`;
 
         try {
             const r = await fetchWithTimeout(`${AI_CONFIG.ollamaUrl}/api/chat`, {
