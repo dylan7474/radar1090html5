@@ -335,6 +335,22 @@
         SPOTTER: 'Chaotic livestream hype. Jokes, memes, playful commentary.'
     };
 
+    const PERSONA_VOICE_PREFERENCES = {
+        MILITARY: [
+            (v) => v.lang === 'en-US',
+            (v) => v.lang && v.lang.startsWith('en-US')
+        ],
+        ATC: [
+            (v) => v.lang === 'en-GB',
+            (v) => (v.name || '').includes('UK English') || (v.name || '').includes('Daniel')
+        ],
+        SPOTTER: [
+            (v) => v.lang === 'en-IE',
+            (v) => v.lang && v.lang.startsWith('en-IE'),
+            (v) => (v.name || '').toLowerCase().includes('irish')
+        ]
+    };
+
     const AIRCRAFT_TYPES = { "B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777", "B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172", "B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet", "F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter" };
 
     let aiProcessing = false;
@@ -451,18 +467,18 @@
     function speak(text) {
         if (!voiceEnabled) return;
         startVisualizer();
-        
+
         // Stop any existing speech first
         window.speechSynthesis.cancel();
+        stopSpeechSequence();
 
         currentUtterance = new SpeechSynthesisUtterance(text);
         const persona = document.getElementById('ai-persona-select').value;
         currentUtterance.rate = persona === 'ATC' ? 1.0 : 1.1;
-        
-        const voices = window.speechSynthesis.getVoices();
-        const v = voices.find(v => v.lang === 'en-GB' || v.name.includes("UK English") || v.name.includes("Daniel"));
-        if (v) currentUtterance.voice = v;
-        
+
+        const voice = selectVoiceForPersona(persona);
+        if (voice) currentUtterance.voice = voice;
+
         // START SEQUENCE
         startCarrier();
         isSpeaking = true;
@@ -486,10 +502,25 @@
     }
     
     function stopSpeechSequence() {
-        isSpeaking = false; 
-        currentUtterance = null; 
-        updateAiStatus("ONLINE", "#00ff41"); 
+        isSpeaking = false;
+        currentUtterance = null;
+        updateAiStatus("ONLINE", "#00ff41");
         stopCarrier();
+    }
+
+    function selectVoiceForPersona(persona) {
+        const voices = window.speechSynthesis.getVoices();
+        const fallbacks = [
+            (v) => v.lang === 'en-GB',
+            (v) => (v.name || '').includes('UK English') || (v.name || '').includes('Daniel')
+        ];
+        const predicates = [...(PERSONA_VOICE_PREFERENCES[persona] || []), ...fallbacks];
+
+        for (const predicate of predicates) {
+            const match = voices.find(predicate);
+            if (match) return match;
+        }
+        return null;
     }
 
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
@@ -589,7 +620,7 @@
         voiceEnabled = !voiceEnabled;
         const btn = document.getElementById('tts-mute-toggle');
         const st = document.getElementById('tts-status');
-        if(voiceEnabled) { btn.innerText = "MUTE"; st.innerText = "ACTIVE"; speak("Voice enabled."); } 
+        if(voiceEnabled) { btn.innerText = "MUTE"; st.innerText = "ACTIVE"; speak("Voice enabled."); }
         else { btn.innerText = "UNMUTE"; st.innerText = "MUTED"; window.speechSynthesis.cancel(); }
     });
     document.getElementById('range-increase').addEventListener('click', () => setTimeout(() => { aiProcessing=false; runAiCycle(); }, 500));
@@ -597,9 +628,10 @@
     document.getElementById('ai-persona-select').addEventListener('change', (e) => {
         setCookie("aiPersona", e.target.value, 365);
         window.speechSynthesis.cancel();
+        stopSpeechSequence();
         aiLog('AI', `Persona switched to ${e.target.value}`);
         updateAiStatus("SWITCHING MODE...", "#ffff00");
-        setTimeout(() => { aiProcessing=false; runAiCycle({ forceImmediate: true }); }, 500);
+        setTimeout(() => { aiProcessing=false; runAiCycle({ forceImmediate: true }); }, 100);
     });
 
     function getCurrentRangeLimit() {
