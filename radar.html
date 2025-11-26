@@ -599,7 +599,7 @@
         window.speechSynthesis.cancel();
         aiLog('AI', `Persona switched to ${e.target.value}`);
         updateAiStatus("SWITCHING MODE...", "#ffff00");
-        setTimeout(() => { aiProcessing=false; runAiCycle(); }, 500);
+        setTimeout(() => { aiProcessing=false; runAiCycle({ forceImmediate: true }); }, 500);
     });
 
     function getCurrentRangeLimit() {
@@ -739,17 +739,22 @@
         logOllamaRemediation();
     }
 
-    async function runAiCycle() {
+    async function runAiCycle(options = {}) {
+        const { forceImmediate = false } = options;
         if (!systemActive || aiProcessing) return;
         if (isSpeaking) return; // Watchdog prevents overlap
         if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
 
         const now = Date.now();
         const timeSinceLast = now - lastCommentaryTimestamp;
-        if (timeSinceLast < COMMENTARY_COOLDOWN_MS) {
+        if (!forceImmediate && timeSinceLast < COMMENTARY_COOLDOWN_MS) {
             const remainingSeconds = Math.ceil((COMMENTARY_COOLDOWN_MS - timeSinceLast) / 1000);
             aiLog('DEBUG', `Cooldown active; ${remainingSeconds}s until next commentary window`, 'debug');
             return;
+        }
+
+        if (forceImmediate) {
+            aiLog('DEBUG', 'Cooldown bypassed due to persona switch', 'debug');
         }
 
         aiProcessing = true;
