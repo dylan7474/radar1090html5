@@ -340,8 +340,8 @@
         SPOTTER: 'Chaotic livestream hype. Jokes, memes, playful commentary.'
     };
 
-    const FEMALE_VOICE_HINTS = ['female', 'woman', 'lady', 'fiona', 'olivia', 'emma', 'amy', 'serena', 'susan'];
-    const MALE_VOICE_HINTS = ['male', 'man', 'guy', 'boy', 'david', 'daniel', 'liam', 'sean', 'declan'];
+    const FEMALE_VOICE_HINTS = ['female', 'woman', 'lady', 'fiona', 'olivia', 'emma', 'amy', 'serena', 'susan', 'victoria', 'kate', 'karen'];
+    const MALE_VOICE_HINTS = ['male', 'man', 'guy', 'boy', 'david', 'daniel', 'liam', 'sean', 'declan', 'brian', 'paul', 'peter', 'michael', 'jack', 'ryan', 'george'];
 
     const PERSONA_VOICE_PREFERENCES = {
         MILITARY: [
@@ -494,8 +494,8 @@
 
         currentUtterance = new SpeechSynthesisUtterance(text);
         const persona = document.getElementById('ai-persona-select').value;
-        currentUtterance.rate = persona === 'ATC' ? 0.98 : persona === 'SPOTTER' ? 1.08 : 1.1;
-        currentUtterance.pitch = persona === 'ATC' ? 1.08 : persona === 'SPOTTER' ? 0.92 : 1.0;
+        currentUtterance.rate = persona === 'ATC' ? 0.95 : persona === 'SPOTTER' ? 1.18 : 1.1;
+        currentUtterance.pitch = persona === 'ATC' ? 1.12 : persona === 'SPOTTER' ? 0.85 : 1.0;
 
         const voice = selectVoiceForPersona(persona);
         if (voice) currentUtterance.voice = voice;
@@ -531,11 +531,17 @@
 
     function selectVoiceForPersona(persona) {
         const voices = window.speechSynthesis.getVoices();
-        const personaFallbacks = persona === 'SPOTTER' ? [
-            (v) => v.lang === 'en-AU',
-            (v) => v.lang === 'en-NZ',
-            (v) => v.lang === 'en-CA'
-        ] : [];
+        const personaFallbacks = persona === 'SPOTTER'
+            ? [
+                (v) => v.lang === 'en-AU' && voiceNameMatches(v, MALE_VOICE_HINTS),
+                (v) => v.lang === 'en-NZ' && voiceNameMatches(v, MALE_VOICE_HINTS),
+                (v) => v.lang === 'en-CA' && voiceNameMatches(v, MALE_VOICE_HINTS),
+                (v) => v.lang === 'en-GB' && voiceNameMatches(v, MALE_VOICE_HINTS)
+            ]
+            : [
+                (v) => v.lang === 'en-GB' && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+                (v) => v.lang && v.lang.startsWith('en-US') && voiceNameMatches(v, FEMALE_VOICE_HINTS)
+            ];
 
         const fallbacks = [
             (v) => v.lang === 'en-GB',
@@ -552,7 +558,22 @@
             const match = voices.find(predicate);
             if (match) return match;
         }
-        return null;
+
+        // As a final split, keep ATC and SPOTTER apart by gender hints even when only generic English voices exist.
+        const englishVoices = voices.filter((v) => v.lang && v.lang.startsWith('en-'));
+        if (persona === 'ATC') {
+            const female = englishVoices.find((v) => voiceNameMatches(v, FEMALE_VOICE_HINTS));
+            if (female) return female;
+            const nonMale = englishVoices.find((v) => !voiceNameMatches(v, MALE_VOICE_HINTS));
+            if (nonMale) return nonMale;
+        } else if (persona === 'SPOTTER') {
+            const male = englishVoices.find((v) => voiceNameMatches(v, MALE_VOICE_HINTS));
+            if (male) return male;
+            const nonFemale = englishVoices.find((v) => !voiceNameMatches(v, FEMALE_VOICE_HINTS));
+            if (nonFemale) return nonFemale;
+        }
+
+        return englishVoices[0] || null;
     }
 
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
