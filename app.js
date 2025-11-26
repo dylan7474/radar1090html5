@@ -17,7 +17,11 @@ const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
 const AUDIO_SILENCE_THRESHOLD = 0.015;
 const AUDIO_SILENCE_HOLD_MS = 3500;
-const APP_VERSION = 'V1.9.43';
+const AUDIO_PULSE_PERIOD_MS = 1400;
+const AUDIO_PULSE_RING_COUNT = 3;
+const AUDIO_PULSE_BASE_RADIUS_RATIO = 0.08;
+const AUDIO_PULSE_SPREAD_RATIO = 0.18;
+const APP_VERSION = 'V1.9.44';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -4199,6 +4203,62 @@ function drawControlledAirspaces(airspaces, centerX, centerY, radarRadius, radar
   return reservedPlacements;
 }
 
+function drawAudioSignalIndicator(centerX, centerY, radarRadius) {
+  const unavailable = desiredAudioMuted || audioStreamError || audioAutoplayBlocked;
+  const signalState = audioSignalState;
+  const showActive = !unavailable && signalState === 'active';
+  const showSilent = !unavailable && signalState === 'silent';
+
+  if (!showActive && !showSilent) {
+    return;
+  }
+
+  const coreRadius = radarRadius * AUDIO_PULSE_BASE_RADIUS_RATIO;
+  const lineWidth = Math.max(1.1, radarRadius * 0.0032);
+
+  ctx.save();
+  ctx.translate(centerX, centerY);
+
+  if (showSilent) {
+    ctx.setLineDash([radarRadius * 0.012, radarRadius * 0.02]);
+    ctx.strokeStyle = 'rgba(255, 191, 71, 0.55)';
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.arc(0, 0, coreRadius * 1.35, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  if (showActive) {
+    const phase = (performance.now() % AUDIO_PULSE_PERIOD_MS) / AUDIO_PULSE_PERIOD_MS;
+    const spread = radarRadius * AUDIO_PULSE_SPREAD_RATIO;
+
+    for (let i = 0; i < AUDIO_PULSE_RING_COUNT; i += 1) {
+      const offset = i / AUDIO_PULSE_RING_COUNT;
+      const progress = (phase + offset) % 1;
+      const radius = coreRadius + spread * progress;
+      const alpha = Math.max(0, 0.45 - progress * 0.45);
+
+      ctx.setLineDash([]);
+      ctx.strokeStyle = `rgba(82, 255, 194, ${alpha.toFixed(3)})`;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    const glowRadius = coreRadius * 1.8;
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+    glow.addColorStop(0, 'rgba(82, 255, 194, 0.35)');
+    glow.addColorStop(1, 'rgba(82, 255, 194, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function drawRadar(deltaTime) {
   resizeCanvas();
   const { width, height } = canvas;
@@ -4272,8 +4332,10 @@ function drawRadar(deltaTime) {
   }
   ctx.restore();
 
-  const reservedLabelPlacements =
-    drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt) || [];
+  drawAudioSignalIndicator(centerX, centerY, radarRadius);
+
+  const reservedLabelPlacements =
+    drawControlledAirspaces(state.airspacesInRange, centerX, centerY, radarRadius, radarRangeKm, drawUprightAt) || [];
 
   // sweep update
   const sweepSpeed = SWEEP_SPEED_DEG_PER_SEC;
