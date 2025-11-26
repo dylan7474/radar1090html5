@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.58
+**Current Version:** V1.9.59
 
 ---
 
@@ -156,8 +156,10 @@ The radar will merge these endpoints into its candidate list, prioritizing the f
 response first.
 
 Any discovery host on the same origin will also be tried automatically at `/ollama/discovery`,
-`/ollama/hosts`, and `/ollama-discovery.json`. Discovered hosts are merged into the default
-candidate list and tried from fastest to slowest during startup.
+`/ollama/hosts`, and `/ollama-discovery.json`. The dashboard also probes a helper on
+`<hostname>:8081` by default so the bundled discovery server works without configuration.
+Discovered hosts are merged into the default candidate list and tried from fastest to
+slowest during startup.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 

@@ -353,8 +353,11 @@
     async function fetchDiscoveredOllamaEndpoints() {
         const configured = localStorage.getItem(OLLAMA_DISCOVERY_STORAGE_KEY);
         const discoveryTargets = configured ? [configured] : [];
+        const locationHost = window.location.hostname || 'localhost';
+        const preferredScheme = window.location.protocol === 'https:' ? 'https' : 'http';
         for (const path of OLLAMA_DISCOVERY_PATHS) {
             discoveryTargets.push(`${window.location.origin}${path}`);
+            discoveryTargets.push(`${preferredScheme}://${locationHost}:8081${path}`);
         }
 
         const seenTargets = new Set();

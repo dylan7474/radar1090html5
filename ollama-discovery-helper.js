@@ -182,6 +182,7 @@ const probeHost = async (host, config) => {
     if (resp.ok) {
       return { url: base, latencyMs };
     }
+    console.warn(`Probe returned status ${resp.status} for ${base}`);
   } catch (err) {
     if (err?.name !== 'AbortError') {
       console.warn(`Probe failed for ${base}: ${err.message || err}`);
