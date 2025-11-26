@@ -15,7 +15,9 @@ const LAND_MASS_MAX_DISTANCE_KM = MAX_CONFIGURED_RANGE_KM * 1.6;
 const LAND_MASS_MIN_VERTEX_SPACING_KM = 0.75;
 const DEFAULT_BEEP_VOLUME = 10;
 const SWEEP_SPEED_DEG_PER_SEC = 90;
-const APP_VERSION = 'V1.9.42';
+const AUDIO_SILENCE_THRESHOLD = 0.015;
+const AUDIO_SILENCE_HOLD_MS = 3500;
+const APP_VERSION = 'V1.9.43';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -1105,6 +1107,13 @@ let desiredAudioMuted = false;
 let pendingAutoUnmute = false;
 let audioRetryTimer = null;
 let autoplayHintShown = false;
+let audioAnalyserContext = null;
+let audioAnalyser = null;
+let audioAnalyserSource = null;
+let audioAnalyserData = null;
+let audioSilenceSinceMs = 0;
+let audioMonitorFrame = null;
+let audioSignalState = 'unknown';
 
 function updateAudioStatus(text) {
   if (!audioStatusEl) {
@@ -1114,12 +1123,118 @@ function updateAudioStatus(text) {
   audioStatusEl.textContent = text;
 }
 
+function updateAudioSignalState(nextState) {
+  if (audioSignalState === nextState) {
+    return;
+  }
+
+  audioSignalState = nextState;
+  refreshAudioStreamControls();
+}
+
+function ensureAudioAnalyser() {
+  if (!audioStreamEl || audioAnalyser) {
+    return audioAnalyser;
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return null;
+  }
+
+  audioAnalyserContext = audioAnalyserContext ?? new AudioContextCtor();
+  if (audioAnalyserContext.state === 'suspended') {
+    audioAnalyserContext.resume().catch(() => {});
+  }
+
+  try {
+    audioAnalyser = audioAnalyserContext.createAnalyser();
+    audioAnalyser.fftSize = 2048;
+    audioAnalyser.smoothingTimeConstant = 0.85;
+    audioAnalyserData = new Uint8Array(audioAnalyser.fftSize);
+
+    if (!audioAnalyserSource) {
+      audioAnalyserSource = audioAnalyserContext.createMediaElementSource(audioStreamEl);
+      audioAnalyserSource.connect(audioAnalyser);
+      audioAnalyser.connect(audioAnalyserContext.destination);
+    }
+  } catch (error) {
+    console.warn('Unable to initialize audio analyser', error);
+    audioAnalyser = null;
+    audioAnalyserSource = null;
+    audioAnalyserData = null;
+    return null;
+  }
+
+  return audioAnalyser;
+}
+
+function stopAudioSilenceMonitor(nextState = 'unknown') {
+  if (audioMonitorFrame !== null) {
+    window.cancelAnimationFrame(audioMonitorFrame);
+    audioMonitorFrame = null;
+  }
+
+  audioSilenceSinceMs = 0;
+  updateAudioSignalState(nextState);
+}
+
+function startAudioSilenceMonitor() {
+  const analyser = ensureAudioAnalyser();
+  if (!analyser || desiredAudioMuted || audioStreamError || audioStreamEl.paused) {
+    stopAudioSilenceMonitor(desiredAudioMuted ? 'muted' : 'unknown');
+    return;
+  }
+
+  if (audioMonitorFrame !== null) {
+    return;
+  }
+
+  const sampleLevel = () => {
+    if (!audioAnalyser) {
+      stopAudioSilenceMonitor('unknown');
+      return;
+    }
+
+    if (desiredAudioMuted || audioStreamError || audioStreamEl.paused) {
+      stopAudioSilenceMonitor(desiredAudioMuted ? 'muted' : 'unknown');
+      return;
+    }
+
+    analyser.getByteTimeDomainData(audioAnalyserData);
+    let sumSquares = 0;
+    for (const sample of audioAnalyserData) {
+      const centered = (sample - 128) / 128;
+      sumSquares += centered * centered;
+    }
+
+    const rms = Math.sqrt(sumSquares / audioAnalyserData.length);
+    const now = performance.now();
+    const belowThreshold = rms < AUDIO_SILENCE_THRESHOLD;
+
+    if (!belowThreshold) {
+      audioSilenceSinceMs = 0;
+      updateAudioSignalState('active');
+    } else if (audioSilenceSinceMs === 0) {
+      audioSilenceSinceMs = now;
+      updateAudioSignalState('active');
+    } else if (now - audioSilenceSinceMs >= AUDIO_SILENCE_HOLD_MS) {
+      updateAudioSignalState('silent');
+    }
+
+    audioMonitorFrame = window.requestAnimationFrame(sampleLevel);
+  };
+
+  audioMonitorFrame = window.requestAnimationFrame(sampleLevel);
+}
+
 function refreshAudioStreamControls() {
   if (!audioStreamEl) {
     return;
   }
 
   const isMuted = desiredAudioMuted;
+  const signalState = audioSignalState;
   if (audioMuteToggleBtn) {
     audioMuteToggleBtn.textContent = isMuted ? 'Unmute' : 'Mute';
     audioMuteToggleBtn.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
@@ -1158,7 +1273,17 @@ function refreshAudioStreamControls() {
     return;
   }
 
-  updateAudioStatus('Live');
+  if (signalState === 'silent') {
+    updateAudioStatus('Live – silent');
+    return;
+  }
+
+  if (signalState === 'active') {
+    updateAudioStatus('Live');
+    return;
+  }
+
+  updateAudioStatus('Live – monitoring');
 }
 
 function refreshAircraftDetailsControls() {
@@ -1277,6 +1402,7 @@ function handleAudioPlaybackSuccess() {
   pendingAutoUnmute = false;
   clearAudioRetryTimer();
   refreshAudioStreamControls();
+  startAudioSilenceMonitor();
 }
 
 function handleAudioPlaybackFailure(error) {
@@ -1293,6 +1419,7 @@ function handleAudioPlaybackFailure(error) {
     scheduleAudioRetry();
   }
   refreshAudioStreamControls();
+  stopAudioSilenceMonitor('unknown');
 }
 
 function attemptAudioPlayback() {
@@ -1425,10 +1552,12 @@ if (audioStreamEl) {
   if ('playsInline' in audioStreamEl) {
     audioStreamEl.playsInline = true;
   }
+  audioStreamEl.crossOrigin = 'anonymous';
   audioStreamEl.src = AUDIO_STREAM_URL;
   const savedMuted = readCookie(AUDIO_MUTED_STORAGE_KEY);
   desiredAudioMuted = savedMuted === 'true';
   pendingAutoUnmute = !desiredAudioMuted;
+  audioSignalState = desiredAudioMuted ? 'muted' : 'unknown';
 
   refreshAudioStreamControls();
 
@@ -1437,9 +1566,11 @@ if (audioStreamEl) {
     audioAutoplayBlocked = false;
     clearAudioRetryTimer();
     refreshAudioStreamControls();
+    startAudioSilenceMonitor();
   });
 
   audioStreamEl.addEventListener('pause', () => {
+    stopAudioSilenceMonitor(desiredAudioMuted ? 'muted' : 'unknown');
     if (!audioStreamEl.muted) {
       refreshAudioStreamControls();
     }
@@ -1456,11 +1587,13 @@ if (audioStreamEl) {
   });
 
   audioStreamEl.addEventListener('ended', () => {
+    stopAudioSilenceMonitor('unknown');
     attemptAudioPlayback();
   });
 
   audioStreamEl.addEventListener('error', (event) => {
     audioStreamError = true;
+    stopAudioSilenceMonitor('unknown');
     refreshAudioStreamControls();
     showMessage('Audio stream unavailable. Check the receiver.', {
       duration: DISPLAY_TIMEOUT_MS * 2,
@@ -1505,12 +1638,14 @@ audioMuteToggleBtn?.addEventListener('click', () => {
   }
 
   if (shouldMute) {
+    stopAudioSilenceMonitor('muted');
     refreshAudioStreamControls();
     return;
   }
 
   audioStreamError = false;
   refreshAudioStreamControls();
+  startAudioSilenceMonitor();
 
   if (audioStreamEl.paused) {
     attemptAudioPlayback();
