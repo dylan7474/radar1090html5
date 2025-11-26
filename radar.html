@@ -323,6 +323,11 @@
     const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
+    const voiceNameMatches = (voice, hints) => {
+        const name = (voice.name || '').toLowerCase();
+        return hints.some((hint) => name.includes(hint));
+    };
+
     const PERSONAS = {
         MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent—assume every track could be hostile until cleared. Analyze behaviour for threat patterns (rapid climb/descents, formation spacing, racetrack or holding patterns, base approaches). Declare bogeys/bandits, call intent (hot/cold), and issue shoot/no-shoot vibes. Do NOT read out raw transponder stats; focus only on threat calls, intent, and manoeuvre analysis. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
         ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide one transmission to pilots: lead with conflicts/alerts, then ICAO-style traffic advisories with callout clock position, distance, altitude, and heading. Keep it standard phraseology, neutral delivery, no jokes, no questions.`,
@@ -333,6 +338,37 @@
         MILITARY: 'War-zone sitrep. Rapid-fire, terse, brevity codes, threat priority, behaviour analysis.',
         ATC: 'Neutral ATC cadence. Standard phraseology, deconfliction first.',
         SPOTTER: 'Chaotic livestream hype. Jokes, memes, playful commentary.'
+    };
+
+    const FEMALE_VOICE_HINTS = ['female', 'woman', 'lady', 'fiona', 'olivia', 'emma', 'amy', 'serena', 'susan', 'victoria', 'kate', 'karen'];
+    const MALE_VOICE_HINTS = ['male', 'man', 'guy', 'boy', 'david', 'daniel', 'liam', 'sean', 'declan', 'brian', 'paul', 'peter', 'michael', 'jack', 'ryan', 'george'];
+
+    const PERSONA_VOICE_PREFERENCES = {
+        MILITARY: [
+            (v) => v.lang === 'en-US',
+            (v) => v.lang && v.lang.startsWith('en-US')
+        ],
+        ATC: [
+            (v) => v.lang === 'en-GB' && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-GB') && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-US') && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+            (v) => voiceNameMatches(v, FEMALE_VOICE_HINTS) && v.lang && v.lang.startsWith('en-'),
+            (v) => v.lang === 'en-GB',
+            (v) => (v.name || '').includes('UK English') || (v.name || '').includes('Daniel')
+        ],
+        SPOTTER: [
+            (v) => v.lang === 'en-IE' && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-IE') && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-AU') && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-NZ') && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-CA') && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang === 'en-IE',
+            (v) => v.lang && v.lang.startsWith('en-AU'),
+            (v) => v.lang && v.lang.startsWith('en-NZ'),
+            (v) => v.lang && v.lang.startsWith('en-CA'),
+            (v) => (v.name || '').toLowerCase().includes('irish'),
+            (v) => voiceNameMatches(v, MALE_VOICE_HINTS)
+        ]
     };
 
     const AIRCRAFT_TYPES = { "B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777", "B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172", "B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet", "F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter" };
@@ -451,18 +487,19 @@
     function speak(text) {
         if (!voiceEnabled) return;
         startVisualizer();
-        
+
         // Stop any existing speech first
         window.speechSynthesis.cancel();
+        stopSpeechSequence();
 
         currentUtterance = new SpeechSynthesisUtterance(text);
         const persona = document.getElementById('ai-persona-select').value;
-        currentUtterance.rate = persona === 'ATC' ? 1.0 : 1.1;
-        
-        const voices = window.speechSynthesis.getVoices();
-        const v = voices.find(v => v.lang === 'en-GB' || v.name.includes("UK English") || v.name.includes("Daniel"));
-        if (v) currentUtterance.voice = v;
-        
+        currentUtterance.rate = persona === 'ATC' ? 0.95 : persona === 'SPOTTER' ? 1.18 : 1.1;
+        currentUtterance.pitch = persona === 'ATC' ? 1.12 : persona === 'SPOTTER' ? 0.85 : 1.0;
+
+        const voice = selectVoiceForPersona(persona);
+        if (voice) currentUtterance.voice = voice;
+
         // START SEQUENCE
         startCarrier();
         isSpeaking = true;
@@ -486,10 +523,57 @@
     }
     
     function stopSpeechSequence() {
-        isSpeaking = false; 
-        currentUtterance = null; 
-        updateAiStatus("ONLINE", "#00ff41"); 
+        isSpeaking = false;
+        currentUtterance = null;
+        updateAiStatus("ONLINE", "#00ff41");
         stopCarrier();
+    }
+
+    function selectVoiceForPersona(persona) {
+        const voices = window.speechSynthesis.getVoices();
+        const personaFallbacks = persona === 'SPOTTER'
+            ? [
+                (v) => v.lang === 'en-AU' && voiceNameMatches(v, MALE_VOICE_HINTS),
+                (v) => v.lang === 'en-NZ' && voiceNameMatches(v, MALE_VOICE_HINTS),
+                (v) => v.lang === 'en-CA' && voiceNameMatches(v, MALE_VOICE_HINTS),
+                (v) => v.lang === 'en-GB' && voiceNameMatches(v, MALE_VOICE_HINTS)
+            ]
+            : [
+                (v) => v.lang === 'en-GB' && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+                (v) => v.lang && v.lang.startsWith('en-US') && voiceNameMatches(v, FEMALE_VOICE_HINTS)
+            ];
+
+        const fallbacks = [
+            (v) => v.lang === 'en-GB',
+            (v) => (v.name || '').includes('UK English') || (v.name || '').includes('Daniel')
+        ];
+
+        const predicates = [
+            ...(PERSONA_VOICE_PREFERENCES[persona] || []),
+            ...personaFallbacks,
+            ...fallbacks
+        ];
+
+        for (const predicate of predicates) {
+            const match = voices.find(predicate);
+            if (match) return match;
+        }
+
+        // As a final split, keep ATC and SPOTTER apart by gender hints even when only generic English voices exist.
+        const englishVoices = voices.filter((v) => v.lang && v.lang.startsWith('en-'));
+        if (persona === 'ATC') {
+            const female = englishVoices.find((v) => voiceNameMatches(v, FEMALE_VOICE_HINTS));
+            if (female) return female;
+            const nonMale = englishVoices.find((v) => !voiceNameMatches(v, MALE_VOICE_HINTS));
+            if (nonMale) return nonMale;
+        } else if (persona === 'SPOTTER') {
+            const male = englishVoices.find((v) => voiceNameMatches(v, MALE_VOICE_HINTS));
+            if (male) return male;
+            const nonFemale = englishVoices.find((v) => !voiceNameMatches(v, FEMALE_VOICE_HINTS));
+            if (nonFemale) return nonFemale;
+        }
+
+        return englishVoices[0] || null;
     }
 
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
@@ -589,7 +673,7 @@
         voiceEnabled = !voiceEnabled;
         const btn = document.getElementById('tts-mute-toggle');
         const st = document.getElementById('tts-status');
-        if(voiceEnabled) { btn.innerText = "MUTE"; st.innerText = "ACTIVE"; speak("Voice enabled."); } 
+        if(voiceEnabled) { btn.innerText = "MUTE"; st.innerText = "ACTIVE"; speak("Voice enabled."); }
         else { btn.innerText = "UNMUTE"; st.innerText = "MUTED"; window.speechSynthesis.cancel(); }
     });
     document.getElementById('range-increase').addEventListener('click', () => setTimeout(() => { aiProcessing=false; runAiCycle(); }, 500));
@@ -597,9 +681,10 @@
     document.getElementById('ai-persona-select').addEventListener('change', (e) => {
         setCookie("aiPersona", e.target.value, 365);
         window.speechSynthesis.cancel();
+        stopSpeechSequence();
         aiLog('AI', `Persona switched to ${e.target.value}`);
         updateAiStatus("SWITCHING MODE...", "#ffff00");
-        setTimeout(() => { aiProcessing=false; runAiCycle({ forceImmediate: true }); }, 500);
+        setTimeout(() => { aiProcessing=false; runAiCycle({ forceImmediate: true }); }, 100);
     });
 
     function getCurrentRangeLimit() {
