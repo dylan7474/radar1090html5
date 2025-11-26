@@ -347,7 +347,11 @@
         SPOTTER: [
             (v) => v.lang === 'en-IE',
             (v) => v.lang && v.lang.startsWith('en-IE'),
-            (v) => (v.name || '').toLowerCase().includes('irish')
+            (v) => v.lang && v.lang.startsWith('en-AU'),
+            (v) => v.lang && v.lang.startsWith('en-NZ'),
+            (v) => v.lang && v.lang.startsWith('en-CA'),
+            (v) => (v.name || '').toLowerCase().includes('irish'),
+            (v) => (v.name || '').toLowerCase().includes('female')
         ]
     };
 
@@ -474,7 +478,8 @@
 
         currentUtterance = new SpeechSynthesisUtterance(text);
         const persona = document.getElementById('ai-persona-select').value;
-        currentUtterance.rate = persona === 'ATC' ? 1.0 : 1.1;
+        currentUtterance.rate = persona === 'ATC' ? 1.0 : persona === 'SPOTTER' ? 1.12 : 1.1;
+        currentUtterance.pitch = persona === 'SPOTTER' ? 1.1 : 1.0;
 
         const voice = selectVoiceForPersona(persona);
         if (voice) currentUtterance.voice = voice;
@@ -510,11 +515,22 @@
 
     function selectVoiceForPersona(persona) {
         const voices = window.speechSynthesis.getVoices();
+        const personaFallbacks = persona === 'SPOTTER' ? [
+            (v) => v.lang === 'en-AU',
+            (v) => v.lang === 'en-NZ',
+            (v) => v.lang === 'en-CA'
+        ] : [];
+
         const fallbacks = [
             (v) => v.lang === 'en-GB',
             (v) => (v.name || '').includes('UK English') || (v.name || '').includes('Daniel')
         ];
-        const predicates = [...(PERSONA_VOICE_PREFERENCES[persona] || []), ...fallbacks];
+
+        const predicates = [
+            ...(PERSONA_VOICE_PREFERENCES[persona] || []),
+            ...personaFallbacks,
+            ...fallbacks
+        ];
 
         for (const predicate of predicates) {
             const match = voices.find(predicate);
