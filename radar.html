@@ -324,9 +324,15 @@
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
     const PERSONAS = {
-        MILITARY: `Role: forward air defense controller in an active war zone. Tone: tense and tactical. Assume every track could be hostile; declare bogeys/bandits, prioritize threats, and bark out bearing, range, angels/altitude, speed, and heading in order of danger. No pleasantries, just battlefield brevity.`,
-        ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide a single transmission to pilots: lead with conflicts or alerts, give concise traffic advisories with altitudes and headings, and keep phraseology standard. No greetings or questions.`,
-        SPOTTER: `Role: over-caffeinated plane spotter livestreaming to friends. Tone: goofy and meme-ish; make playful analogies and goofy git-style quips while calling out standout liveries/types or wild maneuvers. One energetic sentence only—no instructions or questions.`
+        MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent, assume every track could be hostile. Declare bogeys/bandits, issue shoot/no-shoot vibes, and bark bearing-range-angels-speed-heading in order of threat. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
+        ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide one transmission to pilots: lead with conflicts/alerts, then ICAO-style traffic advisories with callout clock position, distance, altitude, and heading. Keep it standard phraseology, neutral delivery, no jokes, no questions.`,
+        SPOTTER: `Role: over-caffeinated plane spotter livestreaming to friends. Tone: goofy git streamer—riff with memes, playful analogies, and self-aware jokes about liveries, types, or wild turns. Sound like you're narrating a chaotic Twitch chat. One hyped-up sentence only—no instructions or questions.`
+    };
+
+    const PERSONA_STYLE_HINTS = {
+        MILITARY: 'War-zone sitrep. Rapid-fire, terse, brevity codes, threat priority.',
+        ATC: 'Neutral ATC cadence. Standard phraseology, deconfliction first.',
+        SPOTTER: 'Chaotic livestream hype. Jokes, memes, playful commentary.'
     };
 
     const AIRCRAFT_TYPES = { "B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777", "B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172", "B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet", "F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter" };
@@ -591,6 +597,7 @@
     document.getElementById('ai-persona-select').addEventListener('change', (e) => {
         setCookie("aiPersona", e.target.value, 365);
         window.speechSynthesis.cancel();
+        aiLog('AI', `Persona switched to ${e.target.value}`);
         updateAiStatus("SWITCHING MODE...", "#ffff00");
         setTimeout(() => { aiProcessing=false; runAiCycle(); }, 500);
     });
@@ -803,13 +810,15 @@
         const key = document.getElementById('ai-persona-select').value;
         let persona = PERSONAS[key];
         if(key==='ATC' && AI_CONFIG.locationName) persona = persona.replace("{LOCATION}", AI_CONFIG.locationName.toUpperCase());
-        
+
+        const styleHint = PERSONA_STYLE_HINTS[key] || '';
+
         const report = targets.map(p => `${p.id}: Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft.`).join("\n");
         const density = count > 15 ? "HEAVY" : count > 5 ? "MODERATE" : "LIGHT";
-        
+
         const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}.
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
-        TASK: One persona-tuned line under 40 words. Lead with alerts, then nearest contacts with range/altitude/heading or trend. Note overall density briefly. No greetings, filler, or questions.`;
+        TASK: One persona-tuned line under 40 words. Lead with alerts, then nearest contacts with range/altitude/heading or trend. Note overall density briefly. Apply style: ${styleHint}. No greetings, filler, or questions.`;
 
         try {
             const r = await fetchWithTimeout(`${AI_CONFIG.ollamaUrl}/api/chat`, {
@@ -836,7 +845,11 @@
         const x = Math.cos(lat1*Math.PI/180)*Math.sin(lat2*Math.PI/180) - Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos((lon2-lon1)*Math.PI/180);
         return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
     }
-    function setCookie(n, v, d) { document.cookie = n + "=" + (v||"") + "; path=/"; }
+    function setCookie(n, v, d) {
+        const days = Number.isFinite(d) ? d : 30;
+        const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+        document.cookie = `${n}=${v || ''}; path=/; expires=${expires}`;
+    }
     function getCookie(n) { const m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? m[2] : null; }
   </script>
 </body>
