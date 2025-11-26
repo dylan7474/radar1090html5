@@ -974,7 +974,7 @@
 
         const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}.
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
-        ${tasking} Apply style: ${styleHint}. No greetings, filler, or questions.`;
+        ${tasking} Apply style: ${styleHint}. Use plain text only: no emojis, emoticons, decorative symbols, or emphasis characters like asterisks. No greetings, filler, or questions.`;
 
         try {
             aiLog('PROMPT', `[${key}] System: ${persona} | Prompt: ${prompt}`, 'debug');
