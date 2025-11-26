@@ -324,13 +324,13 @@
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
     const PERSONAS = {
-        MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent, assume every track could be hostile. Declare bogeys/bandits, issue shoot/no-shoot vibes, and bark bearing-range-angels-speed-heading in order of threat. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
+        MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent—assume every track could be hostile until cleared. Analyze behaviour for threat patterns (rapid climb/descents, formation spacing, racetrack or holding patterns, base approaches). Declare bogeys/bandits, call intent (hot/cold), and issue shoot/no-shoot vibes. Bark bearing-range-angels-speed-heading and threat priority. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
         ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide one transmission to pilots: lead with conflicts/alerts, then ICAO-style traffic advisories with callout clock position, distance, altitude, and heading. Keep it standard phraseology, neutral delivery, no jokes, no questions.`,
         SPOTTER: `Role: over-caffeinated plane spotter livestreaming to friends. Tone: goofy git streamer—riff with memes, playful analogies, and self-aware jokes about liveries, types, or wild turns. Sound like you're narrating a chaotic Twitch chat. One hyped-up sentence only—no instructions or questions.`
     };
 
     const PERSONA_STYLE_HINTS = {
-        MILITARY: 'War-zone sitrep. Rapid-fire, terse, brevity codes, threat priority.',
+        MILITARY: 'War-zone sitrep. Rapid-fire, terse, brevity codes, threat priority, behaviour analysis.',
         ATC: 'Neutral ATC cadence. Standard phraseology, deconfliction first.',
         SPOTTER: 'Chaotic livestream hype. Jokes, memes, playful commentary.'
     };
@@ -813,14 +813,18 @@
 
         const styleHint = PERSONA_STYLE_HINTS[key] || '';
 
-        const report = targets.map(p => `${p.id}: Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft.`).join("\n");
+        const report = targets.map(p => {
+            const trend = p.vertRate > 500 ? `climbing ${p.vertRate}fpm` : p.vertRate < -500 ? `descending ${Math.abs(p.vertRate)}fpm` : 'level';
+            return `${p.id}: Rng ${p.dist.toFixed(0)}km, Alt ${p.alt}ft, Hdg ${(p.track || 0).toFixed(0)}°, Spd ${Math.round(p.speed || 0)}kts, Trend ${trend}.`;
+        }).join("\n");
         const density = count > 15 ? "HEAVY" : count > 5 ? "MODERATE" : "LIGHT";
 
         const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}.
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
-        TASK: One persona-tuned line under 40 words. Lead with alerts, then nearest contacts with range/altitude/heading or trend. Note overall density briefly. Apply style: ${styleHint}. No greetings, filler, or questions.`;
+        TASK: One persona-tuned line under 40 words. Lead with alerts, then priority contacts with range/altitude/heading/speed/trend and any intent (hot/cold, holding, intercept, formation, base approach). Note overall density and any pattern shifts. Apply style: ${styleHint}. No greetings, filler, or questions.`;
 
         try {
+            aiLog('PROMPT', `[${key}] System: ${persona} | Prompt: ${prompt}`, 'debug');
             const r = await fetchWithTimeout(`${AI_CONFIG.ollamaUrl}/api/chat`, {
                 method: 'POST', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ model: AI_CONFIG.ollamaModel, messages: [{role:"system", content:persona}, {role:"user", content:prompt}], stream: false })
