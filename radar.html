@@ -315,6 +315,8 @@
         weatherData: null
     };
 
+    const AI_COMMENTARY_COOLDOWN_MS = 2 * 60 * 1000;
+
     // Slow hosts can take a while to load or answer Ollama requests; allow up to 120s.
     const OLLAMA_DISCOVERY_TIMEOUT_MS = 120000;
     const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
@@ -734,6 +736,14 @@
         if (isSpeaking) return; // Watchdog prevents overlap
         if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
 
+        const now = Date.now();
+        const sinceLast = now - lastCommentaryAt;
+        if (sinceLast < AI_COMMENTARY_COOLDOWN_MS) {
+            const remainingSeconds = Math.ceil((AI_COMMENTARY_COOLDOWN_MS - sinceLast) / 1000);
+            aiLog('DEBUG', `AI cycle skipped: ${remainingSeconds}s cooldown remaining`, 'debug');
+            return;
+        }
+
         aiProcessing = true;
         try {
             aiLog('DEBUG', `AI cycle start (range=${getCurrentRangeLimit()}km, model=${AI_CONFIG.ollamaModel})`, 'debug');
@@ -766,6 +776,7 @@
                 }
                 aiLog(isAlert ? "ALERT" : "STATUS", comms, isAlert ? 'alert' : 'normal');
                 speak(comms);
+                lastCommentaryAt = Date.now();
             }
         } catch (e) {
             console.error("AI processing failed", e);
@@ -829,3 +840,4 @@
   </script>
 </body>
 </html>
+    let lastCommentaryAt = 0;
