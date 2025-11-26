@@ -324,7 +324,7 @@
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
     const PERSONAS = {
-        MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent—assume every track could be hostile until cleared. Analyze behaviour for threat patterns (rapid climb/descents, formation spacing, racetrack or holding patterns, base approaches). Declare bogeys/bandits, call intent (hot/cold), and issue shoot/no-shoot vibes. Bark bearing-range-angels-speed-heading and threat priority. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
+        MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent—assume every track could be hostile until cleared. Analyze behaviour for threat patterns (rapid climb/descents, formation spacing, racetrack or holding patterns, base approaches). Declare bogeys/bandits, call intent (hot/cold), and issue shoot/no-shoot vibes. Do NOT read out raw transponder stats; focus only on threat calls, intent, and manoeuvre analysis. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
         ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide one transmission to pilots: lead with conflicts/alerts, then ICAO-style traffic advisories with callout clock position, distance, altitude, and heading. Keep it standard phraseology, neutral delivery, no jokes, no questions.`,
         SPOTTER: `Role: over-caffeinated plane spotter livestreaming to friends. Tone: goofy git streamer—riff with memes, playful analogies, and self-aware jokes about liveries, types, or wild turns. Sound like you're narrating a chaotic Twitch chat. One hyped-up sentence only—no instructions or questions.`
     };
@@ -819,9 +819,13 @@
         }).join("\n");
         const density = count > 15 ? "HEAVY" : count > 5 ? "MODERATE" : "LIGHT";
 
+        const tasking = key === 'MILITARY'
+            ? 'TASK: One persona-tuned line under 40 words. Lead with threat calls and pattern/intent analysis (hot/cold, intercept posture, formation spacing, racetrack/holding). Skip raw telemetry (ranges, altitudes, speeds); focus on tactical picture, threat priority, and shifts.'
+            : 'TASK: One persona-tuned line under 40 words. Lead with alerts, then priority contacts with range/altitude/heading/speed/trend and any intent (hot/cold, holding, intercept, formation, base approach). Note overall density and any pattern shifts.';
+
         const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}.
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
-        TASK: One persona-tuned line under 40 words. Lead with alerts, then priority contacts with range/altitude/heading/speed/trend and any intent (hot/cold, holding, intercept, formation, base approach). Note overall density and any pattern shifts. Apply style: ${styleHint}. No greetings, filler, or questions.`;
+        ${tasking} Apply style: ${styleHint}. No greetings, filler, or questions.`;
 
         try {
             aiLog('PROMPT', `[${key}] System: ${persona} | Prompt: ${prompt}`, 'debug');
