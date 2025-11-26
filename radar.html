@@ -378,7 +378,9 @@
     let voiceEnabled = true;
     let currentUtterance = null;
     let isSpeaking = false;
-    let audioContext = null; 
+    let aiVoiceSuppressed = false;
+    let pendingHeldUtterance = null;
+    let audioContext = null;
     let msgHistory = [];
     let visInterval = null;
 
@@ -469,6 +471,49 @@
         });
     }
 
+    function holdAiVoiceForAirband(state) {
+        if (aiVoiceSuppressed) return;
+
+        aiVoiceSuppressed = true;
+        if (isSpeaking) {
+            pendingHeldUtterance = currentUtterance?.text || pendingHeldUtterance;
+            window.speechSynthesis.cancel();
+            stopSpeechSequence();
+        }
+
+        updateAiStatus("HOLDING FOR ATC", "#ffaa00");
+        aiLog('DEBUG', `AI voice paused (${state})`, 'debug');
+    }
+
+    function releaseAiVoiceHold(state) {
+        if (!aiVoiceSuppressed) return;
+
+        aiVoiceSuppressed = false;
+        if (!isSpeaking && !aiProcessing && voiceEnabled) {
+            updateAiStatus("ONLINE", "#00ff41");
+        }
+
+        if (pendingHeldUtterance && voiceEnabled) {
+            const queued = pendingHeldUtterance;
+            pendingHeldUtterance = null;
+            speak(queued);
+        }
+
+        aiLog('DEBUG', `AI voice resumed (${state})`, 'debug');
+    }
+
+    window.addEventListener('audio-signal-state-change', (event) => {
+        const state = event.detail?.state;
+        if (state === 'active') {
+            holdAiVoiceForAirband(state);
+            return;
+        }
+
+        if (state === 'silent' || state === 'unknown' || state === 'muted') {
+            releaseAiVoiceHold(state);
+        }
+    });
+
     // --- AUDIO ENGINE ---
     function startCarrier() {
         if (!audioContext || !voiceEnabled) return;
@@ -486,6 +531,12 @@
     // --- CORE LOGIC ---
     function speak(text) {
         if (!voiceEnabled) return;
+        if (aiVoiceSuppressed) {
+            pendingHeldUtterance = text;
+            aiLog('DEBUG', 'Holding AI voice while airband traffic is active', 'debug');
+            updateAiStatus("HOLDING FOR ATC", "#ffaa00");
+            return;
+        }
         startVisualizer();
 
         // Stop any existing speech first

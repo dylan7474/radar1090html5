@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.54
+**Current Version:** V1.9.55
 
 ---
 
@@ -26,6 +26,7 @@ from any modern browser.
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Live audio status flags when the feed is silent versus carrying radio traffic by sampling the stream through a Web Audio
   analyser, plus a pulsing ring on the radar scope itself so you can see radio activity without the sidebar.
+- AI commentary now automatically pauses and resumes around live airband broadcasts so controller traffic is never talked over.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
 - One-tap "Use My Location" control recenters the radar on your current coordinates and keeps them stored for future visits.
