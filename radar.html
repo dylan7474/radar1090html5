@@ -315,6 +315,9 @@
         weatherData: null
     };
 
+    const COMMENTARY_COOLDOWN_MS = 2 * 60 * 1000; // Enforce 2 minute spacing between spoken updates
+    let lastCommentaryTimestamp = 0;
+
     // Slow hosts can take a while to load or answer Ollama requests; allow up to 120s.
     const OLLAMA_DISCOVERY_TIMEOUT_MS = 120000;
     const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
@@ -734,6 +737,14 @@
         if (isSpeaking) return; // Watchdog prevents overlap
         if (!AI_CONFIG.ollamaModel) { detectModel(); return; }
 
+        const now = Date.now();
+        const timeSinceLast = now - lastCommentaryTimestamp;
+        if (timeSinceLast < COMMENTARY_COOLDOWN_MS) {
+            const remainingSeconds = Math.ceil((COMMENTARY_COOLDOWN_MS - timeSinceLast) / 1000);
+            aiLog('DEBUG', `Cooldown active; ${remainingSeconds}s until next commentary window`, 'debug');
+            return;
+        }
+
         aiProcessing = true;
         try {
             aiLog('DEBUG', `AI cycle start (range=${getCurrentRangeLimit()}km, model=${AI_CONFIG.ollamaModel})`, 'debug');
@@ -758,13 +769,14 @@
                 const alerts = analyzeConditions(inRange);
                 const top = inRange.slice(0, AI_CONFIG.maxPlanes);
                 const comms = await generateCommentary(top, inRange.length, alerts);
-                
+
                 const isAlert = alerts.length > 0 || top[0].dist < 15;
                 if(comms.includes("7700")) {
                     document.body.classList.add('emergency-active');
                     setTimeout(() => document.body.classList.remove('emergency-active'), 5000);
                 }
                 aiLog(isAlert ? "ALERT" : "STATUS", comms, isAlert ? 'alert' : 'normal');
+                lastCommentaryTimestamp = Date.now();
                 speak(comms);
             }
         } catch (e) {
