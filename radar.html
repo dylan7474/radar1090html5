@@ -323,6 +323,11 @@
     const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
+    const voiceNameMatches = (voice, hints) => {
+        const name = (voice.name || '').toLowerCase();
+        return hints.some((hint) => name.includes(hint));
+    };
+
     const PERSONAS = {
         MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent—assume every track could be hostile until cleared. Analyze behaviour for threat patterns (rapid climb/descents, formation spacing, racetrack or holding patterns, base approaches). Declare bogeys/bandits, call intent (hot/cold), and issue shoot/no-shoot vibes. Do NOT read out raw transponder stats; focus only on threat calls, intent, and manoeuvre analysis. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
         ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide one transmission to pilots: lead with conflicts/alerts, then ICAO-style traffic advisories with callout clock position, distance, altitude, and heading. Keep it standard phraseology, neutral delivery, no jokes, no questions.`,
@@ -335,23 +340,34 @@
         SPOTTER: 'Chaotic livestream hype. Jokes, memes, playful commentary.'
     };
 
+    const FEMALE_VOICE_HINTS = ['female', 'woman', 'lady', 'fiona', 'olivia', 'emma', 'amy', 'serena', 'susan'];
+    const MALE_VOICE_HINTS = ['male', 'man', 'guy', 'boy', 'david', 'daniel', 'liam', 'sean', 'declan'];
+
     const PERSONA_VOICE_PREFERENCES = {
         MILITARY: [
             (v) => v.lang === 'en-US',
             (v) => v.lang && v.lang.startsWith('en-US')
         ],
         ATC: [
+            (v) => v.lang === 'en-GB' && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-GB') && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-US') && voiceNameMatches(v, FEMALE_VOICE_HINTS),
+            (v) => voiceNameMatches(v, FEMALE_VOICE_HINTS) && v.lang && v.lang.startsWith('en-'),
             (v) => v.lang === 'en-GB',
             (v) => (v.name || '').includes('UK English') || (v.name || '').includes('Daniel')
         ],
         SPOTTER: [
+            (v) => v.lang === 'en-IE' && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-IE') && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-AU') && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-NZ') && voiceNameMatches(v, MALE_VOICE_HINTS),
+            (v) => v.lang && v.lang.startsWith('en-CA') && voiceNameMatches(v, MALE_VOICE_HINTS),
             (v) => v.lang === 'en-IE',
-            (v) => v.lang && v.lang.startsWith('en-IE'),
             (v) => v.lang && v.lang.startsWith('en-AU'),
             (v) => v.lang && v.lang.startsWith('en-NZ'),
             (v) => v.lang && v.lang.startsWith('en-CA'),
             (v) => (v.name || '').toLowerCase().includes('irish'),
-            (v) => (v.name || '').toLowerCase().includes('female')
+            (v) => voiceNameMatches(v, MALE_VOICE_HINTS)
         ]
     };
 
@@ -478,8 +494,8 @@
 
         currentUtterance = new SpeechSynthesisUtterance(text);
         const persona = document.getElementById('ai-persona-select').value;
-        currentUtterance.rate = persona === 'ATC' ? 1.0 : persona === 'SPOTTER' ? 1.12 : 1.1;
-        currentUtterance.pitch = persona === 'SPOTTER' ? 1.1 : 1.0;
+        currentUtterance.rate = persona === 'ATC' ? 0.98 : persona === 'SPOTTER' ? 1.08 : 1.1;
+        currentUtterance.pitch = persona === 'ATC' ? 1.08 : persona === 'SPOTTER' ? 0.92 : 1.0;
 
         const voice = selectVoiceForPersona(persona);
         if (voice) currentUtterance.voice = voice;
