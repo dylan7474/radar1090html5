@@ -11,9 +11,10 @@ DUMP1090_PORT="8080"
 AUDIO_IP="192.168.50.4"
 AUDIO_PORT="8000"
 
-# 3. AI Servers (For Load Balancing)
-# Add all your Ollama IPs here. Nginx will failover automatically.
-OLLAMA_SERVERS="192.168.50.3 192.168.50.4"
+# 3. AI Servers (Primary vs Backup)
+# .5 is used by default. .3 is used ONLY if .5 is offline.
+OLLAMA_PRIMARY="192.168.50.5"
+OLLAMA_BACKUP="192.168.50.3"
 OLLAMA_PORT="11434"
 
 # Standard Settings
@@ -22,7 +23,7 @@ SOURCE_DIR="radar1090html5"
 PROJECT_NAME="radar-docker"
 # ==========================================
 
-echo ">>> Starting Radar1090 Deployment..."
+echo ">>> Starting Radar1090 Deployment (Primary/Backup Config)..."
 
 # 1. CHECK ENVIRONMENT
 if ! command -v git &> /dev/null; then echo "Error: git is missing."; exit 1; fi
@@ -50,16 +51,13 @@ fi
 # 4. GENERATE LOAD BALANCER CONFIG (NGINX)
 echo ">>> Generating Nginx Load Balancer Config..."
 
-# Build the list of AI servers for Nginx
-UPSTREAM_BLOCK=""
-for server in $OLLAMA_SERVERS; do
-    UPSTREAM_BLOCK="${UPSTREAM_BLOCK}    server $server:$OLLAMA_PORT;\\n"
-done
-
 cat > "$PROJECT_NAME/nginx.conf" <<EOF
 # Define the group of AI servers
 upstream ollama_backend {
-$(echo -e "$UPSTREAM_BLOCK")
+    # The 'backup' flag tells Nginx to ONLY use this server 
+    # if the primary servers are unavailable.
+    server $OLLAMA_PRIMARY:$OLLAMA_PORT;
+    server $OLLAMA_BACKUP:$OLLAMA_PORT backup;
 }
 
 server {
@@ -126,6 +124,7 @@ docker compose down --remove-orphans 2>/dev/null || sudo docker compose down --r
 
 if docker compose up -d 2>/dev/null; then
     echo "SUCCESS! Radar Gateway is active on Port 8080."
+    echo "AI Config: Primary .5, Backup .3"
 else
     echo "Standard start failed. Trying sudo..."
     sudo docker compose up -d
