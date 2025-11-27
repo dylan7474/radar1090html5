@@ -236,30 +236,12 @@
         }
     }
 
-    const OLLAMA_DISCOVERY_STORAGE_KEY = 'ollamaDiscoveryUrl';
-    const OLLAMA_DISCOVERY_PATHS = ['/ollama/discovery', '/ollama/hosts', '/ollama-discovery.json'];
-    const OLLAMA_DISCOVERY_PROBE_TIMEOUT_MS = 5000;
-
     function resolveOllamaCandidates() {
-        const saved = localStorage.getItem('ollamaUrl');
-        const protocol = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
-        const host = window.location.hostname || '127.0.0.1';
-        const primary = `${protocol}//${host}:11434`;
-        const originProxy = `${window.location.origin}/ollama`;
-        const originProxySlash = `${window.location.origin}/ollama/`;
+        const saved = normalizeOllamaBase(localStorage.getItem('ollamaUrl'));
+        const originProxy = normalizeOllamaBase(`${window.location.origin}/ollama`);
+        const candidates = saved ? [saved, originProxy] : [originProxy];
 
-        // If the dashboard is served via HTTPS but Ollama is only available over HTTP,
-        // try the downgraded scheme as a fallback so LAN users still connect.
-        const candidates = saved ? [saved] : [primary];
-        if (!saved && protocol === 'https:') {
-            candidates.push(`http://${host}:11434`);
-        }
-
-        // If lighttpd or another reverse proxy exposes Ollama on the same origin
-        // (e.g., via "/ollama"), try that path to avoid mixed-content or CORS blocks.
-        candidates.push(originProxy, originProxySlash);
-
-        return [...new Set(candidates.map(normalizeOllamaBase))];
+        return [...new Set(candidates.filter(Boolean))];
     }
 
     async function fetchWithTimeout(resource, options = {}, timeoutMs = 8000, label = 'fetch') {
@@ -309,7 +291,7 @@
     const defaultOllamaUrl = ollamaCandidates[0] || null;
 
     const AI_CONFIG = {
-        dump1090Base: "http://192.168.50.100:8080/dump1090-fa/data",
+        dump1090Base: "/dump1090-fa/data",
         ollamaUrl: defaultOllamaUrl,
         ollamaModel: null,
         myLat: 54.531836,
@@ -324,109 +306,9 @@
     let lastCommentaryTimestamp = 0;
 
     // Slow hosts can take a while to load or answer Ollama requests; allow up to 120s.
-    const OLLAMA_DISCOVERY_TIMEOUT_MS = 120000;
+    const OLLAMA_CONNECT_TIMEOUT_MS = 120000;
     const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
-
-    function extractDiscoveryHosts(payload) {
-        const rawList = Array.isArray(payload)
-            ? payload
-            : payload?.endpoints || payload?.hosts || payload?.candidates || [];
-
-        const hosts = [];
-        for (const entry of rawList) {
-            if (typeof entry === 'string') {
-                hosts.push({ url: entry, latencyMs: null });
-                continue;
-            }
-
-            if (entry && typeof entry.url === 'string') {
-                hosts.push({
-                    url: entry.url,
-                    latencyMs: Number.isFinite(entry.latencyMs) ? entry.latencyMs : null,
-                });
-            }
-        }
-        return hosts;
-    }
-
-    async function fetchDiscoveredOllamaEndpoints() {
-        const configured = localStorage.getItem(OLLAMA_DISCOVERY_STORAGE_KEY);
-        const discoveryTargets = configured ? [configured] : [];
-        const locationHost = window.location.hostname || 'localhost';
-        const preferredScheme = window.location.protocol === 'https:' ? 'https' : 'http';
-        for (const path of OLLAMA_DISCOVERY_PATHS) {
-            discoveryTargets.push(`${window.location.origin}${path}`);
-            discoveryTargets.push(`${preferredScheme}://${locationHost}:8081${path}`);
-        }
-
-        const seenTargets = new Set();
-        const discoveredByUrl = new Map();
-
-        for (const target of discoveryTargets) {
-            if (!target || seenTargets.has(target)) continue;
-            seenTargets.add(target);
-
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), OLLAMA_DISCOVERY_PROBE_TIMEOUT_MS);
-            const started = performance.now();
-            try {
-                const resp = await fetch(target, { signal: controller.signal });
-                const elapsed = Math.round(performance.now() - started);
-                aiLog('DEBUG', `Discovery probe ${target} -> status ${resp.status} in ${elapsed}ms`, 'debug');
-                if (!resp.ok) continue;
-
-                const payload = await resp.json();
-                const hosts = extractDiscoveryHosts(payload);
-                hosts.forEach((host) => {
-                    if (!host?.url) return;
-                    const normalizedUrl = normalizeOllamaBase(host.url);
-                    const latencyMs = Number.isFinite(host.latencyMs) ? host.latencyMs : elapsed;
-                    const bestKnown = discoveredByUrl.get(normalizedUrl)?.latencyMs ?? Number.MAX_SAFE_INTEGER;
-
-                    if (latencyMs < bestKnown) {
-                        discoveredByUrl.set(normalizedUrl, { url: normalizedUrl, latencyMs });
-                    }
-                });
-            } catch (err) {
-                aiLog('DEBUG', `Discovery probe failed @ ${target}: ${err.message || err}`, 'debug');
-            } finally {
-                clearTimeout(timer);
-            }
-        }
-
-        return Array.from(discoveredByUrl.values());
-    }
-
-    function mergeOllamaCandidates(base, discovered) {
-        const prioritized = [...discovered]
-            .sort((a, b) => (a.latencyMs ?? Number.MAX_SAFE_INTEGER) - (b.latencyMs ?? Number.MAX_SAFE_INTEGER))
-            .map((entry) => entry.url);
-        const merged = [...prioritized, ...base];
-        return [...new Set(merged.map(normalizeOllamaBase))];
-    }
-
-    let discoveryWarmup = null;
-
-    async function primeDiscoveryCandidates() {
-        if (discoveryWarmup) return discoveryWarmup;
-        discoveryWarmup = (async () => {
-            const discovered = await fetchDiscoveredOllamaEndpoints();
-            if (!discovered.length) {
-                aiLog('DEBUG', 'Discovery found no additional Ollama hosts; using defaults.', 'debug');
-                return ollamaCandidates;
-            }
-
-            ollamaCandidates = mergeOllamaCandidates(ollamaCandidates, discovered);
-            AI_CONFIG.ollamaUrl = ollamaCandidates[0];
-            aiLog('AI', `Discovery found ${discovered.length} Ollama host(s); prioritizing ${AI_CONFIG.ollamaUrl}`, 'normal');
-            return ollamaCandidates;
-        })();
-
-        return discoveryWarmup;
-    }
-
-    primeDiscoveryCandidates();
 
     const voiceNameMatches = (voice, hints) => {
         const name = (voice.name || '').toLowerCase();
@@ -540,7 +422,6 @@
     }
 
     async function startSystem() {
-        await primeDiscoveryCandidates();
         document.getElementById('interaction-overlay').style.display = 'none';
         const radar = document.getElementById('radar');
         if(radar) radar.scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});
@@ -863,9 +744,8 @@
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
-        await primeDiscoveryCandidates();
         if (!ollamaCandidates.length) {
-            aiLog('AI ERROR', 'No Ollama endpoints configured. Set localStorage.ollamaUrl or provide a discovery feed.', 'alert');
+            aiLog('AI ERROR', 'No Ollama endpoints configured. Set localStorage.ollamaUrl or ensure /ollama is proxied to your host.', 'alert');
             updateAiStatus("NO HOSTS", "#ff3333");
             return false;
         }
@@ -877,7 +757,7 @@
             AI_CONFIG.ollamaUrl = candidate;
             aiLog("AI", `Detecting Ollama at ${candidate}`);
             try {
-                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_DISCOVERY_TIMEOUT_MS, `Ollama tags @ ${candidate}`);
+                const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_CONNECT_TIMEOUT_MS, `Ollama tags @ ${candidate}`);
                 if (!r.ok) throw new Error(`Status ${r.status}`);
                 const d = await r.json();
                 if (!d.models || d.models.length === 0) throw new Error('No models available');
@@ -972,7 +852,6 @@
     }
 
     async function runAiSelfTest() {
-        await primeDiscoveryCandidates();
         const candidates = [...ollamaCandidates];
         aiLog('DEBUG', `Self-test: checking ${candidates.length} Ollama candidate(s): ${candidates.join(', ')}`, 'debug');
 

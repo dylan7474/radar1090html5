@@ -21,14 +21,14 @@ const AUDIO_PULSE_PERIOD_MS = 1400;
 const AUDIO_PULSE_RING_COUNT = 3;
 const AUDIO_PULSE_BASE_RADIUS_RATIO = 0.08;
 const AUDIO_PULSE_SPREAD_RATIO = 0.18;
-const APP_VERSION = 'V1.9.61';
+const APP_VERSION = 'V1.9.62';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
 const FREQ_MID = 1200;
 const FREQ_HIGH = 1800;
 const EARTH_RADIUS_KM = 6371;
-const AUDIO_STREAM_URL = 'https://audio.dylanjones.org/airbands';
+const AUDIO_STREAM_URL = '/airbands';
 const AUDIO_MUTED_STORAGE_KEY = 'airbandMuted';
 const AIRCRAFT_DETAILS_STORAGE_KEY = 'showAircraftDetails';
 const BEEP_VOLUME_STORAGE_KEY = 'beepVolumeLevel';
@@ -84,9 +84,15 @@ const TICKER_MIN_DURATION_MS = 5500;
 const TICKER_MAX_DURATION_MS = 11000;
 const TICKER_CHAR_DURATION_MS = 80;
 const ALERT_HIGHLIGHT_DURATION_MS = 30 * 1000;
-const DUMP1090_PROTOCOL = 'https';
-const DUMP1090_HOST = 'dump1090.dylanjones.org';
-const DUMP1090_PORT = 443;
+const deriveDefaultServerConfig = () => {
+  const { protocol, hostname, port } = window.location;
+  const safeProtocol = protocol ? protocol.replace(/:$/, '') : 'https';
+  return {
+    protocol: safeProtocol,
+    host: hostname || 'localhost',
+    port: port || '',
+  };
+};
 const GEOLOCATION_TIMEOUT_MS = 15000;
 // Persist user preferences in cookies so they survive reloads and browser restarts.
 const COOKIE_MAX_AGE_DAYS = 365;
@@ -1051,11 +1057,9 @@ const savedOpenStreetMapOverlayVisible = readBooleanPreference(
 );
 const state = {
   server: {
-    protocol: DUMP1090_PROTOCOL,
-    host: DUMP1090_HOST,
-    port: DUMP1090_PORT,
-    basePath: readCookie('dump1090BasePath') || DEFAULT_BASE_PATH,
-  },
+    ...deriveDefaultServerConfig(),
+    basePath: readCookie('dump1090BasePath') || DEFAULT_BASE_PATH,
+  },
   receiver: {
     lat: receiverLatConfig.value,
     lon: receiverLonConfig.value,
