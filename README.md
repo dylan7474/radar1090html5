@@ -3,7 +3,7 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
-**Current Version:** V1.9.61
+**Current Version:** V1.9.62
 
 ---
 
@@ -21,8 +21,8 @@ from any modern browser.
 
 ## Features
 
-- Retro-styled radar display that connects to a `dump1090-fa` server hosted at `http://192.168.50.100:8080`.
-- Integrated airband audio stream at `http://192.168.50.4:8000/airbands` so you can
+- Retro-styled radar display that connects to a `dump1090-fa` feed served from the same origin (e.g., `/dump1090-fa/data`).
+- Integrated airband audio stream at `/airbands` so you can
   monitor radio traffic alongside aircraft movements without juggling player controls.
 - Live audio status flags when the feed is silent versus carrying radio traffic by sampling the stream through a Web Audio
   analyser, plus a pulsing ring on the radar scope itself so you can see radio activity without the sidebar.
@@ -44,8 +44,7 @@ from any modern browser.
 - Range and base approach controls update their readouts without injecting temporary Live Data messages, keeping that panel focused on operational alerts.
 - Live data ticker surfaces timely operational notes—now repeating automated rapid-descent and inbound-base alerts until the triggering aircraft clears.
 - AI comms log updates live while open so new dump1090 and Ollama events stream in without reopening the modal.
-- Optional Ollama discovery feed merges additional endpoints into the startup scan and prioritizes the lowest-latency host for
-  AI commentary without manual retargeting. A bundled helper can scan your LAN and serve the feed automatically.
+- Same-origin Ollama proxy support at `/ollama` to avoid CORS or mixed-content issues when running behind a reverse proxy.
 - Alerted contacts pulse directly on the radar so the subject aircraft stands out the moment a ticker warning fires.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click the same blip again to spotlight it as the only rendered target while
@@ -71,7 +70,7 @@ from any modern browser.
 1. Clone or download this repository.
 2. Open `index.html` directly in your browser or serve the repo through a static file
    host (e.g. `python3 -m http.server`).
-3. Ensure your `dump1090-fa` instance is reachable at `http://192.168.50.100:8080`.
+3. Ensure your `dump1090-fa` instance is reachable via the same origin (for example by proxying `/dump1090-fa/data`).
 4. The dashboard automatically polls `receiver.json` and `aircraft.json` every five
    seconds once loaded.
 5. Adjust the audio controls as needed. The **Live Audio** section starts the airband
@@ -85,85 +84,16 @@ All user-facing preferences persist automatically. To clear them, delete the
 `baseAlertDistanceKm`, `controlsPanelVisible`, `dataPanelVisible`,
 `dump1090BasePath`) via your browser's developer tools.
 
-The dashboard expects the dump1090-fa JSON endpoints to live at
-`http://192.168.50.100:8080/dump1090-fa/data`. Update the `DUMP1090_*` constants near the
-top of `app.js` if your receiver runs on a different host, port, or protocol.
+The dashboard expects the dump1090-fa JSON endpoints to live at a relative path of
+`/dump1090-fa/data` so it can operate cleanly behind a reverse proxy. Override the base path
+by setting the `dump1090BasePath` cookie if your deployment uses a different subpath.
 
-The AI assistant attempts to reach an Ollama instance on the same host that serves the
-dashboard (defaulting to port `11434`). Override the target by setting `localStorage.ollamaUrl`
-in your browser (for example, `http://192.168.50.4:11434`). If the dashboard is on HTTPS but
-Ollama only exposes HTTP, the app now automatically retries with `http://` so LAN clients can
-still connect. For lighttpd or other reverse proxies, you can also expose Ollama on the same
-origin at `/ollama` (or `/ollama/`) to dodge CORS and mixed-content blocks—the app now tests
-both paths automatically and will log a 404 hint if the proxy rule is missing. Saved custom
-targets are normalized to strip trailing slashes so `/api/*` requests do not double up and
-return 404s under strict proxies. Connection
+The AI assistant now targets an Ollama instance exposed at `${window.location.origin}/ollama`.
+Override the target by setting `localStorage.ollamaUrl` in your browser (for example,
+`https://radar.example.com/ollama`). Saved custom targets are normalized to strip trailing
+slashes so `/api/*` requests do not double up and return 404s under strict proxies. Connection
 attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
 when the browser blocks HTTP calls from an HTTPS dashboard.
-
-If you run a discovery helper that scans your LAN for Ollama instances, point the
-dashboard at it with `localStorage.ollamaDiscoveryUrl` (e.g., `http://192.168.50.5:8081/ollama/discovery`).
-The feed can return either a raw array of URLs or objects that include latency hints:
-
-```json
-[
-  "http://192.168.50.10:11434",
-  { "url": "http://192.168.50.11:11434", "latencyMs": 120 }
-]
-```
-
-### Ollama LAN discovery helper
-
-The repo now includes `ollama-discovery-helper.js`, a tiny Node service that scans a
-configurable subnet for Ollama instances and exposes the discovery feed the dashboard
-expects (`/ollama/discovery`, `/ollama/hosts`, and `/ollama-discovery.json`).
-
-Run it from this repo with:
-
-```bash
-node ollama-discovery-helper.js --cidr 192.168.50.0/24 --port 8081
-```
-
-Key flags and environment overrides:
-
-- `--cidr` / `SCAN_CIDR` – subnet to scan (defaults to the first private interface).
-- `--hosts` / `EXTRA_HOSTS` – comma-separated hosts to probe in addition to the CIDR
-  range.
-- `--ollama-port` / `OLLAMA_PORT` – port that Ollama listens on (default `11434`).
-- `--timeout-ms` / `PROBE_TIMEOUT_MS` – per-host timeout for the `/api/tags` probe.
-- `--max-hosts` / `MAX_HOSTS` – cap the number of hosts per scan (defaults to `512`).
-- `--once` – run one scan and print JSON results instead of starting the server.
-
-The helper rescans every two minutes by default (`--rescan-ms 120000`) so the feed keeps up with
-new or transient Ollama hosts. Each sweep now prints the discovered URLs (with latency hints) and a
-summary of how many hosts were unreachable, instead of logging every failed probe.
-
-Point the dashboard at the helper with a one-time browser console command:
-
-```js
-localStorage.ollamaDiscoveryUrl = 'http://192.168.50.5:8081/ollama/discovery'
-```
-
-The helper returns a JSON object shaped like:
-
-```json
-{
-  "endpoints": [
-    { "url": "http://192.168.50.10:11434", "latencyMs": 85 },
-    { "url": "http://192.168.50.11:11434", "latencyMs": 120 }
-  ],
-  "meta": { "cidr": "192.168.50.0/24", "probed": 256, "durationMs": 3100, "completedAt": "2024-05-01T20:15:12.000Z" }
-}
-```
-
-The radar will merge these endpoints into its candidate list, prioritizing the fastest
-response first.
-
-Any discovery host on the same origin will also be tried automatically at `/ollama/discovery`,
-`/ollama/hosts`, and `/ollama-discovery.json`. The dashboard also probes a helper on
-`<hostname>:8081` by default so the bundled discovery server works without configuration.
-Discovered hosts are merged into the default candidate list and tried from fastest to
-slowest during startup.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 
