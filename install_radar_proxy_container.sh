@@ -1,79 +1,39 @@
 #!/bin/bash
 
 # ==========================================
-# INFRASTRUCTURE CONFIGURATION
+# CONFIGURATION
 # ==========================================
-# 1. Backend Flight Data (Your Pi)
 DUMP1090_IP="192.168.50.100"
 DUMP1090_PORT="8080"
-
-# 2. Backend Audio Server (Your Pi)
 AUDIO_IP="192.168.50.4"
 AUDIO_PORT="8000"
 
-# 3. AI Servers (Primary vs Backup)
-OLLAMA_PRIMARY="192.168.50.5"
-OLLAMA_BACKUP="192.168.50.3"
+# AI SETTINGS
+# We only need the port and the network range to scan
 OLLAMA_PORT="11434"
+SCAN_NET="192.168.50.0/24"
 
-# Repo Settings
+# Standard Config
 REPO_URL="https://github.com/dylan7474/radar1090html5.git"
 SOURCE_DIR="radar1090html5" 
 PROJECT_NAME="radar-docker"
 # ==========================================
 
-echo ">>> STARTING VIRGIN BUILD DEPLOYMENT..."
-echo ">>> This will install Docker, prerequisites, and the Radar Gateway."
+echo ">>> Starting Radar1090 Deployment (Auto-Discovery Edition)..."
 
-# ------------------------------------------
-# STEP 1: SYSTEM PREP & PREREQUISITES
-# ------------------------------------------
-echo ">>> [1/6] Installing Prerequisites (git, curl, rsync)..."
-if command -v apt-get &> /dev/null; then
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq git curl rsync
-elif command -v yum &> /dev/null; then
-    sudo yum install -y -q git curl rsync
-fi
+# --- [GIT & DOWNLOAD] ---
+if ! command -v git &> /dev/null; then echo "Error: git is missing."; exit 1; fi
+if ! command -v docker &> /dev/null; then echo "Error: docker is missing."; exit 1; fi
 
-# ------------------------------------------
-# STEP 2: INSTALL DOCKER (The "Tea Break" Step)
-# ------------------------------------------
-if ! command -v docker &> /dev/null; then
-    echo ">>> [2/6] Docker not found. Installing via get.docker.com..."
-    echo ">>> This usually takes about 5 minutes. Go make a cup of tea! ☕"
-    
-    curl -sSL https://get.docker.com | sudo sh
-
-    echo ">>> Docker installed."
-    echo ">>> Starting Docker service..."
-    sudo systemctl enable --now docker
-    sudo systemctl is-active docker
-
-    echo ">>> Adding user $USER to 'docker' group..."
-    sudo usermod -aG docker "$USER"
-    
-    echo ">>> Verifying install with hello-world..."
-    sudo docker run --rm hello-world
-else
-    echo ">>> [2/6] Docker is already installed. Skipping."
-fi
-
-# ------------------------------------------
-# STEP 3: CLONE REPOSITORY
-# ------------------------------------------
-echo ">>> [3/6] Fetching Source Code..."
 if [ -d "$SOURCE_DIR" ]; then
     echo ">>> Updating existing repo..."
     cd "$SOURCE_DIR" && git pull && cd ..
 else
+    echo ">>> Cloning repository..."
     git clone "$REPO_URL"
 fi
 
-# ------------------------------------------
-# STEP 4: PREPARE FILES
-# ------------------------------------------
-echo ">>> [4/6] Preparing Deployment Directory..."
+# --- [PREPARE FOLDERS] ---
 mkdir -p "$PROJECT_NAME/src"
 if [ -d "$SOURCE_DIR/.git" ]; then
     rsync -av --exclude='.git' "$SOURCE_DIR/" "$PROJECT_NAME/src/" > /dev/null 2>&1 || cp -r "$SOURCE_DIR/"* "$PROJECT_NAME/src/"
@@ -81,17 +41,60 @@ else
     cp -r "$SOURCE_DIR/"* "$PROJECT_NAME/src/"
 fi
 
-# ------------------------------------------
-# STEP 5: GENERATE CONFIGURATION
-# ------------------------------------------
-echo ">>> [5/6] Generating Configuration Files..."
+# --- [CREATE BOOT SCRIPT] ---
+# This script runs INSIDE the container every time it starts.
+echo ">>> Creating Auto-Discovery Boot Script..."
+cat > "$PROJECT_NAME/boot.sh" <<EOF
+#!/bin/sh
 
-# Nginx Config
+echo "------------------------------------------------"
+echo "🔍 STARTING OLLAMA NETWORK DISCOVERY..."
+echo "------------------------------------------------"
+
+# 1. Install Nmap (Network Scanner) cleanly
+# We redirect output to /dev/null to keep logs clean
+apk add --no-cache nmap > /dev/null 2>&1
+
+# 2. Scan the network for port $OLLAMA_PORT
+# -oG - : Output in grepable format
+# grep "/open/" : Find lines where the port is explicitly open
+# awk : Extract just the IP address
+FOUND_IPS=\$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print \$2}')
+
+# 3. Build the Nginx Upstream Config
+UPSTREAM_FILE="/etc/nginx/conf.d/ollama_upstreams.conf"
+echo "upstream ollama_backend {" > \$UPSTREAM_FILE
+
+COUNT=0
+for ip in \$FOUND_IPS; do
+    echo "✅ Found Ollama Server: \$ip"
+    echo "    server \$ip:$OLLAMA_PORT;" >> \$UPSTREAM_FILE
+    COUNT=\$((COUNT+1))
+done
+
+# If no servers found, add a dummy one to prevent Nginx crash (or 127.0.0.1)
+if [ "\$COUNT" -eq "0" ]; then
+    echo "⚠️  NO OLLAMA SERVERS FOUND! Defaulting to localhost (will likely fail 502)."
+    echo "    server 127.0.0.1:$OLLAMA_PORT;" >> \$UPSTREAM_FILE
+fi
+
+echo "}" >> \$UPSTREAM_FILE
+echo "------------------------------------------------"
+echo "🚀 DISCOVERY COMPLETE. Found \$COUNT servers."
+echo "   Starting Nginx..."
+echo "------------------------------------------------"
+
+# 4. Start Nginx
+nginx -g "daemon off;"
+EOF
+
+chmod +x "$PROJECT_NAME/boot.sh"
+
+# --- [GENERATE NGINX TEMPLATE] ---
+echo ">>> Generating Nginx Template..."
 cat > "$PROJECT_NAME/nginx.conf" <<EOF
-upstream ollama_backend {
-    server $OLLAMA_PRIMARY:$OLLAMA_PORT;
-    server $OLLAMA_BACKUP:$OLLAMA_PORT backup;
-}
+# Include the dynamically generated upstream file
+include /etc/nginx/conf.d/ollama_upstreams.conf;
 
 server {
     listen 80;
@@ -117,7 +120,7 @@ server {
         chunked_transfer_encoding off;
     }
 
-    # 4. AI (Load Balanced)
+    # 4. AI (Uses Dynamic Backend)
     location /ollama/ {
         rewrite ^/ollama/(.*) /\$1 break;
         proxy_pass http://ollama_backend;
@@ -128,7 +131,8 @@ server {
 }
 EOF
 
-# Docker Compose
+# --- [GENERATE DOCKER COMPOSE] ---
+echo ">>> Generating Docker Compose..."
 cat > "$PROJECT_NAME/docker-compose.yml" <<EOF
 version: '3.8'
 services:
@@ -139,36 +143,35 @@ services:
     ports:
       - "8080:80"
     volumes:
+      # Website Files
       - ./src:/usr/share/nginx/html:ro
+      # Nginx Main Config
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # The Boot Script
+      - ./boot.sh:/boot.sh:ro
+    # Override startup command to run our scanner first
+    entrypoint: ["/bin/sh", "/boot.sh"]
 EOF
 
-# ------------------------------------------
-# STEP 6: LAUNCH
-# ------------------------------------------
-echo ">>> [6/6] Launching Containers..."
+# --- [PATCH SOURCE CODE] ---
+echo ">>> Patching source code..."
+sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "$PROJECT_NAME/src/app.js"
+sed -i "s|const DUMP1090_HOST = .*;|const DUMP1090_HOST = window.location.hostname;|g" "$PROJECT_NAME/src/app.js"
+sed -i "s|const DUMP1090_PORT = .*;|const DUMP1090_PORT = window.location.port \|\| (window.location.protocol === 'https:' ? 443 : 80);|g" "$PROJECT_NAME/src/app.js"
+sed -i "s|const DUMP1090_PROTOCOL = .*;|const DUMP1090_PROTOCOL = window.location.protocol.replace(':', '');|g" "$PROJECT_NAME/src/app.js"
+sed -i 's|dump1090Base: "http.*",|dump1090Base: "/dump1090-fa/data",|g' "$PROJECT_NAME/src/radar.html"
+sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/ollama",|g' "$PROJECT_NAME/src/radar.html"
+
+# --- [DEPLOY] ---
+echo ">>> Deploying..."
 cd "$PROJECT_NAME"
+docker compose down --remove-orphans 2>/dev/null || sudo docker compose down --remove-orphans 2>/dev/null
 
-# Clean up any old instances
-sudo docker compose down --remove-orphans 2>/dev/null
-
-# Attempt to start. 
-# NOTE: Even though we added the user to the group, the current shell session 
-# doesn't know that yet. We use 'sg' to execute as the new group, or fallback to sudo.
-if sg docker -c "docker compose up -d" 2>/dev/null; then
-    echo ">>> Success! Started as user '$USER' (via new group permissions)."
+if docker compose up -d 2>/dev/null; then
+    echo "SUCCESS! Gateway is scanning for AI servers..."
+    echo "Check the logs to see what it found: docker logs radar1090-gateway"
 else
-    echo ">>> Group refresh pending. Starting via sudo for this session..."
+    echo "Retrying with sudo..."
     sudo docker compose up -d
+    echo "Check the logs: sudo docker logs radar1090-gateway"
 fi
-
-echo ""
-echo "========================================================"
-echo " 🚀 DEPLOYMENT COMPLETE"
-echo "========================================================"
-echo " Access your Radar: http://$(hostname -I | awk '{print $1}'):8080/radar.html"
-echo ""
-echo " NOTE: You have been added to the 'docker' group."
-echo " To run docker commands without 'sudo' in the future,"
-echo " please LOG OUT and LOG BACK IN (or run: newgrp docker)."
-echo "========================================================"
