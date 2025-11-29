@@ -9,9 +9,9 @@ AUDIO_IP="192.168.50.4"
 AUDIO_PORT="8000"
 
 # AI DISCOVERY SETTINGS
-# The container will scan this network and port
 OLLAMA_PORT="11434"
 SCAN_NET="192.168.50.0/24"
+CHECK_INTERVAL="600" # 10 Minutes in seconds
 
 # Repo Settings
 REPO_URL="https://github.com/dylan7474/radar1090html5.git"
@@ -20,7 +20,7 @@ PROJECT_NAME="radar-docker"
 # ==========================================
 
 echo ">>> STARTING SMART RADAR DEPLOYMENT"
-echo ">>> Features: Virgin Install + Network Scanning + Speed Benchmarking"
+echo ">>> Mode: Virgin Install + 10-Min Watchdog + Speed Benchmarking"
 
 # ------------------------------------------
 # STEP 1: INSTALL SYSTEM PREREQUISITES
@@ -79,77 +79,94 @@ fi
 # ------------------------------------------
 # STEP 5: CREATE "SMART" BOOT SCRIPT
 # ------------------------------------------
-echo ">>> [5/7] Creating Performance-Aware Boot Script..."
+echo ">>> [5/7] Creating Watchdog Boot Script..."
 
-# This script runs INSIDE the container on every restart
+# This script runs INSIDE the container
 cat > "$PROJECT_NAME/boot.sh" <<EOF
 #!/bin/sh
-echo "------------------------------------------------"
-echo "🔍 STARTING SMART DISCOVERY & BENCHMARKING..."
-echo "   Target: $SCAN_NET Port: $OLLAMA_PORT"
-echo "------------------------------------------------"
 
-# Install tools (Nmap for scanning, Curl for timing)
+# Configuration Function
+run_scan_and_config() {
+    echo "------------------------------------------------"
+    echo "🔍 WATCHDOG: Scanning for AI Servers..."
+    
+    # 1. Find Candidates
+    RAW_IPS=\$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print \$2}')
+
+    if [ -z "\$RAW_IPS" ]; then
+        echo "⚠️  No servers found. Defaulting to localhost."
+        echo "upstream ollama_backend { server 127.0.0.1:$OLLAMA_PORT; }" > /etc/nginx/ollama_upstreams.conf
+        return
+    fi
+
+    # 2. Benchmark Candidates
+    echo "⏱️  Benchmarking speed..."
+    rm -f /tmp/servers.txt
+    touch /tmp/servers.txt
+
+    for ip in \$RAW_IPS; do
+        # Timeout: 2s connect, 5s total.
+        TIME=\$(curl -o /dev/null -s -w '%{time_total}' --connect-timeout 2 -m 5 "http://\$ip:$OLLAMA_PORT/api/tags")
+        
+        if [ -z "\$TIME" ] || [ "\$TIME" = "0.000" ]; then
+            echo "   ❌ \$ip - Unreachable"
+        else
+            echo "   ⚡ \$ip - \$TIMEs"
+            echo "\$TIME \$ip" >> /tmp/servers.txt
+        fi
+    done
+
+    # 3. Sort (Fastest First)
+    SORTED_SERVERS=\$(sort -n /tmp/servers.txt | awk '{print \$2}')
+
+    # 4. Generate Config
+    UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
+    # Write to temp file first to be atomic
+    TEMP_CONFIG="/tmp/ollama_upstreams.tmp"
+    
+    echo "upstream ollama_backend {" > \$TEMP_CONFIG
+    IS_FIRST=1
+    for ip in \$SORTED_SERVERS; do
+        if [ "\$IS_FIRST" -eq "1" ]; then
+            echo "   🏆 PRIMARY: \$ip"
+            echo "    server \$ip:$OLLAMA_PORT;" >> \$TEMP_CONFIG
+            IS_FIRST=0
+        else
+            echo "   🥈 BACKUP:  \$ip"
+            echo "    server \$ip:$OLLAMA_PORT backup;" >> \$TEMP_CONFIG
+        fi
+    done
+    echo "}" >> \$TEMP_CONFIG
+
+    # Move into place
+    mv \$TEMP_CONFIG \$UPSTREAM_FILE
+    
+    # Reload Nginx if it is running
+    if pgrep nginx > /dev/null; then
+        echo "🔄 Reloading Nginx Configuration..."
+        nginx -s reload
+    fi
+    echo "------------------------------------------------"
+}
+
+# --- MAIN STARTUP ---
+
+# Install tools
 apk add --no-cache nmap curl > /dev/null 2>&1
 
-# 1. Find Candidates
-RAW_IPS=\$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print \$2}')
+# Initial Run (Blocking)
+run_scan_and_config
 
-if [ -z "\$RAW_IPS" ]; then
-    echo "⚠️  No Ollama servers found! Defaulting to localhost."
-    echo "upstream ollama_backend { server 127.0.0.1:$OLLAMA_PORT; }" > /etc/nginx/ollama_upstreams.conf
-    nginx -g "daemon off;"
-    exit 0
-fi
+# Start Watchdog Loop (Background)
+(
+  while true; do
+    sleep $CHECK_INTERVAL
+    run_scan_and_config
+  done
+) &
 
-# 2. Benchmark Candidates
-echo "🏁 Benchmarking Candidates..."
-BEST_IP=""
-BEST_TIME=9999
-
-# Create a temporary list file
-touch /tmp/servers.txt
-
-for ip in \$RAW_IPS; do
-    # Time the connection (connect timeout 2s, max total 5s)
-    # We fetch /api/tags because it is a lightweight read operation
-    TIME=\$(curl -o /dev/null -s -w '%{time_total}' --connect-timeout 2 -m 5 "http://\$ip:$OLLAMA_PORT/api/tags")
-    
-    if [ -z "\$TIME" ] || [ "\$TIME" = "0.000" ]; then
-        echo "   ❌ \$ip - Unreachable/Timeout"
-    else
-        echo "   ⏱️  \$ip - \$TIME seconds"
-        # Append to list:  TIME IP
-        echo "\$TIME \$ip" >> /tmp/servers.txt
-    fi
-done
-
-# 3. Sort by Speed (Fastest First)
-# sort -n sorts numerically
-SORTED_SERVERS=\$(sort -n /tmp/servers.txt | awk '{print \$2}')
-
-# 4. Generate Nginx Config
-# The first server in the sorted list is Primary.
-# All others are marked 'backup'.
-UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
-echo "upstream ollama_backend {" > \$UPSTREAM_FILE
-
-IS_FIRST=1
-for ip in \$SORTED_SERVERS; do
-    if [ "\$IS_FIRST" -eq "1" ]; then
-        echo "   🏆 PRIMARY (Fastest): \$ip"
-        echo "    server \$ip:$OLLAMA_PORT;" >> \$UPSTREAM_FILE
-        IS_FIRST=0
-    else
-        echo "   🥈 BACKUP: \$ip"
-        echo "    server \$ip:$OLLAMA_PORT backup;" >> \$UPSTREAM_FILE
-    fi
-done
-echo "}" >> \$UPSTREAM_FILE
-
-echo "------------------------------------------------"
-echo "🚀 CONFIGURATION COMPLETE. Starting Nginx..."
-echo "------------------------------------------------"
+# Start Nginx (Foreground)
+echo "🚀 Starting Nginx Gateway..."
 nginx -g "daemon off;"
 EOF
 chmod +x "$PROJECT_NAME/boot.sh"
@@ -230,10 +247,12 @@ sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/oll
 echo ">>> [7/7] Launching Containers..."
 cd "$PROJECT_NAME"
 
+# Clean up
 if command -v docker &> /dev/null; then
     sudo docker compose down --remove-orphans 2>/dev/null
 fi
 
+# Launch
 if sg docker -c "docker compose up -d" 2>/dev/null; then
     echo ">>> Success! Started via 'docker' group."
 else
@@ -245,6 +264,6 @@ echo ""
 echo "========================================================"
 echo " 🚀 DEPLOYMENT COMPLETE"
 echo "========================================================"
-echo " The container is now benchmarking your AI servers."
-echo " Check the results: docker logs radar1090-gateway"
+echo " The system will re-scan and optimize every 10 mins."
+echo " Check the live logs: docker logs -f radar1090-gateway"
 echo "========================================================"
