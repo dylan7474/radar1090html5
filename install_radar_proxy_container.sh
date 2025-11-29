@@ -8,9 +8,11 @@ DUMP1090_PORT="8080"
 AUDIO_IP="192.168.50.4"
 AUDIO_PORT="8000"
 
-# AI SETTINGS (Auto-Discovery)
+# AI SERVERS (Primary & Backup)
+# .5 is Primary. If it dies, Nginx switches to .3 automatically.
+OLLAMA_PRIMARY="192.168.50.5"
+OLLAMA_BACKUP="192.168.50.3"
 OLLAMA_PORT="11434"
-SCAN_NET="192.168.50.0/24"
 
 # Repo Settings
 REPO_URL="https://github.com/dylan7474/radar1090html5.git"
@@ -18,52 +20,56 @@ SOURCE_DIR="radar1090html5"
 PROJECT_NAME="radar-docker"
 # ==========================================
 
-echo ">>> STARTING ULTIMATE RADAR DEPLOYMENT..."
-echo "   - Mode: Docker Proxy + Auto-Discovery"
-echo "   - Target: Virgin Build (will install dependencies)"
+echo ">>> STARTING RADAR INSTALLATION (Virgin Build + Crash Fix)..."
 
 # ------------------------------------------
-# STEP 1: SYSTEM PREP & PREREQUISITES
+# STEP 1: INSTALL SYSTEM PREREQUISITES
 # ------------------------------------------
-echo ">>> [1/7] Installing Prerequisites (git, curl, rsync)..."
+echo ">>> [1/7] Checking System Tools..."
 if command -v apt-get &> /dev/null; then
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq git curl rsync
+    # Silence output for cleaner logs
+    if ! command -v git &> /dev/null || ! command -v curl &> /dev/null; then
+        echo "    Installing git, curl, rsync..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq git curl rsync
+    fi
 elif command -v yum &> /dev/null; then
-    sudo yum install -y -q git curl rsync
+    if ! command -v git &> /dev/null; then
+        sudo yum install -y -q git curl rsync
+    fi
 fi
 
 # ------------------------------------------
-# STEP 2: INSTALL DOCKER
+# STEP 2: INSTALL DOCKER (If missing)
 # ------------------------------------------
 if ! command -v docker &> /dev/null; then
-    echo ">>> [2/7] Docker not found. Installing via get.docker.com..."
-    echo ">>> This usually takes about 5 minutes. Go make a cup of tea! ☕"
+    echo ">>> [2/7] Docker not found. Installing..."
+    echo "    (This takes ~5 mins. Time for tea! ☕)"
     
     curl -sSL https://get.docker.com | sudo sh
 
-    echo ">>> Docker installed. Enabling service..."
+    echo "    Enabling Docker..."
     sudo systemctl enable --now docker
     
-    echo ">>> Adding user $USER to 'docker' group..."
+    echo "    Adding user '$USER' to docker group..."
     sudo usermod -aG docker "$USER"
 else
     echo ">>> [2/7] Docker is already installed. Skipping."
 fi
 
 # ------------------------------------------
-# STEP 3: CLONE REPOSITORY
+# STEP 3: GET SOURCE CODE
 # ------------------------------------------
 echo ">>> [3/7] Fetching Source Code..."
 if [ -d "$SOURCE_DIR" ]; then
-    echo ">>> Updating existing repo..."
+    echo "    Updating existing repo..."
     cd "$SOURCE_DIR" && git pull && cd ..
 else
     git clone "$REPO_URL"
 fi
 
 # ------------------------------------------
-# STEP 4: PREPARE FILES
+# STEP 4: PREPARE FOLDERS
 # ------------------------------------------
 echo ">>> [4/7] Preparing Deployment Directory..."
 mkdir -p "$PROJECT_NAME/src"
@@ -74,80 +80,44 @@ else
 fi
 
 # ------------------------------------------
-# STEP 5: CREATE AUTO-DISCOVERY BOOT SCRIPT
+# STEP 5: GENERATE CONFIGURATION (FIXED)
 # ------------------------------------------
-echo ">>> [5/7] Creating Auto-Discovery Boot Logic..."
-cat > "$PROJECT_NAME/boot.sh" <<EOF
-#!/bin/sh
-echo "------------------------------------------------"
-echo "🔍 STARTING OLLAMA NETWORK DISCOVERY..."
-echo "------------------------------------------------"
+echo ">>> [5/7] Generating Crash-Proof Config..."
 
-# Install scanner inside container
-apk add --no-cache nmap > /dev/null 2>&1
-
-# Scan network
-FOUND_IPS=\$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print \$2}')
-
-# Write Nginx Config
-UPSTREAM_FILE="/etc/nginx/conf.d/ollama_upstreams.conf"
-echo "upstream ollama_backend {" > \$UPSTREAM_FILE
-
-COUNT=0
-for ip in \$FOUND_IPS; do
-    echo "✅ Found Ollama Server: \$ip"
-    echo "    server \$ip:$OLLAMA_PORT;" >> \$UPSTREAM_FILE
-    COUNT=\$((COUNT+1))
-done
-
-if [ "\$COUNT" -eq "0" ]; then
-    echo "⚠️  NO OLLAMA SERVERS FOUND! Defaulting to localhost."
-    echo "    server 127.0.0.1:$OLLAMA_PORT;" >> \$UPSTREAM_FILE
-fi
-
-echo "}" >> \$UPSTREAM_FILE
-echo "------------------------------------------------"
-echo "🚀 DISCOVERY COMPLETE. Found \$COUNT servers."
-echo "   Starting Nginx..."
-echo "------------------------------------------------"
-nginx -g "daemon off;"
-EOF
-chmod +x "$PROJECT_NAME/boot.sh"
-
-# ------------------------------------------
-# STEP 6: GENERATE CONFIGURATION
-# ------------------------------------------
-echo ">>> [6/7] Generating Configuration Files..."
-
-# Nginx Template
+# Nginx Config
+# FIX: We write the upstream config inside the main file to avoid 
+# the "Duplicate Upstream" crash caused by include files.
 cat > "$PROJECT_NAME/nginx.conf" <<EOF
-include /etc/nginx/conf.d/ollama_upstreams.conf;
+upstream ollama_backend {
+    server $OLLAMA_PRIMARY:$OLLAMA_PORT;
+    server $OLLAMA_BACKUP:$OLLAMA_PORT backup;
+}
 
 server {
     listen 80;
     server_name localhost;
 
-    # Web App
+    # 1. Web App
     location / {
         root /usr/share/nginx/html;
         index radar.html index.html;
         try_files \$uri \$uri/ =404;
     }
 
-    # Flight Data
+    # 2. Flight Data
     location /dump1090-fa/ {
         proxy_pass http://$DUMP1090_IP:$DUMP1090_PORT/dump1090-fa/;
         proxy_set_header Host \$host;
     }
 
-    # Audio
+    # 3. Audio
     location /airbands {
         proxy_pass http://$AUDIO_IP:$AUDIO_PORT/airbands;
         proxy_buffering off;
         chunked_transfer_encoding off;
     }
 
-    # AI (Auto-Discovered)
+    # 4. AI (Load Balanced)
     location /ollama/ {
         rewrite ^/ollama/(.*) /\$1 break;
         proxy_pass http://ollama_backend;
@@ -171,11 +141,12 @@ services:
     volumes:
       - ./src:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./boot.sh:/boot.sh:ro
-    entrypoint: ["/bin/sh", "/boot.sh"]
 EOF
 
-# Patch Code (Apply Relative Paths)
+# ------------------------------------------
+# STEP 6: PATCH SOURCE CODE
+# ------------------------------------------
+echo ">>> [6/7] Patching Code for Proxy..."
 sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "$PROJECT_NAME/src/app.js"
 sed -i "s|const DUMP1090_HOST = .*;|const DUMP1090_HOST = window.location.hostname;|g" "$PROJECT_NAME/src/app.js"
 sed -i "s|const DUMP1090_PORT = .*;|const DUMP1090_PORT = window.location.port \|\| (window.location.protocol === 'https:' ? 443 : 80);|g" "$PROJECT_NAME/src/app.js"
@@ -189,14 +160,17 @@ sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/oll
 echo ">>> [7/7] Launching Containers..."
 cd "$PROJECT_NAME"
 
-# Cleanup old
-sudo docker compose down --remove-orphans 2>/dev/null
+# Clean up old containers
+if command -v docker &> /dev/null; then
+    sudo docker compose down --remove-orphans 2>/dev/null
+fi
 
-# Attempt launch with group refresh or sudo fallback
+# Attempt launch. 
+# We use 'sg' to run as the 'docker' group immediately without logout.
 if sg docker -c "docker compose up -d" 2>/dev/null; then
     echo ">>> Success! Started via 'docker' group."
 else
-    echo ">>> Starting via sudo..."
+    echo ">>> Group refresh pending. Starting via sudo..."
     sudo docker compose up -d
 fi
 
@@ -205,7 +179,7 @@ echo "========================================================"
 echo " 🚀 DEPLOYMENT COMPLETE"
 echo "========================================================"
 echo " Access your Radar: http://$(hostname -I | awk '{print $1}'):8080/radar.html"
-echo " Discovery: The container is scanning $SCAN_NET for AI..."
+echo " Configuration: Primary AI (.5), Backup AI (.3)"
 echo "========================================================"#!/bin/bash
 
 # ==========================================
@@ -216,9 +190,11 @@ DUMP1090_PORT="8080"
 AUDIO_IP="192.168.50.4"
 AUDIO_PORT="8000"
 
-# AI SETTINGS (Auto-Discovery)
+# AI SERVERS (Primary & Backup)
+# .5 is Primary. If it dies, Nginx switches to .3 automatically.
+OLLAMA_PRIMARY="192.168.50.5"
+OLLAMA_BACKUP="192.168.50.3"
 OLLAMA_PORT="11434"
-SCAN_NET="192.168.50.0/24"
 
 # Repo Settings
 REPO_URL="https://github.com/dylan7474/radar1090html5.git"
@@ -226,52 +202,56 @@ SOURCE_DIR="radar1090html5"
 PROJECT_NAME="radar-docker"
 # ==========================================
 
-echo ">>> STARTING ULTIMATE RADAR DEPLOYMENT..."
-echo "   - Mode: Docker Proxy + Auto-Discovery"
-echo "   - Target: Virgin Build (will install dependencies)"
+echo ">>> STARTING RADAR INSTALLATION (Virgin Build + Crash Fix)..."
 
 # ------------------------------------------
-# STEP 1: SYSTEM PREP & PREREQUISITES
+# STEP 1: INSTALL SYSTEM PREREQUISITES
 # ------------------------------------------
-echo ">>> [1/7] Installing Prerequisites (git, curl, rsync)..."
+echo ">>> [1/7] Checking System Tools..."
 if command -v apt-get &> /dev/null; then
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq git curl rsync
+    # Silence output for cleaner logs
+    if ! command -v git &> /dev/null || ! command -v curl &> /dev/null; then
+        echo "    Installing git, curl, rsync..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq git curl rsync
+    fi
 elif command -v yum &> /dev/null; then
-    sudo yum install -y -q git curl rsync
+    if ! command -v git &> /dev/null; then
+        sudo yum install -y -q git curl rsync
+    fi
 fi
 
 # ------------------------------------------
-# STEP 2: INSTALL DOCKER
+# STEP 2: INSTALL DOCKER (If missing)
 # ------------------------------------------
 if ! command -v docker &> /dev/null; then
-    echo ">>> [2/7] Docker not found. Installing via get.docker.com..."
-    echo ">>> This usually takes about 5 minutes. Go make a cup of tea! ☕"
+    echo ">>> [2/7] Docker not found. Installing..."
+    echo "    (This takes ~5 mins. Time for tea! ☕)"
     
     curl -sSL https://get.docker.com | sudo sh
 
-    echo ">>> Docker installed. Enabling service..."
+    echo "    Enabling Docker..."
     sudo systemctl enable --now docker
     
-    echo ">>> Adding user $USER to 'docker' group..."
+    echo "    Adding user '$USER' to docker group..."
     sudo usermod -aG docker "$USER"
 else
     echo ">>> [2/7] Docker is already installed. Skipping."
 fi
 
 # ------------------------------------------
-# STEP 3: CLONE REPOSITORY
+# STEP 3: GET SOURCE CODE
 # ------------------------------------------
 echo ">>> [3/7] Fetching Source Code..."
 if [ -d "$SOURCE_DIR" ]; then
-    echo ">>> Updating existing repo..."
+    echo "    Updating existing repo..."
     cd "$SOURCE_DIR" && git pull && cd ..
 else
     git clone "$REPO_URL"
 fi
 
 # ------------------------------------------
-# STEP 4: PREPARE FILES
+# STEP 4: PREPARE FOLDERS
 # ------------------------------------------
 echo ">>> [4/7] Preparing Deployment Directory..."
 mkdir -p "$PROJECT_NAME/src"
@@ -282,80 +262,44 @@ else
 fi
 
 # ------------------------------------------
-# STEP 5: CREATE AUTO-DISCOVERY BOOT SCRIPT
+# STEP 5: GENERATE CONFIGURATION (FIXED)
 # ------------------------------------------
-echo ">>> [5/7] Creating Auto-Discovery Boot Logic..."
-cat > "$PROJECT_NAME/boot.sh" <<EOF
-#!/bin/sh
-echo "------------------------------------------------"
-echo "🔍 STARTING OLLAMA NETWORK DISCOVERY..."
-echo "------------------------------------------------"
+echo ">>> [5/7] Generating Crash-Proof Config..."
 
-# Install scanner inside container
-apk add --no-cache nmap > /dev/null 2>&1
-
-# Scan network
-FOUND_IPS=\$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print \$2}')
-
-# Write Nginx Config
-UPSTREAM_FILE="/etc/nginx/conf.d/ollama_upstreams.conf"
-echo "upstream ollama_backend {" > \$UPSTREAM_FILE
-
-COUNT=0
-for ip in \$FOUND_IPS; do
-    echo "✅ Found Ollama Server: \$ip"
-    echo "    server \$ip:$OLLAMA_PORT;" >> \$UPSTREAM_FILE
-    COUNT=\$((COUNT+1))
-done
-
-if [ "\$COUNT" -eq "0" ]; then
-    echo "⚠️  NO OLLAMA SERVERS FOUND! Defaulting to localhost."
-    echo "    server 127.0.0.1:$OLLAMA_PORT;" >> \$UPSTREAM_FILE
-fi
-
-echo "}" >> \$UPSTREAM_FILE
-echo "------------------------------------------------"
-echo "🚀 DISCOVERY COMPLETE. Found \$COUNT servers."
-echo "   Starting Nginx..."
-echo "------------------------------------------------"
-nginx -g "daemon off;"
-EOF
-chmod +x "$PROJECT_NAME/boot.sh"
-
-# ------------------------------------------
-# STEP 6: GENERATE CONFIGURATION
-# ------------------------------------------
-echo ">>> [6/7] Generating Configuration Files..."
-
-# Nginx Template
+# Nginx Config
+# FIX: We write the upstream config inside the main file to avoid 
+# the "Duplicate Upstream" crash caused by include files.
 cat > "$PROJECT_NAME/nginx.conf" <<EOF
-include /etc/nginx/conf.d/ollama_upstreams.conf;
+upstream ollama_backend {
+    server $OLLAMA_PRIMARY:$OLLAMA_PORT;
+    server $OLLAMA_BACKUP:$OLLAMA_PORT backup;
+}
 
 server {
     listen 80;
     server_name localhost;
 
-    # Web App
+    # 1. Web App
     location / {
         root /usr/share/nginx/html;
         index radar.html index.html;
         try_files \$uri \$uri/ =404;
     }
 
-    # Flight Data
+    # 2. Flight Data
     location /dump1090-fa/ {
         proxy_pass http://$DUMP1090_IP:$DUMP1090_PORT/dump1090-fa/;
         proxy_set_header Host \$host;
     }
 
-    # Audio
+    # 3. Audio
     location /airbands {
         proxy_pass http://$AUDIO_IP:$AUDIO_PORT/airbands;
         proxy_buffering off;
         chunked_transfer_encoding off;
     }
 
-    # AI (Auto-Discovered)
+    # 4. AI (Load Balanced)
     location /ollama/ {
         rewrite ^/ollama/(.*) /\$1 break;
         proxy_pass http://ollama_backend;
@@ -379,11 +323,12 @@ services:
     volumes:
       - ./src:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./boot.sh:/boot.sh:ro
-    entrypoint: ["/bin/sh", "/boot.sh"]
 EOF
 
-# Patch Code (Apply Relative Paths)
+# ------------------------------------------
+# STEP 6: PATCH SOURCE CODE
+# ------------------------------------------
+echo ">>> [6/7] Patching Code for Proxy..."
 sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "$PROJECT_NAME/src/app.js"
 sed -i "s|const DUMP1090_HOST = .*;|const DUMP1090_HOST = window.location.hostname;|g" "$PROJECT_NAME/src/app.js"
 sed -i "s|const DUMP1090_PORT = .*;|const DUMP1090_PORT = window.location.port \|\| (window.location.protocol === 'https:' ? 443 : 80);|g" "$PROJECT_NAME/src/app.js"
@@ -397,14 +342,17 @@ sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/oll
 echo ">>> [7/7] Launching Containers..."
 cd "$PROJECT_NAME"
 
-# Cleanup old
-sudo docker compose down --remove-orphans 2>/dev/null
+# Clean up old containers
+if command -v docker &> /dev/null; then
+    sudo docker compose down --remove-orphans 2>/dev/null
+fi
 
-# Attempt launch with group refresh or sudo fallback
+# Attempt launch. 
+# We use 'sg' to run as the 'docker' group immediately without logout.
 if sg docker -c "docker compose up -d" 2>/dev/null; then
     echo ">>> Success! Started via 'docker' group."
 else
-    echo ">>> Starting via sudo..."
+    echo ">>> Group refresh pending. Starting via sudo..."
     sudo docker compose up -d
 fi
 
@@ -413,5 +361,5 @@ echo "========================================================"
 echo " 🚀 DEPLOYMENT COMPLETE"
 echo "========================================================"
 echo " Access your Radar: http://$(hostname -I | awk '{print $1}'):8080/radar.html"
-echo " Discovery: The container is scanning $SCAN_NET for AI..."
+echo " Configuration: Primary AI (.5), Backup AI (.3)"
 echo "========================================================"
