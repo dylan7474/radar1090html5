@@ -1,30 +1,38 @@
 #!/bin/bash
+set -euo pipefail
+umask 077
 
 # ==========================================
 # INFRASTRUCTURE CONFIGURATION
 # ==========================================
-DUMP1090_IP="192.168.50.100"
-DUMP1090_PORT="8080"
-AUDIO_IP="192.168.50.4"
-AUDIO_PORT="8000"
+DUMP1090_IP="${DUMP1090_IP:-192.168.50.100}"
+DUMP1090_PORT="${DUMP1090_PORT:-8080}"
+AUDIO_IP="${AUDIO_IP:-192.168.50.4}"
+AUDIO_PORT="${AUDIO_PORT:-8000}"
 
 # --- [CHANGE THIS PORT HERE] ---
 # The port you want to use to access the website
-GATEWAY_PORT="8090"
+GATEWAY_PORT="${GATEWAY_PORT:-8090}"
+
+# Bind the published port to localhost by default so Cloudflare Zero Trust tunnels
+# can expose it without leaking the service to the LAN. Set to "0.0.0.0" if you
+# intentionally want the gateway reachable outside the tunnel.
+HOST_BIND_IP="${HOST_BIND_IP:-127.0.0.1}"
 
 # AI DISCOVERY SETTINGS
-OLLAMA_PORT="11434"
-SCAN_NET="192.168.50.0/24"
-CHECK_INTERVAL="600" # 10 Minutes
+OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+SCAN_NET="${SCAN_NET:-192.168.50.0/24}"
+CHECK_INTERVAL="${CHECK_INTERVAL:-600}" # 10 Minutes
 
 # Repo Settings
-REPO_URL="https://github.com/dylan7474/radar1090html5.git"
-SOURCE_DIR="radar1090html5" 
-PROJECT_NAME="radar-docker"
+REPO_URL="${REPO_URL:-https://github.com/dylan7474/radar1090html5.git}"
+SOURCE_DIR="${SOURCE_DIR:-radar1090html5}"
+PROJECT_NAME="${PROJECT_NAME:-radar-docker}"
 # ==========================================
 
 echo ">>> STARTING SMART RADAR DEPLOYMENT"
 echo ">>> Target Port: $GATEWAY_PORT"
+echo ">>> Host Bind: $HOST_BIND_IP (set HOST_BIND_IP=0.0.0.0 to allow LAN access)"
 
 # ------------------------------------------
 # STEP 1: INSTALL SYSTEM PREREQUISITES
@@ -172,6 +180,12 @@ include /etc/nginx/ollama_upstreams.conf;
 server {
     listen 80;
     server_name localhost;
+    server_tokens off;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    add_header Permissions-Policy "geolocation=(self)" always;
 
     location / {
         root /usr/share/nginx/html;
@@ -182,10 +196,16 @@ server {
     location /dump1090-fa/ {
         proxy_pass http://$DUMP1090_IP:$DUMP1090_PORT/dump1090-fa/;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     location /airbands {
         proxy_pass http://$AUDIO_IP:$AUDIO_PORT/airbands;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_buffering off;
         chunked_transfer_encoding off;
     }
@@ -193,6 +213,9 @@ server {
     location /ollama/ {
         rewrite ^/ollama/(.*) /\$1 break;
         proxy_pass http://ollama_backend;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_buffering off;
         proxy_read_timeout 300s;
         proxy_connect_timeout 5s;
@@ -209,7 +232,7 @@ services:
     container_name: radar1090-gateway
     restart: always
     ports:
-      - "$GATEWAY_PORT:80"
+      - "$HOST_BIND_IP:$GATEWAY_PORT:80"
     volumes:
       - ./src:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro

@@ -45,6 +45,7 @@ from any modern browser.
 - Live data ticker surfaces timely operational notes—now repeating automated rapid-descent and inbound-base alerts until the triggering aircraft clears.
 - AI comms log updates live while open so new dump1090 and Ollama events stream in without reopening the modal.
 - Same-origin Ollama proxy support at `/ollama` to avoid CORS or mixed-content issues when running behind a reverse proxy.
+- Hardened Dockerized reverse proxy deployment script tuned for Cloudflare Zero Trust; it binds to localhost by default to keep the gateway off the LAN while the tunnel publishes the service.
 - Alerted contacts pulse directly on the radar so the subject aircraft stands out the moment a ticker warning fires.
 - Click any aircraft blip to lock the sidebar readout to that contact.
   Click the same blip again to spotlight it as the only rendered target while
@@ -113,6 +114,26 @@ required. Ensure the device can briefly reach the public tile servers when you o
 picker so the basemap can load beneath the draggable marker; the dashboard automatically
 cycles through alternate Leaflet CDNs if the first script request is blocked by a
 firewall.
+
+### Containerized reverse proxy for Cloudflare Zero Trust
+
+Run `install_radar_proxy_container.sh` when you want a hardened gateway that Cloudflare Zero Trust can publish via an Access policy or tunnel:
+
+1. Ensure Docker and Docker Compose are available on the host. The script installs them automatically on Debian- or Red Hat-based systems if they are missing.
+2. Set any required overrides as environment variables before running the script:
+   - `HOST_BIND_IP=127.0.0.1` (default) keeps the container port bound to localhost so only the Cloudflare tunnel can reach it. Set `HOST_BIND_IP=0.0.0.0` if you intentionally want LAN access during testing.
+   - `GATEWAY_PORT` controls the published port (defaults to `8090`).
+   - `DUMP1090_IP`, `DUMP1090_PORT`, `AUDIO_IP`, and `AUDIO_PORT` point the proxy at your upstream services.
+3. Execute the installer:
+
+   ```bash
+   chmod +x install_radar_proxy_container.sh
+   ./install_radar_proxy_container.sh
+   ```
+
+4. Create or update your Cloudflare Tunnel to forward traffic to `http://localhost:${GATEWAY_PORT}` on the host. Apply your Cloudflare Access policy to the tunnel hostname so only authorized users reach the gateway.
+
+The generated `nginx.conf` injects security headers, forwards client IP details to upstream services, and proxies dump1090-fa, airband audio, and Ollama through a single origin that matches the dashboard URLs.
 
 Controlled airspace footprints are also defined in [`config.js`](config.js) via the
 `CONTROLLED_AIRSPACES` array. Each entry needs an ICAO code, human-friendly name,
