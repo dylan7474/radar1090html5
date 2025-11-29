@@ -8,10 +8,14 @@ DUMP1090_PORT="8080"
 AUDIO_IP="192.168.50.4"
 AUDIO_PORT="8000"
 
+# --- [CHANGE THIS PORT HERE] ---
+# The port you want to use to access the website
+GATEWAY_PORT="8090"
+
 # AI DISCOVERY SETTINGS
 OLLAMA_PORT="11434"
 SCAN_NET="192.168.50.0/24"
-CHECK_INTERVAL="600" # 10 Minutes in seconds
+CHECK_INTERVAL="600" # 10 Minutes
 
 # Repo Settings
 REPO_URL="https://github.com/dylan7474/radar1090html5.git"
@@ -20,7 +24,7 @@ PROJECT_NAME="radar-docker"
 # ==========================================
 
 echo ">>> STARTING SMART RADAR DEPLOYMENT"
-echo ">>> Mode: Virgin Install + 10-Min Watchdog + Speed Benchmarking"
+echo ">>> Target Port: $GATEWAY_PORT"
 
 # ------------------------------------------
 # STEP 1: INSTALL SYSTEM PREREQUISITES
@@ -81,7 +85,6 @@ fi
 # ------------------------------------------
 echo ">>> [5/7] Creating Watchdog Boot Script..."
 
-# This script runs INSIDE the container
 cat > "$PROJECT_NAME/boot.sh" <<EOF
 #!/bin/sh
 
@@ -90,7 +93,6 @@ run_scan_and_config() {
     echo "------------------------------------------------"
     echo "🔍 WATCHDOG: Scanning for AI Servers..."
     
-    # 1. Find Candidates
     RAW_IPS=\$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print \$2}')
 
     if [ -z "\$RAW_IPS" ]; then
@@ -99,13 +101,11 @@ run_scan_and_config() {
         return
     fi
 
-    # 2. Benchmark Candidates
     echo "⏱️  Benchmarking speed..."
     rm -f /tmp/servers.txt
     touch /tmp/servers.txt
 
     for ip in \$RAW_IPS; do
-        # Timeout: 2s connect, 5s total.
         TIME=\$(curl -o /dev/null -s -w '%{time_total}' --connect-timeout 2 -m 5 "http://\$ip:$OLLAMA_PORT/api/tags")
         
         if [ -z "\$TIME" ] || [ "\$TIME" = "0.000" ]; then
@@ -116,12 +116,9 @@ run_scan_and_config() {
         fi
     done
 
-    # 3. Sort (Fastest First)
     SORTED_SERVERS=\$(sort -n /tmp/servers.txt | awk '{print \$2}')
 
-    # 4. Generate Config
     UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
-    # Write to temp file first to be atomic
     TEMP_CONFIG="/tmp/ollama_upstreams.tmp"
     
     echo "upstream ollama_backend {" > \$TEMP_CONFIG
@@ -138,10 +135,8 @@ run_scan_and_config() {
     done
     echo "}" >> \$TEMP_CONFIG
 
-    # Move into place
     mv \$TEMP_CONFIG \$UPSTREAM_FILE
     
-    # Reload Nginx if it is running
     if pgrep nginx > /dev/null; then
         echo "🔄 Reloading Nginx Configuration..."
         nginx -s reload
@@ -150,14 +145,9 @@ run_scan_and_config() {
 }
 
 # --- MAIN STARTUP ---
-
-# Install tools
 apk add --no-cache nmap curl > /dev/null 2>&1
-
-# Initial Run (Blocking)
 run_scan_and_config
 
-# Start Watchdog Loop (Background)
 (
   while true; do
     sleep $CHECK_INTERVAL
@@ -165,7 +155,6 @@ run_scan_and_config
   done
 ) &
 
-# Start Nginx (Foreground)
 echo "🚀 Starting Nginx Gateway..."
 nginx -g "daemon off;"
 EOF
@@ -178,34 +167,29 @@ echo ">>> [6/7] Generating Nginx & Docker Config..."
 
 # Nginx Template
 cat > "$PROJECT_NAME/nginx.conf" <<EOF
-# Load the dynamically generated upstream file
 include /etc/nginx/ollama_upstreams.conf;
 
 server {
     listen 80;
     server_name localhost;
 
-    # 1. Web App
     location / {
         root /usr/share/nginx/html;
         index radar.html index.html;
         try_files \$uri \$uri/ =404;
     }
 
-    # 2. Flight Data
     location /dump1090-fa/ {
         proxy_pass http://$DUMP1090_IP:$DUMP1090_PORT/dump1090-fa/;
         proxy_set_header Host \$host;
     }
 
-    # 3. Audio
     location /airbands {
         proxy_pass http://$AUDIO_IP:$AUDIO_PORT/airbands;
         proxy_buffering off;
         chunked_transfer_encoding off;
     }
 
-    # 4. AI (Smart Load Balanced)
     location /ollama/ {
         rewrite ^/ollama/(.*) /\$1 break;
         proxy_pass http://ollama_backend;
@@ -216,7 +200,7 @@ server {
 }
 EOF
 
-# Docker Compose
+# Docker Compose (Updated with GATEWAY_PORT variable)
 cat > "$PROJECT_NAME/docker-compose.yml" <<EOF
 version: '3.8'
 services:
@@ -225,7 +209,7 @@ services:
     container_name: radar1090-gateway
     restart: always
     ports:
-      - "8080:80"
+      - "$GATEWAY_PORT:80"
     volumes:
       - ./src:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -233,7 +217,7 @@ services:
     entrypoint: ["/bin/sh", "/boot.sh"]
 EOF
 
-# Patch Code (Relative Paths)
+# Patch Code
 sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "$PROJECT_NAME/src/app.js"
 sed -i "s|const DUMP1090_HOST = .*;|const DUMP1090_HOST = window.location.hostname;|g" "$PROJECT_NAME/src/app.js"
 sed -i "s|const DUMP1090_PORT = .*;|const DUMP1090_PORT = window.location.port \|\| (window.location.protocol === 'https:' ? 443 : 80);|g" "$PROJECT_NAME/src/app.js"
@@ -247,12 +231,10 @@ sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/oll
 echo ">>> [7/7] Launching Containers..."
 cd "$PROJECT_NAME"
 
-# Clean up
 if command -v docker &> /dev/null; then
     sudo docker compose down --remove-orphans 2>/dev/null
 fi
 
-# Launch
 if sg docker -c "docker compose up -d" 2>/dev/null; then
     echo ">>> Success! Started via 'docker' group."
 else
@@ -264,6 +246,5 @@ echo ""
 echo "========================================================"
 echo " 🚀 DEPLOYMENT COMPLETE"
 echo "========================================================"
-echo " The system will re-scan and optimize every 10 mins."
-echo " Check the live logs: docker logs -f radar1090-gateway"
+echo " Access your Radar: http://$(hostname -I | awk '{print $1}'):$GATEWAY_PORT/radar.html"
 echo "========================================================"
