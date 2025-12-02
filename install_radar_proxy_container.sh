@@ -6,7 +6,7 @@ set -euo pipefail
 # ==========================================
 if [ "$#" -ne 1 ]; then
     echo "❌ Error: You must provide a password for the Radio Stream."
-    echo "Usage: sudo ./deploy_all_v13.sh 'YourPasswordHere'"
+    echo "Usage: sudo ./deploy_all_v14.sh 'YourPasswordHere'"
     exit 1
 fi
 RAW_PASS="$1"
@@ -66,7 +66,7 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING MASTER DEPLOYMENT (V13 - ZRAM Fix)"
+echo ">>> STARTING MASTER DEPLOYMENT (V14 - ZRAM Force Reset)"
 echo ">>> Host IP: $CURRENT_IP"
 
 # ==========================================
@@ -106,7 +106,7 @@ else
     echo "    ✅ Docker is already installed."
 fi
 
-# Install Tools
+# Install Tools (including zram-tools)
 sudo apt-get install -y -qq \
   git build-essential cmake libmp3lame-dev libshout3-dev \
   libasound2-dev ffmpeg rtl-sdr pkg-config jq \
@@ -116,7 +116,7 @@ sudo apt-get install -y -qq \
 echo "✅ Dependencies Installed."
 
 # ==========================================
-# PHASE 1.5: SWAP & ZRAM CONFIGURATION (FIXED)
+# PHASE 1.5: SWAP & ZRAM CONFIGURATION (FORCE RESET)
 # ==========================================
 echo ">>> [2/7] Optimizing Memory (ZRAM)..."
 
@@ -128,28 +128,27 @@ if systemctl is-active --quiet dphys-swapfile; then
     sudo rm -f /var/swap
 fi
 
-# 2. Fix ZRAM Config (Use PERCENT, not ALLOCATION)
-echo "    ⚡ Configuring ZRAM Config..."
+# 2. FORCE RESET ZRAM (The Fix)
+echo "    ♻️  Resetting ZRAM to clear locks..."
+sudo systemctl stop zramswap 2>/dev/null || true
+sudo swapoff /dev/zram0 2>/dev/null || true
+# Try to unload module to clear "Device busy" errors
+sudo modprobe -r zram 2>/dev/null || true
 
-# We completely rewrite the config file to ensure it's correct
+# 3. Write Config
+echo "    ⚡ Writing ZRAM Config..."
 sudo tee /etc/default/zramswap > /dev/null <<EOF
 ALGO=lz4
 PERCENT=60
 EOF
 
-# 3. Force Load Kernel Module (Fixes 'control process exited' error)
-if ! lsmod | grep -q zram; then
-    echo "    ⚡ Loading zram kernel module..."
-    sudo modprobe zram
-    echo "zram" | sudo tee -a /etc/modules
-fi
-
-# 4. Tune Swappiness
+# 4. Load Module & Tune
+sudo modprobe zram
 echo "vm.swappiness=100" | sudo tee /etc/sysctl.d/99-zram.conf > /dev/null
 sudo sysctl -p /etc/sysctl.d/99-zram.conf > /dev/null
 
-# 5. Restart Service
-sudo systemctl daemon-reload
+# 5. Start Service
+echo "    🚀 Starting ZRAM Service..."
 sudo systemctl restart zramswap
 
 if systemctl is-active --quiet zramswap; then
@@ -423,9 +422,8 @@ fi
 
 echo ""
 echo "========================================================"
-echo " 🚀 SYSTEM FULLY OPERATIONAL (ZRAM + Low-RAM Mode)"
+echo " 🚀 SYSTEM FULLY OPERATIONAL (ZRAM Reset + Optimized)"
 echo "========================================================"
 echo " 🌍 Gateway: http://$CURRENT_IP/"
-echo " ⚡ Memory:  Enhanced with ZRAM (Compressed)"
-echo " 🛡️  Logging: DISABLED (Safe for SD Card)"
+echo " ♻️  ZRAM:    Reset & Active (Safe Memory Config)"
 echo "========================================================"
