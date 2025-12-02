@@ -1,105 +1,235 @@
 #!/bin/bash
 set -euo pipefail
-umask 077
 
 # ==========================================
-# INFRASTRUCTURE CONFIGURATION
+# 🔐 ARGUMENT CHECK: PASSWORD REQUIRED
 # ==========================================
-DUMP1090_IP="${DUMP1090_IP:-192.168.50.100}"
-DUMP1090_PORT="${DUMP1090_PORT:-8080}"
-AUDIO_IP="${AUDIO_IP:-192.168.50.4}"
-AUDIO_PORT="${AUDIO_PORT:-8000}"
+if [ "$#" -ne 1 ]; then
+    echo "❌ Error: You must provide a password for the Radio Stream."
+    echo "Usage: sudo ./deploy_all_v10.sh 'YourPasswordHere'"
+    exit 1
+fi
+RAW_PASS="$1"
 
-# --- [CHANGE THIS PORT HERE] ---
-# The port you want to use to access the website
-GATEWAY_PORT="${GATEWAY_PORT:-8090}"
-
-# Bind the published port to localhost by default so Cloudflare Zero Trust tunnels
-# can expose it without leaking the service to the LAN. Set to "0.0.0.0" if you
-# intentionally want the gateway reachable outside the tunnel.
-HOST_BIND_IP="${HOST_BIND_IP:-127.0.0.1}"
-
-# AI DISCOVERY SETTINGS
-OLLAMA_PORT="${OLLAMA_PORT:-11434}"
-SCAN_NET="${SCAN_NET:-192.168.50.0/24}"
-CHECK_INTERVAL="${CHECK_INTERVAL:-600}" # 10 Minutes
-
-# Repo Settings
-REPO_URL="${REPO_URL:-https://github.com/dylan7474/radar1090html5.git}"
-SOURCE_DIR="${SOURCE_DIR:-radar1090html5}"
-PROJECT_NAME="${PROJECT_NAME:-radar-docker}"
+# ==========================================
+# 🛠️ CONFIGURATION VARIABLES
 # ==========================================
 
-echo ">>> STARTING SMART RADAR DEPLOYMENT"
-echo ">>> Target Port: $GATEWAY_PORT"
-echo ">>> Host Bind: $HOST_BIND_IP (set HOST_BIND_IP=0.0.0.0 to allow LAN access)"
+# --- REMOTE RADAR SETTINGS ---
+DUMP1090_IP="192.168.50.100"
+DUMP1090_PORT="8080"
 
-# ------------------------------------------
-# STEP 1: INSTALL SYSTEM PREREQUISITES
-# ------------------------------------------
-echo ">>> [1/7] Checking System Tools..."
-if command -v apt-get &> /dev/null; then
-    if ! command -v git &> /dev/null || ! command -v curl &> /dev/null; then
-        echo "    Installing git, curl, rsync..."
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq git curl rsync
-    fi
-elif command -v yum &> /dev/null; then
-    if ! command -v git &> /dev/null; then
-        sudo yum install -y -q git curl rsync
-    fi
+# --- LOCAL AUDIO SETTINGS ---
+AUDIO_IP="127.0.0.1"
+AUDIO_PORT="8000"
+
+# --- AI DISCOVERY SETTINGS ---
+OLLAMA_PORT="11434"
+SCAN_NET="192.168.50.0/24"
+CHECK_INTERVAL="600"
+BENCHMARK_MODEL="tinydolphin"
+
+# --- SYSTEM SETTINGS ---
+GATEWAY_PORT="80" 
+ICECAST_PASS="$RAW_PASS"
+AIRBAND_REPO="https://github.com/szpajder/RTLSDR-Airband.git"
+AIRBAND_DIR="rtl_airband"
+
+# Deployment Config Folder (Not the web source)
+RUNTIME_DIR="radar-runtime"
+
+# --- Sanitization ---
+SYSTEMD_SAFE_PASS=${RAW_PASS//$/$$}
+SED_SAFE_PASS=$(echo "$RAW_PASS" | sed 's/|/\\|/g' | sed 's/&/\\&/g')
+CURRENT_USER=${SUDO_USER:-$USER}
+CURRENT_GROUP=$(id -gn $CURRENT_USER)
+CURRENT_IP=$(hostname -I | awk '{print $1}')
+
+# ==========================================
+# 🔄 HELPER FUNCTIONS
+# ==========================================
+function run_with_retry() {
+    local n=1
+    local max=5
+    local delay=5
+    while true; do
+        "$@" && break || {
+            if [[ $n -lt $max ]]; then
+                ((n++))
+                echo "⚠️ Command failed. Retrying in $delay sec (Attempt $n/$max)..."
+                sleep $delay;
+            else
+                echo "❌ Command failed after $max attempts."
+                return 1
+            fi
+        }
+    done
+}
+
+echo ">>> STARTING MASTER DEPLOYMENT (Self-Contained / Direct Mount)"
+echo ">>> Host IP: $CURRENT_IP"
+
+# ==========================================
+# PHASE 1: PREPARATION & DEPENDENCIES
+# ==========================================
+echo ">>> [1/6] Preparing System..."
+
+# Sanity Check: Ensure we are in the repo
+if [ ! -f "radar.html" ]; then
+    echo "❌ Error: radar.html not found in current directory!"
+    echo "   Please run this script from inside the 'radar1090html5' repository."
+    exit 1
 fi
 
-# ------------------------------------------
-# STEP 2: INSTALL DOCKER (If missing)
-# ------------------------------------------
+sudo systemctl stop lighttpd apache2 nginx 2>/dev/null || true
+sudo systemctl disable lighttpd apache2 nginx 2>/dev/null || true
+
+if [ -f /etc/apt/sources.list.d/docker.list ]; then
+    sudo rm /etc/apt/sources.list.d/docker.list
+fi
+
+run_with_retry sudo apt-get update -qq
+
 if ! command -v docker &> /dev/null; then
-    echo ">>> [2/7] Docker not found. Installing..."
-    echo "    (This takes ~5 mins. Go make a cup of tea! ☕)"
-    
-    curl -sSL https://get.docker.com | sudo sh
-
-    echo "    Enabling Docker..."
+    echo "    Docker not found. Installing manually..."
+    sudo apt-get install -y ca-certificates curl gnupg
+    sudo install -m 0755 -d /etc/apt/keyrings
+    if [ -f /etc/apt/keyrings/docker.asc ]; then sudo rm /etc/apt/keyrings/docker.asc; fi
+    run_with_retry curl -fsSL https://download.docker.com/linux/raspbian/gpg -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/raspbian bookworm stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    run_with_retry sudo apt-get update -qq
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     sudo systemctl enable --now docker
-    sudo usermod -aG docker "$USER"
+    sudo usermod -aG docker "$CURRENT_USER"
 else
-    echo ">>> [2/7] Docker is already installed. Skipping."
+    echo "    ✅ Docker is already installed."
 fi
 
-# ------------------------------------------
-# STEP 3: GET SOURCE CODE
-# ------------------------------------------
-echo ">>> [3/7] Fetching Source Code..."
-if [ -d "$SOURCE_DIR" ]; then
-    echo "    Updating existing repo..."
-    cd "$SOURCE_DIR" && git pull && cd ..
-else
-    git clone "$REPO_URL"
+sudo apt-get install -y -qq \
+  git build-essential cmake libmp3lame-dev libshout3-dev \
+  libasound2-dev ffmpeg rtl-sdr pkg-config jq \
+  icecast2 netcat-openbsd libconfig++-dev librtlsdr-dev libfftw3-dev liquidsoap curl
+
+echo "✅ Dependencies Installed."
+
+# ==========================================
+# PHASE 2: CONFIGURE ICECAST & AUDIO
+# ==========================================
+echo ">>> [2/6] Configuring Icecast..."
+
+if ! grep -q "<source-password>$SED_SAFE_PASS</source-password>" /etc/icecast2/icecast.xml; then
+    sudo sed -i "s|<source-password>.*</source-password>|<source-password>$SED_SAFE_PASS</source-password>|" /etc/icecast2/icecast.xml
+    sudo sed -i "s|<relay-password>.*</relay-password>|<relay-password>$SED_SAFE_PASS</relay-password>|" /etc/icecast2/icecast.xml
+    sudo sed -i "s|<admin-password>.*</admin-password>|<admin-password>$SED_SAFE_PASS</admin-password>|" /etc/icecast2/icecast.xml
 fi
 
-# ------------------------------------------
-# STEP 4: PREPARE FOLDERS
-# ------------------------------------------
-echo ">>> [4/7] Preparing Deployment Directory..."
-mkdir -p "$PROJECT_NAME/src"
-if [ -d "$SOURCE_DIR/.git" ]; then
-    rsync -av --exclude='.git' "$SOURCE_DIR/" "$PROJECT_NAME/src/" > /dev/null 2>&1 || cp -r "$SOURCE_DIR/"* "$PROJECT_NAME/src/"
-else
-    cp -r "$SOURCE_DIR/"* "$PROJECT_NAME/src/"
+sudo sed -i "s|<hostname>.*</hostname>|<hostname>$CURRENT_IP</hostname>|" /etc/icecast2/icecast.xml
+sudo systemctl restart icecast2
+
+if ! command -v rtl_airband &> /dev/null; then
+    echo "    Building rtl_airband..."
+    if [ ! -d "$AIRBAND_DIR" ]; then
+        run_with_retry git clone "$AIRBAND_REPO" "$AIRBAND_DIR"
+    else
+        cd "$AIRBAND_DIR" && git pull && cd ..
+    fi
+    sudo chown -R "$CURRENT_USER":"$CURRENT_GROUP" "$AIRBAND_DIR"
+    cd "$AIRBAND_DIR"
+    mkdir -p build && cd build
+    make clean || true
+    cmake .. -DWITH_WBFM=ON -DWITH_SSBD=ON -DNFM=ON
+    make -j$(nproc)
+    sudo make install
+    cd ../.. 
 fi
 
-# ------------------------------------------
-# STEP 5: CREATE "SMART" BOOT SCRIPT
-# ------------------------------------------
-echo ">>> [5/7] Creating Watchdog Boot Script..."
+echo "    Writing rtl_airband config..."
+sudo tee /usr/local/etc/rtl_airband.conf >/dev/null <<EOF
+devices: (
+  {
+    type = "rtlsdr";
+    index = 0;
+    gain = 37;
+    correction = 56;
+    mode = "scan";
+    scan_delay = 0.10;
+    hold_time = 8.0;
+    channels: (
+      {
+        modulation = "am";
+        bandwidth = 12000;
+        squelch_snr_threshold = 3;
+        freqs = ( 124375000, 118850000 );
+        outputs: (
+          {
+            type = "icecast";
+            server = "127.0.0.1";
+            port = 8000;
+            mountpoint = "airbands";
+            username = "source";
+            password = "$RAW_PASS";
+            format = "mp3";
+            bitrate = 32;
+            mono = true;
+            name = "Teesside ATC (Raw)";
+            genre = "ATC";
+          }
+        );
+      }
+    );
+  }
+);
+EOF
 
-cat > "$PROJECT_NAME/boot.sh" <<EOF
+echo "    Setting up Systemd Services..."
+sudo tee /etc/systemd/system/rtl_airband.service >/dev/null <<EOF
+[Unit]
+Description=RTLSDR-Airband Scanner
+After=icecast2.service
+Requires=icecast2.service
+[Service]
+ExecStart=/usr/local/bin/rtl_airband -F -e -c /usr/local/etc/rtl_airband.conf
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo tee /etc/systemd/system/ffmpeg_airband.service >/dev/null <<EOF
+[Unit]
+Description=FFmpeg Stream Cleaner
+After=rtl_airband.service icecast2.service
+[Service]
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/bin/ffmpeg -re -i http://127.0.0.1:8000/airbands -c:a libmp3lame -b:a 48k -ar 22050 -ac 2 -f mp3 -content_type audio/mpeg 'icecast://source:${SYSTEMD_SAFE_PASS}@127.0.0.1:8000/airband_clean'
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable rtl_airband ffmpeg_airband
+sudo systemctl restart rtl_airband ffmpeg_airband
+echo "✅ Audio System Deployed."
+
+# ==========================================
+# PHASE 3: CONFIGURE RUNTIME ENVIRONMENT
+# ==========================================
+echo ">>> [3/6] Configuring Runtime..."
+
+# We create a specific folder for configs, but we DO NOT copy web files.
+mkdir -p "$RUNTIME_DIR"
+
+# --- CREATE SMART WATCHDOG (GPU-AWARE) ---
+echo "    Creating Watchdog in $RUNTIME_DIR..."
+cat > "$RUNTIME_DIR/boot.sh" <<EOF
 #!/bin/sh
 
-# Configuration Function
 run_scan_and_config() {
     echo "------------------------------------------------"
-    echo "🔍 WATCHDOG: Scanning for AI Servers..."
+    echo "🔍 WATCHDOG: Scanning for AI Servers on $SCAN_NET..."
     
     RAW_IPS=\$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print \$2}')
 
@@ -109,15 +239,19 @@ run_scan_and_config() {
         return
     fi
 
-    echo "⏱️  Benchmarking speed..."
+    echo "⏱️  Running 'Sprint' Benchmark ($BENCHMARK_MODEL)..."
     rm -f /tmp/servers.txt
     touch /tmp/servers.txt
 
     for ip in \$RAW_IPS; do
-        TIME=\$(curl -o /dev/null -s -w '%{time_total}' --connect-timeout 2 -m 5 "http://\$ip:$OLLAMA_PORT/api/tags")
+        JSON_DATA='{"model": "$BENCHMARK_MODEL", "prompt": "1", "stream": false}'
+        TIME=\$(curl -o /dev/null -s -w '%{time_total}' \\
+             --connect-timeout 2 -m 5 \\
+             -X POST "http://\$ip:$OLLAMA_PORT/api/generate" \\
+             -d "\$JSON_DATA")
         
         if [ -z "\$TIME" ] || [ "\$TIME" = "0.000" ]; then
-            echo "   ❌ \$ip - Unreachable"
+            echo "   ❌ \$ip - Failed Benchmark"
         else
             echo "   ⚡ \$ip - \$TIMEs"
             echo "\$TIME \$ip" >> /tmp/servers.txt
@@ -125,7 +259,6 @@ run_scan_and_config() {
     done
 
     SORTED_SERVERS=\$(sort -n /tmp/servers.txt | awk '{print \$2}')
-
     UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
     TEMP_CONFIG="/tmp/ollama_upstreams.tmp"
     
@@ -144,130 +277,102 @@ run_scan_and_config() {
     echo "}" >> \$TEMP_CONFIG
 
     mv \$TEMP_CONFIG \$UPSTREAM_FILE
-    
-    if pgrep nginx > /dev/null; then
-        echo "🔄 Reloading Nginx Configuration..."
-        nginx -s reload
-    fi
-    echo "------------------------------------------------"
+    if pgrep nginx > /dev/null; then nginx -s reload; fi
 }
 
-# --- MAIN STARTUP ---
 apk add --no-cache nmap curl > /dev/null 2>&1
 run_scan_and_config
-
-(
-  while true; do
-    sleep $CHECK_INTERVAL
-    run_scan_and_config
-  done
-) &
+( while true; do sleep $CHECK_INTERVAL; run_scan_and_config; done ) &
 
 echo "🚀 Starting Nginx Gateway..."
 nginx -g "daemon off;"
 EOF
-chmod +x "$PROJECT_NAME/boot.sh"
+chmod +x "$RUNTIME_DIR/boot.sh"
 
-# ------------------------------------------
-# STEP 6: GENERATE CONFIGURATION
-# ------------------------------------------
-echo ">>> [6/7] Generating Nginx & Docker Config..."
+# ==========================================
+# PHASE 4: NGINX & DOCKER COMPOSE
+# ==========================================
+echo ">>> [4/6] Generating Nginx & Docker Config..."
 
-# Nginx Template
-cat > "$PROJECT_NAME/nginx.conf" <<EOF
+cat > "$RUNTIME_DIR/nginx.conf" <<EOF
 include /etc/nginx/ollama_upstreams.conf;
 
 server {
-    listen 80;
+    listen $GATEWAY_PORT; 
     server_name localhost;
-    server_tokens off;
-
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    add_header Permissions-Policy "geolocation=(self)" always;
-
+    
     location / {
         root /usr/share/nginx/html;
         index radar.html index.html;
-        try_files \$uri \$uri/ =404;
     }
+
+    # Deny access to the repository internals since we are mounting the whole folder
+    location ~ /\.git { deny all; }
+    location ~ \.sh$  { deny all; }
 
     location /dump1090-fa/ {
         proxy_pass http://$DUMP1090_IP:$DUMP1090_PORT/dump1090-fa/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     location /airbands {
         proxy_pass http://$AUDIO_IP:$AUDIO_PORT/airbands;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_buffering off;
-        chunked_transfer_encoding off;
+    }
+    location /airband_clean {
+        proxy_pass http://$AUDIO_IP:$AUDIO_PORT/airband_clean;
+        proxy_buffering off;
     }
 
     location /ollama/ {
         rewrite ^/ollama/(.*) /\$1 break;
         proxy_pass http://ollama_backend;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_buffering off;
         proxy_read_timeout 300s;
         proxy_connect_timeout 5s;
+        proxy_buffering off;
     }
 }
 EOF
 
-# Docker Compose (Updated with GATEWAY_PORT variable)
-cat > "$PROJECT_NAME/docker-compose.yml" <<EOF
+# DOCKER COMPOSE: DIRECT MOUNT
+# Note the volume: "../:/usr/share/nginx/html:ro"
+# This mounts the directory ABOVE 'radar-runtime' (which is your repo root) to the container.
+cat > "$RUNTIME_DIR/docker-compose.yml" <<EOF
 version: '3.8'
 services:
   radar-gateway:
     image: nginx:alpine
     container_name: radar1090-gateway
     restart: always
-    ports:
-      - "$HOST_BIND_IP:$GATEWAY_PORT:80"
+    network_mode: "host"
     volumes:
-      - ./src:/usr/share/nginx/html:ro
+      - ../:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./boot.sh:/boot.sh:ro
     entrypoint: ["/bin/sh", "/boot.sh"]
 EOF
 
-# Patch Code
-sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "$PROJECT_NAME/src/app.js"
-sed -i "s|const DUMP1090_HOST = .*;|const DUMP1090_HOST = window.location.hostname;|g" "$PROJECT_NAME/src/app.js"
-sed -i "s|const DUMP1090_PORT = .*;|const DUMP1090_PORT = window.location.port \|\| (window.location.protocol === 'https:' ? 443 : 80);|g" "$PROJECT_NAME/src/app.js"
-sed -i "s|const DUMP1090_PROTOCOL = .*;|const DUMP1090_PROTOCOL = window.location.protocol.replace(':', '');|g" "$PROJECT_NAME/src/app.js"
-sed -i 's|dump1090Base: "http.*",|dump1090Base: "/dump1090-fa/data",|g' "$PROJECT_NAME/src/radar.html"
-sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/ollama",|g' "$PROJECT_NAME/src/radar.html"
+# Patch JS Files in-place (in the repo root)
+sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "app.js"
+sed -i 's|dump1090Base: "http.*",|dump1090Base: "/dump1090-fa/data",|g' "radar.html"
+sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/ollama",|g' "radar.html"
 
-# ------------------------------------------
-# STEP 7: LAUNCH
-# ------------------------------------------
-echo ">>> [7/7] Launching Containers..."
-cd "$PROJECT_NAME"
+# ==========================================
+# PHASE 5: LAUNCH
+# ==========================================
+echo ">>> [5/6] Launching Container..."
+cd "$RUNTIME_DIR"
 
 if command -v docker &> /dev/null; then
     sudo docker compose down --remove-orphans 2>/dev/null
-fi
-
-if sg docker -c "docker compose up -d" 2>/dev/null; then
-    echo ">>> Success! Started via 'docker' group."
-else
-    echo ">>> Group refresh pending. Starting via sudo..."
     sudo docker compose up -d
 fi
 
 echo ""
 echo "========================================================"
-echo " 🚀 DEPLOYMENT COMPLETE"
+echo " 🚀 SYSTEM FULLY OPERATIONAL"
 echo "========================================================"
-echo " Access your Radar: http://$(hostname -I | awk '{print $1}'):$GATEWAY_PORT/radar.html"
+echo " 🌍 Gateway: http://$CURRENT_IP/"
+echo " 📂 Mode:    In-Place Mount (Updates are instant)"
 echo "========================================================"
