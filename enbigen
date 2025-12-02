@@ -1,0 +1,14 @@
+#!/bin/bash
+# enlarge-console-font.sh
+# Simple script to enlarge console text on Raspberry Pi
+
+# Choose a larger font (try Terminus 32x16 or 24x12)
+FONT="Lat15-Terminus32x16"
+
+echo "Switching console font to $FONT..."
+sudo setfont $FONT
+
+echo "Done. If text is still too small, try another font like:"
+echo "  Lat15-Terminus24x12"
+echo "  Lat15-Terminus28x14"
+echo "  Lat15-TerminusBold32x16"
