@@ -12,10 +12,11 @@ from any modern browser.
 1. [Features](#features)
 2. [Requirements](#requirements)
 3. [Quick Start](#quick-start)
-4. [Configuration](#configuration)
-5. [Troubleshooting](#troubleshooting)
-6. [Development](#development)
-7. [Future Improvements](#future-improvements)
+4. [Raspberry Pi Hub Installation](#-raspberry-pi-hub-installation)
+5. [Configuration](#configuration)
+6. [Troubleshooting](#troubleshooting)
+7. [Development](#development)
+8. [Future Improvements](#future-improvements)
 
 ---
 
@@ -76,6 +77,34 @@ from any modern browser.
    seconds once loaded.
 5. Adjust the audio controls as needed. The **Live Audio** section starts the airband
    feed automatically—tap the mute toggle if you need to silence it temporarily.
+
+## 🚀 Raspberry Pi Hub Installation
+
+Use `install_radar_proxy_container.sh` when you want a self-contained deployment on a
+Raspberry Pi that bundles everything into a single host:
+
+1. **Local Audio:** Streams Airband audio from a connected RTL-SDR USB stick.
+2. **Remote Radar:** Proxies ADS-B flight data from a remote feeder.
+3. **Smart AI:** Auto-discovers and benchmarks Ollama servers on the LAN to find the
+   fastest GPU.
+
+### Usage
+
+1. Clone this repository on your Raspberry Pi:
+
+   ```bash
+   git clone https://github.com/dylan7474/radar1090html5.git
+   cd radar1090html5
+   ```
+
+2. Run the deployment script (requires sudo) with your desired Icecast password:
+
+   ```bash
+   chmod +x install_radar_proxy_container.sh
+   sudo ./install_radar_proxy_container.sh 'YourIcecastPassword'
+   ```
+
+3. Access the dashboard at `http://<RaspberryPi_IP>/` once the installer finishes.
 
 ## Configuration
 
