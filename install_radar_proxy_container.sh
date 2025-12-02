@@ -6,7 +6,7 @@ set -euo pipefail
 # ==========================================
 if [ "$#" -ne 1 ]; then
     echo "❌ Error: You must provide a password for the Radio Stream."
-    echo "Usage: sudo ./deploy_all_v10.sh 'YourPasswordHere'"
+    echo "Usage: sudo ./deploy_all_v11.sh 'YourPasswordHere'"
     exit 1
 fi
 RAW_PASS="$1"
@@ -35,7 +35,7 @@ ICECAST_PASS="$RAW_PASS"
 AIRBAND_REPO="https://github.com/szpajder/RTLSDR-Airband.git"
 AIRBAND_DIR="rtl_airband"
 
-# Deployment Config Folder (Not the web source)
+# Deployment Config Folder
 RUNTIME_DIR="radar-runtime"
 
 # --- Sanitization ---
@@ -66,7 +66,7 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING MASTER DEPLOYMENT (Self-Contained / Direct Mount)"
+echo ">>> STARTING MASTER DEPLOYMENT (Overlay/Low-RAM Optimized)"
 echo ">>> Host IP: $CURRENT_IP"
 
 # ==========================================
@@ -74,9 +74,8 @@ echo ">>> Host IP: $CURRENT_IP"
 # ==========================================
 echo ">>> [1/6] Preparing System..."
 
-# Sanity Check: Ensure we are in the repo
 if [ ! -f "radar.html" ]; then
-    echo "❌ Error: radar.html not found in current directory!"
+    echo "❌ Error: radar.html not found!"
     echo "   Please run this script from inside the 'radar1090html5' repository."
     exit 1
 fi
@@ -219,10 +218,8 @@ echo "✅ Audio System Deployed."
 # ==========================================
 echo ">>> [3/6] Configuring Runtime..."
 
-# We create a specific folder for configs, but we DO NOT copy web files.
 mkdir -p "$RUNTIME_DIR"
 
-# --- CREATE SMART WATCHDOG (GPU-AWARE) ---
 echo "    Creating Watchdog in $RUNTIME_DIR..."
 cat > "$RUNTIME_DIR/boot.sh" <<EOF
 #!/bin/sh
@@ -301,12 +298,16 @@ server {
     listen $GATEWAY_PORT; 
     server_name localhost;
     
+    # 🛑 OVERLAY MODE OPTIMIZATION 🛑
+    # Disable logs to prevent RAM filling up
+    access_log off;
+    error_log /dev/null crit;
+    
     location / {
         root /usr/share/nginx/html;
         index radar.html index.html;
     }
 
-    # Deny access to the repository internals since we are mounting the whole folder
     location ~ /\.git { deny all; }
     location ~ \.sh$  { deny all; }
 
@@ -335,9 +336,6 @@ server {
 }
 EOF
 
-# DOCKER COMPOSE: DIRECT MOUNT
-# Note the volume: "../:/usr/share/nginx/html:ro"
-# This mounts the directory ABOVE 'radar-runtime' (which is your repo root) to the container.
 cat > "$RUNTIME_DIR/docker-compose.yml" <<EOF
 version: '3.8'
 services:
@@ -346,6 +344,14 @@ services:
     container_name: radar1090-gateway
     restart: always
     network_mode: "host"
+    
+    # 🛑 OVERLAY MODE OPTIMIZATION 🛑
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "1"
+
     volumes:
       - ../:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -353,7 +359,7 @@ services:
     entrypoint: ["/bin/sh", "/boot.sh"]
 EOF
 
-# Patch JS Files in-place (in the repo root)
+# Patch JS Files
 sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "app.js"
 sed -i 's|dump1090Base: "http.*",|dump1090Base: "/dump1090-fa/data",|g' "radar.html"
 sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/ollama",|g' "radar.html"
@@ -371,8 +377,8 @@ fi
 
 echo ""
 echo "========================================================"
-echo " 🚀 SYSTEM FULLY OPERATIONAL"
+echo " 🚀 SYSTEM FULLY OPERATIONAL (Overlay-Ready)"
 echo "========================================================"
 echo " 🌍 Gateway: http://$CURRENT_IP/"
-echo " 📂 Mode:    In-Place Mount (Updates are instant)"
+echo " 🛡️  Logging: DISABLED (Safe for Read-Only FS)"
 echo "========================================================"
