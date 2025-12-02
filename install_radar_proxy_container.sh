@@ -6,7 +6,7 @@ set -euo pipefail
 # ==========================================
 if [ "$#" -ne 1 ]; then
     echo "❌ Error: You must provide a password for the Radio Stream."
-    echo "Usage: sudo ./deploy_all_v11.sh 'YourPasswordHere'"
+    echo "Usage: sudo ./deploy_all_v12.sh 'YourPasswordHere'"
     exit 1
 fi
 RAW_PASS="$1"
@@ -66,13 +66,13 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING MASTER DEPLOYMENT (Overlay/Low-RAM Optimized)"
+echo ">>> STARTING MASTER DEPLOYMENT (ZRAM + Low RAM Optimized)"
 echo ">>> Host IP: $CURRENT_IP"
 
 # ==========================================
 # PHASE 1: PREPARATION & DEPENDENCIES
 # ==========================================
-echo ">>> [1/6] Preparing System..."
+echo ">>> [1/7] Preparing System..."
 
 if [ ! -f "radar.html" ]; then
     echo "❌ Error: radar.html not found!"
@@ -80,15 +80,18 @@ if [ ! -f "radar.html" ]; then
     exit 1
 fi
 
+# Stop conflicting web servers
 sudo systemctl stop lighttpd apache2 nginx 2>/dev/null || true
 sudo systemctl disable lighttpd apache2 nginx 2>/dev/null || true
 
+# Clean old Docker lists if present
 if [ -f /etc/apt/sources.list.d/docker.list ]; then
     sudo rm /etc/apt/sources.list.d/docker.list
 fi
 
 run_with_retry sudo apt-get update -qq
 
+# Install Docker
 if ! command -v docker &> /dev/null; then
     echo "    Docker not found. Installing manually..."
     sudo apt-get install -y ca-certificates curl gnupg
@@ -105,17 +108,47 @@ else
     echo "    ✅ Docker is already installed."
 fi
 
+# Install Audio Tools AND zram-tools
 sudo apt-get install -y -qq \
   git build-essential cmake libmp3lame-dev libshout3-dev \
   libasound2-dev ffmpeg rtl-sdr pkg-config jq \
-  icecast2 netcat-openbsd libconfig++-dev librtlsdr-dev libfftw3-dev liquidsoap curl
+  icecast2 netcat-openbsd libconfig++-dev librtlsdr-dev libfftw3-dev liquidsoap curl \
+  zram-tools
 
 echo "✅ Dependencies Installed."
 
 # ==========================================
+# PHASE 1.5: SWAP & ZRAM CONFIGURATION
+# ==========================================
+echo ">>> [2/7] Optimizing Memory (ZRAM Check)..."
+
+# 1. Disable slow SD card swap if it exists
+if systemctl is-active --quiet dphys-swapfile; then
+    echo "    🚫 Disabling slow SD card swap..."
+    sudo systemctl stop dphys-swapfile
+    sudo systemctl disable dphys-swapfile
+    sudo rm -f /var/swap
+fi
+
+# 2. Configure ZRAM (Idempotent check)
+if grep -q "ALLOCATION=60" /etc/default/zramswap; then
+    echo "    ✅ ZRAM already configured."
+else
+    echo "    ⚡ Configuring ZRAM..."
+    sudo sed -i 's/^#ALLOCATION=.*/ALLOCATION=60/' /etc/default/zramswap
+    sudo sed -i 's/^ALLOCATION=.*/ALLOCATION=60/' /etc/default/zramswap
+    
+    # Tune Swappiness
+    echo "vm.swappiness=100" | sudo tee /etc/sysctl.d/99-zram.conf > /dev/null
+    sudo sysctl -p /etc/sysctl.d/99-zram.conf > /dev/null
+    
+    sudo systemctl restart zramswap
+fi
+
+# ==========================================
 # PHASE 2: CONFIGURE ICECAST & AUDIO
 # ==========================================
-echo ">>> [2/6] Configuring Icecast..."
+echo ">>> [3/7] Configuring Icecast..."
 
 if ! grep -q "<source-password>$SED_SAFE_PASS</source-password>" /etc/icecast2/icecast.xml; then
     sudo sed -i "s|<source-password>.*</source-password>|<source-password>$SED_SAFE_PASS</source-password>|" /etc/icecast2/icecast.xml
@@ -216,7 +249,7 @@ echo "✅ Audio System Deployed."
 # ==========================================
 # PHASE 3: CONFIGURE RUNTIME ENVIRONMENT
 # ==========================================
-echo ">>> [3/6] Configuring Runtime..."
+echo ">>> [4/7] Configuring Runtime..."
 
 mkdir -p "$RUNTIME_DIR"
 
@@ -289,7 +322,7 @@ chmod +x "$RUNTIME_DIR/boot.sh"
 # ==========================================
 # PHASE 4: NGINX & DOCKER COMPOSE
 # ==========================================
-echo ">>> [4/6] Generating Nginx & Docker Config..."
+echo ">>> [5/7] Generating Nginx & Docker Config..."
 
 cat > "$RUNTIME_DIR/nginx.conf" <<EOF
 include /etc/nginx/ollama_upstreams.conf;
@@ -298,8 +331,7 @@ server {
     listen $GATEWAY_PORT; 
     server_name localhost;
     
-    # 🛑 OVERLAY MODE OPTIMIZATION 🛑
-    # Disable logs to prevent RAM filling up
+    # 🛑 MEMORY SAVER: Disable Access Logs
     access_log off;
     error_log /dev/null crit;
     
@@ -345,7 +377,7 @@ services:
     restart: always
     network_mode: "host"
     
-    # 🛑 OVERLAY MODE OPTIMIZATION 🛑
+    # 🛑 MEMORY SAVER: Limit Logs
     logging:
       driver: "json-file"
       options:
@@ -367,7 +399,7 @@ sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/oll
 # ==========================================
 # PHASE 5: LAUNCH
 # ==========================================
-echo ">>> [5/6] Launching Container..."
+echo ">>> [6/7] Launching Container..."
 cd "$RUNTIME_DIR"
 
 if command -v docker &> /dev/null; then
@@ -377,8 +409,9 @@ fi
 
 echo ""
 echo "========================================================"
-echo " 🚀 SYSTEM FULLY OPERATIONAL (Overlay-Ready)"
+echo " 🚀 SYSTEM FULLY OPERATIONAL (ZRAM + Low-RAM Mode)"
 echo "========================================================"
 echo " 🌍 Gateway: http://$CURRENT_IP/"
-echo " 🛡️  Logging: DISABLED (Safe for Read-Only FS)"
+echo " 🛡️  SD Card: Protected (Logs Disabled + No Swap File)"
+echo " ⚡ Memory:  Enhanced with ZRAM"
 echo "========================================================"
