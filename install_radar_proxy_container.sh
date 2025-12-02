@@ -8,7 +8,7 @@ DEFAULT_MODEL="gemma3:270m"
 
 if [ "$#" -lt 1 ]; then
     echo "❌ Error: You must provide a password."
-    echo "Usage: sudo ./deploy_all_v19.sh 'Password' ['model-name']"
+    echo "Usage: sudo ./deploy_all_v20.sh 'Password' ['model-name']"
     exit 1
 fi
 
@@ -57,7 +57,7 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING DEPLOYMENT V19 (Benchmark Fix)"
+echo ">>> STARTING DEPLOYMENT V20 (Production Mode - Logs Off)"
 echo ">>> Benchmark Model: $BENCHMARK_MODEL"
 
 # ==========================================
@@ -201,9 +201,10 @@ run_scan_and_config() {
     touch /tmp/servers.txt
 
     for ip in \$RAW_IPS; do
+        # Use double quotes for JSON to allow variable expansion
         JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"1\", \"stream\": false}"
         
-        # BUGFIX: Added -o /dev/null so we don't read the JSON body into variables
+        # -o /dev/null ensures we don't read JSON response into variables
         RESPONSE=\$(curl -s -o /dev/null -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA")
         
         TIME=\$(echo "\$RESPONSE" | cut -d: -f1)
@@ -258,9 +259,9 @@ server {
     listen $GATEWAY_PORT; 
     server_name localhost;
     
-    # 📝 LOGGING ENABLED FOR DEBUGGING (Standard Output)
-    access_log /dev/stdout;
-    error_log /dev/stderr;
+    # 🛑 PRODUCTION MODE: LOGS DISABLED
+    access_log off;
+    error_log /dev/stderr crit;
     
     location / { root /usr/share/nginx/html; index radar.html index.html; }
     location ~ /\.git { deny all; }
@@ -317,7 +318,7 @@ if command -v docker &> /dev/null; then sudo docker compose down --remove-orphan
 # PHASE 6: SELF-TEST
 # ==========================================
 echo ">>> [7/7] Verifying System..."
-sleep 5 # Give Nginx a moment to start
+sleep 5
 
 echo "   📡 Testing Radar Proxy..."
 if curl -s --head "http://localhost/dump1090-fa/data/aircraft.json" | grep "200 OK" > /dev/null; then echo "      ✅ Radar OK"; else echo "      ❌ Radar Link Down"; fi
@@ -327,6 +328,5 @@ if curl -s --head "http://localhost/ollama/api/tags" | grep "200 OK" > /dev/null
 
 echo ""
 echo "========================================================"
-echo " 🚀 SYSTEM ONLINE"
-echo " 🐛 Logs Enabled: View with 'sudo docker logs -f radar1090-gateway'"
+echo " 🚀 SYSTEM ONLINE (Silent Mode)"
 echo "========================================================"
