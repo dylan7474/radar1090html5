@@ -6,7 +6,7 @@ set -euo pipefail
 # ==========================================
 if [ "$#" -ne 1 ]; then
     echo "❌ Error: You must provide a password for the Radio Stream."
-    echo "Usage: sudo ./deploy_all_v14.sh 'YourPasswordHere'"
+    echo "Usage: sudo ./deploy_all_v16.sh 'YourPasswordHere'"
     exit 1
 fi
 RAW_PASS="$1"
@@ -27,7 +27,7 @@ AUDIO_PORT="8000"
 OLLAMA_PORT="11434"
 SCAN_NET="192.168.50.0/24"
 CHECK_INTERVAL="600"
-BENCHMARK_MODEL="tinydolphin"
+BENCHMARK_MODEL="gemma3:270m"      # <--- NEW: Standard model for speed test
 
 # --- SYSTEM SETTINGS ---
 GATEWAY_PORT="80" 
@@ -66,8 +66,9 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING MASTER DEPLOYMENT (V14 - ZRAM Force Reset)"
+echo ">>> STARTING MASTER DEPLOYMENT (V16 - Gemma3 Speed Test)"
 echo ">>> Host IP: $CURRENT_IP"
+echo ">>> Benchmark Model: $BENCHMARK_MODEL"
 
 # ==========================================
 # PHASE 1: PREPARATION & DEPENDENCIES
@@ -116,7 +117,7 @@ sudo apt-get install -y -qq \
 echo "✅ Dependencies Installed."
 
 # ==========================================
-# PHASE 1.5: SWAP & ZRAM CONFIGURATION (FORCE RESET)
+# PHASE 1.5: SWAP & ZRAM CONFIGURATION
 # ==========================================
 echo ">>> [2/7] Optimizing Memory (ZRAM)..."
 
@@ -128,11 +129,10 @@ if systemctl is-active --quiet dphys-swapfile; then
     sudo rm -f /var/swap
 fi
 
-# 2. FORCE RESET ZRAM (The Fix)
+# 2. FORCE RESET ZRAM
 echo "    ♻️  Resetting ZRAM to clear locks..."
 sudo systemctl stop zramswap 2>/dev/null || true
 sudo swapoff /dev/zram0 2>/dev/null || true
-# Try to unload module to clear "Device busy" errors
 sudo modprobe -r zram 2>/dev/null || true
 
 # 3. Write Config
@@ -267,6 +267,7 @@ echo ">>> [4/7] Configuring Runtime..."
 mkdir -p "$RUNTIME_DIR"
 
 echo "    Creating Watchdog in $RUNTIME_DIR..."
+# This watchdog runs the RACE using the BENCHMARK_MODEL
 cat > "$RUNTIME_DIR/boot.sh" <<EOF
 #!/bin/sh
 
@@ -294,7 +295,7 @@ run_scan_and_config() {
              -d "\$JSON_DATA")
         
         if [ -z "\$TIME" ] || [ "\$TIME" = "0.000" ]; then
-            echo "   ❌ \$ip - Failed Benchmark"
+            echo "   ❌ \$ip - Failed Benchmark (Missing model?)"
         else
             echo "   ⚡ \$ip - \$TIMEs"
             echo "\$TIME \$ip" >> /tmp/servers.txt
@@ -309,7 +310,7 @@ run_scan_and_config() {
     IS_FIRST=1
     for ip in \$SORTED_SERVERS; do
         if [ "\$IS_FIRST" -eq "1" ]; then
-            echo "   🏆 PRIMARY: \$ip"
+            echo "   🏆 PRIMARY: \$ip (Fastest)"
             echo "    server \$ip:$OLLAMA_PORT;" >> \$TEMP_CONFIG
             IS_FIRST=0
         else
@@ -344,7 +345,7 @@ server {
     listen $GATEWAY_PORT; 
     server_name localhost;
     
-    # 🛑 MEMORY SAVER: Disable Access Logs
+    # 🛑 MEMORY SAVER
     access_log off;
     error_log /dev/null crit;
     
@@ -390,7 +391,7 @@ services:
     restart: always
     network_mode: "host"
     
-    # 🛑 MEMORY SAVER: Limit Logs
+    # 🛑 MEMORY SAVER
     logging:
       driver: "json-file"
       options:
@@ -422,8 +423,8 @@ fi
 
 echo ""
 echo "========================================================"
-echo " 🚀 SYSTEM FULLY OPERATIONAL (ZRAM Reset + Optimized)"
+echo " 🚀 SYSTEM FULLY OPERATIONAL (ZRAM + Gemma3 Speed Test)"
 echo "========================================================"
 echo " 🌍 Gateway: http://$CURRENT_IP/"
-echo " ♻️  ZRAM:    Reset & Active (Safe Memory Config)"
+echo " ⚡ Benchmark: Testing speed with $BENCHMARK_MODEL"
 echo "========================================================"
