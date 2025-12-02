@@ -3,6 +3,13 @@
 radar1090 ships as a standalone HTML5 experience designed to run the web dashboard
 from any modern browser.
 
+Two entry points are available depending on your deployment:
+
+- `index.html`: the core radar experience without the AI copilot. Ideal for air-gapped
+  or privacy-first installs where you only want flight tracking and audio.
+- `radar.html`: the AI-enabled dashboard that layers Ollama-assisted commentary and
+  controls on top of the standard radar UI.
+
 **Current Version:** V1.9.62
 
 ---
@@ -70,8 +77,12 @@ from any modern browser.
 ## Quick Start
 
 1. Clone or download this repository.
-2. Open `index.html` directly in your browser or serve the repo through a static file
-   host (e.g. `python3 -m http.server`).
+2. Choose the HTML entry point:
+   - `index.html` for the non-AI radar dashboard.
+   - `radar.html` when you want AI commentary and controls (requires access to an
+     Ollama endpoint; see [Configuration](#configuration)).
+   Serve either file through a static host (e.g. `python3 -m http.server`) or open it
+   directly in your browser.
 3. Ensure your `dump1090-fa` instance is reachable via the same origin (for example by proxying `/dump1090-fa/data`).
 4. The dashboard automatically polls `receiver.json` and `aircraft.json` every five
    seconds once loaded.
@@ -113,6 +124,10 @@ All user-facing preferences persist automatically. To clear them, delete the
 `showAircraftDetails`, `beepVolumeLevel`, `radarRangeIndex`,
 `baseAlertDistanceKm`, `controlsPanelVisible`, `dataPanelVisible`,
 `dump1090BasePath`) via your browser's developer tools.
+
+Open `radar.html` when you want the AI copilot features; it expects an Ollama
+endpoint reachable at the same origin or as overridden below. `index.html`
+skips the AI calls and only needs the `dump1090-fa` data feed.
 
 The dashboard expects the dump1090-fa JSON endpoints to live at a relative path of
 `/dump1090-fa/data` so it can operate cleanly behind a reverse proxy. Override the base path
