@@ -8,7 +8,7 @@ DEFAULT_MODEL="gemma3:270m"
 
 if [ "$#" -lt 1 ]; then
     echo "❌ Error: You must provide a password."
-    echo "Usage: sudo ./deploy_all_v18.sh 'Password' ['model-name']"
+    echo "Usage: sudo ./deploy_all_v19.sh 'Password' ['model-name']"
     exit 1
 fi
 
@@ -57,7 +57,7 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING DEPLOYMENT V18 (Bugfix + Logging)"
+echo ">>> STARTING DEPLOYMENT V19 (Benchmark Fix)"
 echo ">>> Benchmark Model: $BENCHMARK_MODEL"
 
 # ==========================================
@@ -201,11 +201,10 @@ run_scan_and_config() {
     touch /tmp/servers.txt
 
     for ip in \$RAW_IPS; do
-        # FIX: Use escaped double quotes for JSON to allow variable expansion
         JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"1\", \"stream\": false}"
         
-        # We also capture the HTTP Code to ensure 200 OK
-        RESPONSE=\$(curl -s -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA")
+        # BUGFIX: Added -o /dev/null so we don't read the JSON body into variables
+        RESPONSE=\$(curl -s -o /dev/null -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA")
         
         TIME=\$(echo "\$RESPONSE" | cut -d: -f1)
         CODE=\$(echo "\$RESPONSE" | cut -d: -f2)
@@ -315,7 +314,7 @@ cd "$RUNTIME_DIR"
 if command -v docker &> /dev/null; then sudo docker compose down --remove-orphans 2>/dev/null; sudo docker compose up -d; fi
 
 # ==========================================
-# PHASE 6: SELF-TEST (NEW)
+# PHASE 6: SELF-TEST
 # ==========================================
 echo ">>> [7/7] Verifying System..."
 sleep 5 # Give Nginx a moment to start
