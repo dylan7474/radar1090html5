@@ -2,14 +2,20 @@
 set -euo pipefail
 
 # ==========================================
-# 🔐 ARGUMENT CHECK: PASSWORD REQUIRED
+# 🔐 ARGUMENT CHECK: PASSWORD & MODEL
 # ==========================================
-if [ "$#" -ne 1 ]; then
-    echo "❌ Error: You must provide a password for the Radio Stream."
-    echo "Usage: sudo ./deploy_all_v16.sh 'YourPasswordHere'"
+DEFAULT_MODEL="gemma3:270m"
+
+if [ "$#" -lt 1 ]; then
+    echo "❌ Error: You must provide at least a password."
+    echo "Usage: sudo ./deploy_all_v17.sh 'Password' ['optional:model-name']"
+    echo "Example: sudo ./deploy_all_v17.sh 'secret123' 'deepseek-r1:1.5b'"
     exit 1
 fi
+
 RAW_PASS="$1"
+# Use the second argument if provided, otherwise use default
+BENCHMARK_MODEL="${2:-$DEFAULT_MODEL}"
 
 # ==========================================
 # 🛠️ CONFIGURATION VARIABLES
@@ -27,7 +33,6 @@ AUDIO_PORT="8000"
 OLLAMA_PORT="11434"
 SCAN_NET="192.168.50.0/24"
 CHECK_INTERVAL="600"
-BENCHMARK_MODEL="gemma3:270m"      # <--- NEW: Standard model for speed test
 
 # --- SYSTEM SETTINGS ---
 GATEWAY_PORT="80" 
@@ -66,9 +71,9 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING MASTER DEPLOYMENT (V16 - Gemma3 Speed Test)"
+echo ">>> STARTING MASTER DEPLOYMENT (V17 - Custom Model Argument)"
 echo ">>> Host IP: $CURRENT_IP"
-echo ">>> Benchmark Model: $BENCHMARK_MODEL"
+echo ">>> Target Model: $BENCHMARK_MODEL"
 
 # ==========================================
 # PHASE 1: PREPARATION & DEPENDENCIES
@@ -267,7 +272,7 @@ echo ">>> [4/7] Configuring Runtime..."
 mkdir -p "$RUNTIME_DIR"
 
 echo "    Creating Watchdog in $RUNTIME_DIR..."
-# This watchdog runs the RACE using the BENCHMARK_MODEL
+# Note: We inject $BENCHMARK_MODEL (from command line argument) into the script here
 cat > "$RUNTIME_DIR/boot.sh" <<EOF
 #!/bin/sh
 
@@ -423,8 +428,8 @@ fi
 
 echo ""
 echo "========================================================"
-echo " 🚀 SYSTEM FULLY OPERATIONAL (ZRAM + Gemma3 Speed Test)"
+echo " 🚀 SYSTEM FULLY OPERATIONAL (Custom Model Support)"
 echo "========================================================"
 echo " 🌍 Gateway: http://$CURRENT_IP/"
-echo " ⚡ Benchmark: Testing speed with $BENCHMARK_MODEL"
+echo " ⚡ Benchmark: Testing with $BENCHMARK_MODEL"
 echo "========================================================"
