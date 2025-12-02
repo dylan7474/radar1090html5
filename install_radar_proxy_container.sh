@@ -6,7 +6,7 @@ set -euo pipefail
 # ==========================================
 if [ "$#" -ne 1 ]; then
     echo "❌ Error: You must provide a password for the Radio Stream."
-    echo "Usage: sudo ./deploy_all_v12.sh 'YourPasswordHere'"
+    echo "Usage: sudo ./deploy_all_v13.sh 'YourPasswordHere'"
     exit 1
 fi
 RAW_PASS="$1"
@@ -66,7 +66,7 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING MASTER DEPLOYMENT (ZRAM + Low RAM Optimized)"
+echo ">>> STARTING MASTER DEPLOYMENT (V13 - ZRAM Fix)"
 echo ">>> Host IP: $CURRENT_IP"
 
 # ==========================================
@@ -80,11 +80,9 @@ if [ ! -f "radar.html" ]; then
     exit 1
 fi
 
-# Stop conflicting web servers
 sudo systemctl stop lighttpd apache2 nginx 2>/dev/null || true
 sudo systemctl disable lighttpd apache2 nginx 2>/dev/null || true
 
-# Clean old Docker lists if present
 if [ -f /etc/apt/sources.list.d/docker.list ]; then
     sudo rm /etc/apt/sources.list.d/docker.list
 fi
@@ -108,21 +106,21 @@ else
     echo "    ✅ Docker is already installed."
 fi
 
-# Install Audio Tools AND zram-tools
+# Install Tools
 sudo apt-get install -y -qq \
   git build-essential cmake libmp3lame-dev libshout3-dev \
   libasound2-dev ffmpeg rtl-sdr pkg-config jq \
   icecast2 netcat-openbsd libconfig++-dev librtlsdr-dev libfftw3-dev liquidsoap curl \
-  zram-tools
+  zram-tools bc
 
 echo "✅ Dependencies Installed."
 
 # ==========================================
-# PHASE 1.5: SWAP & ZRAM CONFIGURATION
+# PHASE 1.5: SWAP & ZRAM CONFIGURATION (FIXED)
 # ==========================================
-echo ">>> [2/7] Optimizing Memory (ZRAM Check)..."
+echo ">>> [2/7] Optimizing Memory (ZRAM)..."
 
-# 1. Disable slow SD card swap if it exists
+# 1. Disable slow SD card swap
 if systemctl is-active --quiet dphys-swapfile; then
     echo "    🚫 Disabling slow SD card swap..."
     sudo systemctl stop dphys-swapfile
@@ -130,19 +128,35 @@ if systemctl is-active --quiet dphys-swapfile; then
     sudo rm -f /var/swap
 fi
 
-# 2. Configure ZRAM (Idempotent check)
-if grep -q "ALLOCATION=60" /etc/default/zramswap; then
-    echo "    ✅ ZRAM already configured."
+# 2. Fix ZRAM Config (Use PERCENT, not ALLOCATION)
+echo "    ⚡ Configuring ZRAM Config..."
+
+# We completely rewrite the config file to ensure it's correct
+sudo tee /etc/default/zramswap > /dev/null <<EOF
+ALGO=lz4
+PERCENT=60
+EOF
+
+# 3. Force Load Kernel Module (Fixes 'control process exited' error)
+if ! lsmod | grep -q zram; then
+    echo "    ⚡ Loading zram kernel module..."
+    sudo modprobe zram
+    echo "zram" | sudo tee -a /etc/modules
+fi
+
+# 4. Tune Swappiness
+echo "vm.swappiness=100" | sudo tee /etc/sysctl.d/99-zram.conf > /dev/null
+sudo sysctl -p /etc/sysctl.d/99-zram.conf > /dev/null
+
+# 5. Restart Service
+sudo systemctl daemon-reload
+sudo systemctl restart zramswap
+
+if systemctl is-active --quiet zramswap; then
+    echo "    ✅ ZRAM Active."
 else
-    echo "    ⚡ Configuring ZRAM..."
-    sudo sed -i 's/^#ALLOCATION=.*/ALLOCATION=60/' /etc/default/zramswap
-    sudo sed -i 's/^ALLOCATION=.*/ALLOCATION=60/' /etc/default/zramswap
-    
-    # Tune Swappiness
-    echo "vm.swappiness=100" | sudo tee /etc/sysctl.d/99-zram.conf > /dev/null
-    sudo sysctl -p /etc/sysctl.d/99-zram.conf > /dev/null
-    
-    sudo systemctl restart zramswap
+    echo "    ⚠️ ZRAM Failed to start. Checking status..."
+    sudo systemctl status zramswap --no-pager
 fi
 
 # ==========================================
@@ -412,6 +426,6 @@ echo "========================================================"
 echo " 🚀 SYSTEM FULLY OPERATIONAL (ZRAM + Low-RAM Mode)"
 echo "========================================================"
 echo " 🌍 Gateway: http://$CURRENT_IP/"
-echo " 🛡️  SD Card: Protected (Logs Disabled + No Swap File)"
-echo " ⚡ Memory:  Enhanced with ZRAM"
+echo " ⚡ Memory:  Enhanced with ZRAM (Compressed)"
+echo " 🛡️  Logging: DISABLED (Safe for SD Card)"
 echo "========================================================"
