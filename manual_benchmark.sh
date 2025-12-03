@@ -11,6 +11,7 @@ Environment overrides:
   OLLAMA_PORT       Port for Ollama (default: 11434).
   SAMPLES           Number of timed requests per host (default: 3).
   TIMEOUT           Per-request timeout in seconds (default: 8).
+  DEBUG             Set to 1 to print curl diagnostics for each sample.
 USAGE
 }
 
@@ -50,8 +51,21 @@ run_benchmark() {
 
     PROMPT_JSON=$(printf '%s' "$prompt" | jq -Rs .)
     JSON_DATA=$(printf '{"model":"%s","prompt":%s,"stream":false}' "$BENCHMARK_MODEL" "$PROMPT_JSON")
+
+    CURL_ARGS=("-s" "-S" "--connect-timeout" "3" "-H" "Content-Type: application/json" "-X" "POST" "http://$ip:$OLLAMA_PORT/api/generate" "-d" "$JSON_DATA")
+    DEBUG_FLAG=""
+    if [ "${DEBUG:-0}" -eq 1 ]; then
+      DEBUG_FLAG="-v"
+    fi
+
     echo "  🔄 Warm-up request (may take a few seconds)..."
-    curl -s -o /dev/null --connect-timeout 3 -m 12 -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>/tmp/bench_warmup_"$ip".log || true
+    curl ${DEBUG_FLAG:-} "${CURL_ARGS[@]}" -m 12 -o /dev/null 2>/tmp/bench_warmup_"$ip".log || true
+
+    if [ ! -s /tmp/bench_warmup_"$ip".log ] && [ "${DEBUG:-0}" -eq 1 ]; then
+      echo "    (warm-up curl produced no stderr output; checking connectivity)"
+    elif [ -s /tmp/bench_warmup_"$ip".log ]; then
+      echo "    Warm-up stderr: $(head -c 160 /tmp/bench_warmup_"$ip".log | tr '\n' ' ')"
+    fi
 
     TIMES=""
     COMPLETED=0
@@ -63,8 +77,7 @@ run_benchmark() {
         rm -f "$BODY_FILE" "$ERR_FILE"
 
         echo -n "  • Sample $i/$samples: "
-        RESPONSE=$(curl -s -o "$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "$timeout" \
-            -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>"$ERR_FILE" || true)
+        RESPONSE=$(curl ${DEBUG_FLAG:-} -o "$BODY_FILE" -w "%{time_total}:%{http_code}" "${CURL_ARGS[@]}" --connect-timeout 3 -m "$timeout" 2>"$ERR_FILE" || true)
 
         TIME=$(echo "$RESPONSE" | cut -d: -f1)
         CODE=$(echo "$RESPONSE" | cut -d: -f2)
@@ -95,6 +108,10 @@ run_benchmark() {
             fi
             BENCH_ERROR_CODE="$CODE"
             echo "❌ ${BENCH_ERROR}"
+
+            if [ "${DEBUG:-0}" -eq 1 ] && [ -z "$DIAG_ERR" ]; then
+              echo "    (no curl stderr captured; try curl manually: curl -v -X POST http://$ip:$OLLAMA_PORT/api/generate -H 'Content-Type: application/json' -d '$JSON_DATA')"
+            fi
         fi
 
         i=$((i + 1))
