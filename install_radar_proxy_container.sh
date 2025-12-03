@@ -21,9 +21,10 @@ OLLAMA_PORT="11434"
 BENCHMARK_MODEL="llama3.2:1b"
 
 # --- SYSTEM ---
-GATEWAY_PORT="80" 
+GATEWAY_PORT="80"
 AIRBAND_REPO="https://github.com/szpajder/RTLSDR-Airband.git"
 AIRBAND_DIR="rtl_airband"
+RUNTIME_DIR="$(pwd)/runtime"
 
 # --- SANITIZATION ---
 SYSTEMD_SAFE_PASS=${RAW_PASS//$/$$}
