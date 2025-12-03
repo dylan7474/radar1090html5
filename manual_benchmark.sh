@@ -30,7 +30,11 @@ SAMPLES="${SAMPLES:-3}"
 TIMEOUT="${TIMEOUT:-8}"
 
 if [ -z "${BENCHMARK_MODEL:-}" ] && [ -f ai-config.json ]; then
-  BENCHMARK_MODEL=$(jq -r '.ollamaModel // empty' ai-config.json)
+  if jq -e . >/dev/null 2>&1 < ai-config.json; then
+    BENCHMARK_MODEL=$(jq -r '.ollamaModel // empty' ai-config.json || true)
+  else
+    echo "⚠️  Ignoring invalid ai-config.json (unable to parse JSON); falling back to default model." >&2
+  fi
 fi
 BENCHMARK_MODEL="${BENCHMARK_MODEL:-llama3.2:1b}"
 
