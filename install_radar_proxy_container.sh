@@ -288,8 +288,9 @@ run_benchmark() {
     timeout="${4:-8}"
 
     # Always warm the model first so the measured requests aren't penalized by load time.
-    JSON_DATA="{"model": "$BENCHMARK_MODEL", "prompt": "$prompt", "stream": false}"
-    curl -s -o /dev/null --connect-timeout 3 -m 12 -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>/tmp/bench_warmup_"$ip".log || true
+    PROMPT_JSON=$(printf '%s' "$prompt" | jq -Rs .)
+    JSON_DATA=$(printf '{"model":"%s","prompt":%s,"stream":false}' "$BENCHMARK_MODEL" "$PROMPT_JSON")
+    curl -s -o /dev/null --connect-timeout 3 -m 12 -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>/tmp/bench_warmup_"$ip".log || true
 
     TIMES=""
     COMPLETED=0
@@ -300,7 +301,8 @@ run_benchmark() {
         ERR_FILE="/tmp/bench_err_${ip}_${i}.txt"
         rm -f "$BODY_FILE" "$ERR_FILE"
 
-        RESPONSE=$(curl -s -o "$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "$timeout"                        -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>"$ERR_FILE" || true)
+        RESPONSE=$(curl -s -o "$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "$timeout" \
+            -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>"$ERR_FILE" || true)
 
         TIME=$(echo "$RESPONSE" | cut -d: -f1)
         CODE=$(echo "$RESPONSE" | cut -d: -f2)
