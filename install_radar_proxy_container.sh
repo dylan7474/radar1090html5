@@ -211,8 +211,13 @@ run_scan_and_config() {
         # Use double quotes for JSON to allow variable expansion
         JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"1\", \"stream\": false}"
 
-        # We silence the output (-o /dev/null) to prevent variable corruption
-        RESPONSE=\$(curl -s -o /dev/null -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA")
+        # Capture response body and curl error output for better diagnostics when benchmarks fail
+        BENCH_BODY="/tmp/bench_body_\$ip.txt"
+        BENCH_ERR="/tmp/bench_err_\$ip.txt"
+        rm -f "\$BENCH_BODY" "\$BENCH_ERR"
+
+        RESPONSE=\$(curl -s -o "\$BENCH_BODY" -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 \
+                   -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA" 2>"\$BENCH_ERR" || true)
 
         TIME=\$(echo "\$RESPONSE" | cut -d: -f1)
         CODE=\$(echo "\$RESPONSE" | cut -d: -f2)
@@ -223,7 +228,16 @@ run_scan_and_config() {
         fi
 
         if [ "\$CODE" != "200" ]; then
-            echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE)"
+            DIAG_BODY=\$(head -c 200 "\$BENCH_BODY" | tr '\n' ' ')
+            DIAG_ERR=\$(cat "\$BENCH_ERR" | tr '\n' ' ')
+
+            if [ -n "\$DIAG_ERR" ]; then
+                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - curl error: \$DIAG_ERR"
+            elif [ -n "\$DIAG_BODY" ]; then
+                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - response: \$DIAG_BODY"
+            else
+                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - no response body"
+            fi
         else
             echo "   ⚡ \$ip - \${TIME}s"
             echo "\$TIME \$ip" >> /tmp/servers.txt
