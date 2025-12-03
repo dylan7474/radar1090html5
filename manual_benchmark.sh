@@ -3,30 +3,22 @@ set -euo pipefail
 
 usage() {
   cat <<USAGE
-Manual benchmark runner for Ollama hosts.
-Usage: $0 [options] <host1> [host2 ...]
+Manual Ollama selector. Points the app at a specific host and lets you pick a model
+from that host's /api/tags response.
+Usage: $0 [options] <host>
 
 Options (flags override env vars):
-  -m, --model NAME         Model name (default: ai-config.json -> llama3.2:1b)
-  -p, --port PORT          Ollama port (default: 11434)
-  -s, --samples N          Timed requests per host (default: 3)
-  -t, --timeout SEC        Per-request timeout (default: 20 seconds)
-      --connect-timeout S  Connect timeout (default: 5 seconds)
-  -d, --debug              Print curl diagnostics (or pass literal DEBUG as arg)
-  -h, --help               Show this help
+  -m, --model NAME   Model name (optional; prompts if omitted)
+  -p, --port PORT    Ollama port (default: 11434)
+  -h, --help         Show this help
 
 Environment overrides:
-  BENCHMARK_MODEL, OLLAMA_PORT, SAMPLES, TIMEOUT, CONNECT_TIMEOUT, DEBUG
+  OLLAMA_PORT
 USAGE
 }
 
-BENCHMARK_MODEL="${BENCHMARK_MODEL:-}"
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"
-SAMPLES="${SAMPLES:-3}"
-TIMEOUT="${TIMEOUT:-20}"
-CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-5}"
-WARMUP_TIMEOUT="${WARMUP_TIMEOUT:-30}"
-DEBUG="${DEBUG:-0}"
+SELECTED_MODEL="${BENCHMARK_MODEL:-}"
 
 HOSTS=()
 while [ "$#" -gt 0 ]; do
@@ -36,190 +28,87 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     -m|--model)
-      BENCHMARK_MODEL="$2"; shift 2 ;;
+      SELECTED_MODEL="$2"; shift 2 ;;
     -p|--port)
       OLLAMA_PORT="$2"; shift 2 ;;
-    -s|--samples)
-      SAMPLES="$2"; shift 2 ;;
-    -t|--timeout)
-      TIMEOUT="$2"; shift 2 ;;
-    --connect-timeout)
-      CONNECT_TIMEOUT="$2"; shift 2 ;;
-    -d|--debug)
-      DEBUG=1; shift ;;
     --)
       shift; HOSTS+=("$@"); break ;;
-    DEBUG)
-      DEBUG=1; shift ;;
     *)
       HOSTS+=("$1"); shift ;;
   esac
 done
 
-if [ "${#HOSTS[@]}" -lt 1 ]; then
-  echo "❌ Provide at least one host to benchmark."
+if [ "${#HOSTS[@]}" -ne 1 ]; then
+  echo "❌ Provide exactly one host to configure."
   usage
   exit 1
 fi
 
-if [ -z "${BENCHMARK_MODEL:-}" ] && [ -f ai-config.json ]; then
+if [ -z "$SELECTED_MODEL" ] && [ -f ai-config.json ]; then
   if jq -e . >/dev/null 2>&1 < ai-config.json; then
-    BENCHMARK_MODEL=$(jq -r '.ollamaModel // empty' ai-config.json || true)
+    SELECTED_MODEL=$(jq -r '.ollamaModel // empty' ai-config.json || true)
   else
-    echo "⚠️  Ignoring invalid ai-config.json (unable to parse JSON); falling back to default model." >&2
+    echo "⚠️  Ignoring invalid ai-config.json (unable to parse JSON)." >&2
   fi
 fi
-BENCHMARK_MODEL="${BENCHMARK_MODEL:-llama3.2:1b}"
 
-run_benchmark() {
-    BENCH_RESULT=""
-    BENCH_ERROR=""
-    BENCH_ERROR_CODE=""
+TARGET_HOST="${HOSTS[0]}"
 
-    ip="$1"
-    prompt="$2"
-    samples="${3:-3}"
-    timeout="${4:-8}"
+echo "🔎 Fetching models from http://$TARGET_HOST:$OLLAMA_PORT..."
+TAGS_JSON=$(curl -s --connect-timeout 5 -m 20 "http://$TARGET_HOST:$OLLAMA_PORT/api/tags" || true)
 
-    PROMPT_JSON=$(printf '%s' "$prompt" | jq -Rs .)
-    JSON_DATA=$(printf '{"model":"%s","prompt":%s,"stream":false}' "$BENCHMARK_MODEL" "$PROMPT_JSON")
-
-    CURL_ARGS=("-s" "-S" "--connect-timeout" "$CONNECT_TIMEOUT" "-H" "Content-Type: application/json" "-X" "POST" "http://$ip:$OLLAMA_PORT/api/generate" "-d" "$JSON_DATA")
-    DEBUG_FLAG=""
-    if [ "${DEBUG:-0}" -eq 1 ]; then
-      DEBUG_FLAG="-v"
-    fi
-
-    echo "  🔄 Warm-up request (may take a few seconds)..."
-    WARM_LOG="/tmp/bench_warmup_${ip}.log"
-    curl ${DEBUG_FLAG:-} "${CURL_ARGS[@]}" -m "$WARMUP_TIMEOUT" -o /dev/null 2>"$WARM_LOG" || true
-
-    if [ ! -s "$WARM_LOG" ] && [ "${DEBUG:-0}" -eq 1 ]; then
-      echo "    (warm-up curl produced no stderr output; checking connectivity)"
-    elif [ -s "$WARM_LOG" ]; then
-      WARM_DIAG=$(head -c 200 "$WARM_LOG" | tr '\n' ' ')
-      echo "    Warm-up stderr: ${WARM_DIAG}"
-      if printf '%s' "$WARM_DIAG" | grep -qi "Operation timed out"; then
-        echo "    Hint: increase --timeout (now $timeout)s or --connect-timeout (now $CONNECT_TIMEOUT)s if the host is slow."
-      fi
-    fi
-
-    TIMES=""
-    COMPLETED=0
-
-    i=1
-    while [ "$i" -le "$samples" ]; do
-        BODY_FILE="/tmp/bench_body_${ip}_${i}.txt"
-        ERR_FILE="/tmp/bench_err_${ip}_${i}.txt"
-        rm -f "$BODY_FILE" "$ERR_FILE"
-
-        echo -n "  • Sample $i/$samples: "
-        RESPONSE=$(curl ${DEBUG_FLAG:-} -o "$BODY_FILE" -w "%{time_total}:%{http_code}" "${CURL_ARGS[@]}" --connect-timeout "$CONNECT_TIMEOUT" -m "$timeout" 2>"$ERR_FILE" || true)
-
-        TIME=$(echo "$RESPONSE" | cut -d: -f1)
-        CODE=$(echo "$RESPONSE" | cut -d: -f2)
-        CODE=${CODE:-000}
-
-        if [ "$CODE" = "200" ]; then
-            TIMES="$TIMES $TIME"
-            COMPLETED=$((COMPLETED + 1))
-            echo "✅ ${TIME}s"
-        else
-            if [ -f "$BODY_FILE" ]; then
-                DIAG_BODY=$(head -c 200 "$BODY_FILE" | tr '\n' ' ')
-            else
-                DIAG_BODY=""
-            fi
-            if [ -f "$ERR_FILE" ]; then
-                DIAG_ERR=$(cat "$ERR_FILE" | tr '\n' ' ')
-            else
-                DIAG_ERR=""
-            fi
-
-            if [ -n "$DIAG_ERR" ]; then
-                BENCH_ERROR="HTTP $CODE - curl error: $DIAG_ERR"
-            elif [ -n "$DIAG_BODY" ]; then
-                BENCH_ERROR="HTTP $CODE - response: $DIAG_BODY"
-            else
-                BENCH_ERROR="HTTP $CODE - no response body"
-            fi
-            BENCH_ERROR_CODE="$CODE"
-            echo "❌ ${BENCH_ERROR}"
-
-            if [ "${DEBUG:-0}" -eq 1 ] && [ -z "$DIAG_ERR" ]; then
-              echo "    (no curl stderr captured; try curl manually: curl -v -X POST http://$ip:$OLLAMA_PORT/api/generate -H 'Content-Type: application/json' -d '$JSON_DATA')"
-            fi
-        fi
-
-        i=$((i + 1))
-    done
-
-    if [ "$COMPLETED" -eq 0 ]; then
-        BENCH_RESULT=""
-        return 1
-    fi
-
-    BENCH_RESULT=$(echo "$TIMES" | awk '{sum=0; count=0; for(i=1;i<=NF;i++){if($i ~ /^[0-9.]+$/){sum+=$i; count++}} if(count>0){printf "%.3f", sum/count}}')
-    return 0
-}
-
-function has_model() {
-  MODEL_PRESENT=$(printf '%s' "$1" | jq -r --arg MODEL "$BENCHMARK_MODEL" '.models[]? | (.name // .model // .) | select(. == $MODEL)' | head -n1)
-  [ -n "$MODEL_PRESENT" ]
-}
-
-total_success=0
-
-echo "Using model '$BENCHMARK_MODEL' on port $OLLAMA_PORT (samples: $SAMPLES, timeout: $TIMEOUT, connect-timeout: $CONNECT_TIMEOUT)"
-for host in "${HOSTS[@]}"; do
-  echo "------------------------------------------------"
-  echo "Benchmarking $host..."
-
-  HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 -m 4 "http://$host:$OLLAMA_PORT/api/version")
-  if [ "$HEALTH_CODE" != "200" ]; then
-    echo "  ❌ Health check failed (HTTP $HEALTH_CODE)"
-    continue
-  fi
-
-  TAGS_JSON=$(curl -s --connect-timeout 2 -m 8 "http://$host:$OLLAMA_PORT/api/tags" || true)
-  if [ -z "$TAGS_JSON" ]; then
-    echo "  ❌ Unable to read /api/tags"
-    continue
-  fi
-
-  if ! printf '%s' "$TAGS_JSON" | jq -e . >/dev/null 2>&1; then
-    echo "  ❌ /api/tags returned invalid JSON"
-    continue
-  fi
-
-  if ! has_model "$TAGS_JSON"; then
-    echo "  ❌ Required model '$BENCHMARK_MODEL' missing on host"
-    echo "$TAGS_JSON" | jq -r '.models[]? | "    - " + (.name // .model // .)' || true
-    continue
-  fi
-
-  run_benchmark "$host" "Benchmark latency for radar copilots" "$SAMPLES" "$TIMEOUT"
-  RESULT="$BENCH_RESULT"
-
-  if [ -z "$RESULT" ]; then
-    SOFT_CODES="000 408 425 429 500 502 503 504"
-    if echo " $SOFT_CODES " | grep -q " ${BENCH_ERROR_CODE:-000} "; then
-      echo "  ⚠️  Benchmark incomplete (${BENCH_ERROR:-unknown error}); host left eligible with fallback latency."
-      total_success=$((total_success + 1))
-    else
-      echo "  ❌ Benchmark failed (${BENCH_ERROR:-no response captured})"
-    fi
-    continue
-  fi
-
-  echo "  ⚡ Average latency: ${RESULT}s"
-  total_success=$((total_success + 1))
-done
-
-after_hosts=$((total_success))
-if [ "$after_hosts" -eq 0 ]; then
-  echo "No hosts completed benchmarking successfully."
+if [ -z "$TAGS_JSON" ]; then
+  echo "❌ Unable to read /api/tags from $TARGET_HOST:$OLLAMA_PORT"
   exit 1
 fi
 
-echo "✅ Completed benchmarking for $after_hosts host(s)."
+if ! printf '%s' "$TAGS_JSON" | jq -e . >/dev/null 2>&1; then
+  echo "❌ /api/tags returned invalid JSON"
+  exit 1
+fi
+
+mapfile -t MODELS < <(printf '%s' "$TAGS_JSON" | jq -r '.models[]? | (.name // .model // empty)' | sort -u)
+
+if [ ${#MODELS[@]} -eq 0 ]; then
+  echo "❌ No models reported by $TARGET_HOST"
+  exit 1
+fi
+
+if [ -n "$SELECTED_MODEL" ]; then
+  FOUND=0
+  for model in "${MODELS[@]}"; do
+    if [ "$model" = "$SELECTED_MODEL" ]; then
+      FOUND=1
+      break
+    fi
+  done
+  if [ "$FOUND" -eq 0 ]; then
+    echo "⚠️  Requested model '$SELECTED_MODEL' not found on host; ignoring override."
+    SELECTED_MODEL=""
+  fi
+fi
+
+if [ -z "$SELECTED_MODEL" ]; then
+  echo "Available models:"
+  for idx in "${!MODELS[@]}"; do
+    echo "  $((idx+1)). ${MODELS[$idx]}"
+  done
+  read -rp "Select model [1-${#MODELS[@]}] (default 1): " selection
+  selection=${selection:-1}
+  if ! [[ $selection =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#MODELS[@]} ]; then
+    echo "⚠️  Invalid choice; defaulting to option 1."
+    selection=1
+  fi
+  SELECTED_MODEL=${MODELS[$((selection-1))]}
+fi
+
+cat > ai-config.json <<EOF
+{
+  "ollamaModel": "$SELECTED_MODEL",
+  "ollamaHosts": [
+    "http://$TARGET_HOST:$OLLAMA_PORT"
+  ]
+}
+EOF
+
+echo "✅ Saved ai-config.json with host $TARGET_HOST:$OLLAMA_PORT and model '$SELECTED_MODEL'."

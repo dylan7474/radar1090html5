@@ -98,8 +98,7 @@ Raspberry Pi that bundles everything into a single host:
 
 1. **Local Audio:** Streams Airband audio from a connected RTL-SDR USB stick.
 2. **Remote Radar:** Proxies ADS-B flight data from a remote feeder.
-3. **Smart AI:** Auto-discovers and benchmarks Ollama servers on the LAN to find the
-   fastest GPU.
+3. **Smart AI:** Targets the Ollama host and model you pick during setup.
 
 ### Usage
 
@@ -142,31 +141,24 @@ slashes so `/api/*` requests do not double up and return 404s under strict proxi
 attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
 when the browser blocks HTTP calls from an HTTPS dashboard.
 
-The deployment script now selects an AI model during installation, only offering names that every
-reachable Ollama instance reports via `/api/tags`, and writes the choice to `ai-config.json` at
-the repository root. The dashboard reads that file on startup and engages the selected model
-automatically; rerun the installer if you need to change models later.
+During installation the deployment script now asks for the Ollama host/IP, lists the models that
+host reports via `/api/tags`, and writes your selection to `ai-config.json` at the repository root.
+The dashboard reads that file on startup and engages the selected model automatically; rerun the
+installer or `manual_benchmark.sh` if you need to change hosts or models later.
 
-### Manually benchmarking Ollama hosts
+### Manually setting the Ollama host and model
 
-Use `manual_benchmark.sh` when you want to mirror the installer's watchdog checks against specific
-hosts without rerunning the full deployment:
+Use `manual_benchmark.sh` to point the app at a specific Ollama host and pick one of the models the
+host reports via `/api/tags`:
 
 ```bash
-./manual_benchmark.sh 192.168.50.3 192.168.50.5 192.168.50.136
+./manual_benchmark.sh 192.168.50.3
 ```
 
-- Default model: reads `ai-config.json` (if present) or falls back to `llama3.2:1b` so the prompt
-  matches the installer.
-- Health preflight: runs `/api/version` and `/api/tags` first, skipping hosts that do not expose the
-  target model.
-- Timing loop: warms the model then averages three timed `/api/generate` calls. Defaults can be
-  overridden via flags or env vars (`--samples`, `--timeout`/`TIMEOUT`, `--connect-timeout`/`CONNECT_TIMEOUT`,
-  `--model`/`BENCHMARK_MODEL`, `--port`/`OLLAMA_PORT`, `--debug`). The default per-request timeout is 20s
-  with a 30s warm-up to avoid false negatives on slower hosts.
-
-If every host fails, double-check the model list on each target with `curl http://HOST:11434/api/tags
-| jq '.models[]?.name'` and align `BENCHMARK_MODEL` accordingly.
+- Defaults: the script pre-fills the model selection from `ai-config.json` when available; otherwise
+  you can pass `--model` or choose interactively.
+- Output: writes `ai-config.json` with the chosen host and model so the app and installer share the
+  same configuration.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 
