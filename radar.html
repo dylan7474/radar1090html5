@@ -77,7 +77,7 @@
               <span class="control-value status-text" id="ai-status-text" title="Status">OFFLINE</span>
             </div>
             <div class="control-buttons">
-              <button type="button" class="control-button" id="ai-toggle-btn">RETRY</button>
+              <button type="button" class="control-button" id="ai-toggle-btn">RECONNECT</button>
             </div>
           </div>
 
@@ -107,7 +107,6 @@
           
           <div class="control-row control-row--single">
              <div class="control-buttons">
-               <button type="button" class="control-button" id="ai-self-test-btn">RUN AI SELF-TEST</button>
                 <button type="button" class="control-button" id="show-log-btn">VIEW COMMS LOG</button>
              </div>
           </div>
@@ -446,7 +445,6 @@
 
     // Slow hosts can take a while to load or answer Ollama requests; allow up to 120s.
     const OLLAMA_CONNECT_TIMEOUT_MS = 120000;
-    const OLLAMA_SELF_TEST_TIMEOUT_MS = 120000;
     const OLLAMA_CHAT_TIMEOUT_MS = 120000;
 
     const voiceNameMatches = (voice, hints) => {
@@ -861,9 +859,6 @@
         renderLogEntries();
         logModal.hidden = false;
     });
-    document.getElementById('ai-self-test-btn').addEventListener('click', () => {
-        runAiSelfTest().catch(e => aiLog('AI ERROR', `Self-test failed: ${e.message || e}`, 'alert'));
-    });
     document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
     document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
 
@@ -1086,6 +1081,15 @@
         }
     }
 
+    let aiReconnectInFlight = false;
+
+    function setAiReconnectState(isRunning) {
+        const btn = document.getElementById('ai-toggle-btn');
+        if (!btn) return;
+        btn.disabled = isRunning;
+        btn.innerText = isRunning ? 'CONNECTING...' : 'RECONNECT';
+    }
+
     function aiLog(title, text, type = 'normal') {
         const tick = document.getElementById('message-ticker-track');
         const time = new Date().toLocaleTimeString();
@@ -1104,7 +1108,26 @@
         else console.log(payload);
     }
 
-    document.getElementById('ai-toggle-btn').addEventListener('click', detectModel);
+    document.getElementById('ai-toggle-btn').addEventListener('click', async () => {
+        if (aiReconnectInFlight) return;
+
+        aiReconnectInFlight = true;
+        setAiReconnectState(true);
+        aiLog('AI', 'Manual reconnect requested. Retrying Ollama detection...');
+
+        try {
+            const connected = await detectModel();
+            if (connected) {
+                aiProcessing = false;
+                runAiCycle({ forceImmediate: true });
+            }
+        } catch (err) {
+            console.error('AI reconnect failed', err);
+        } finally {
+            aiReconnectInFlight = false;
+            setAiReconnectState(false);
+        }
+    });
     document.getElementById('tts-mute-toggle').addEventListener('click', () => {
         voiceEnabled = !voiceEnabled;
         const btn = document.getElementById('tts-mute-toggle');
@@ -1282,31 +1305,6 @@
             clearTimeout(timer);
             aiLog('DEBUG', `No-cors probe failed at ${candidate}: ${probeErr.message || probeErr}`, 'debug');
         }
-    }
-
-    async function runAiSelfTest() {
-        const candidates = [...ollamaCandidates];
-        aiLog('DEBUG', `Self-test: checking ${candidates.length} Ollama candidate(s): ${candidates.join(', ')}`, 'debug');
-
-        for (const candidate of candidates) {
-            try {
-                const resp = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_SELF_TEST_TIMEOUT_MS, `Self-test tags @ ${candidate}`);
-                const summary = `Self-test: ${candidate} responded with status ${resp.status} (type=${resp.type})`;
-                if (resp.status === 403) {
-                    lastCorsForbiddenCandidate = candidate;
-                    aiLog('DEBUG', `${summary} — add OLLAMA_ORIGINS for ${window.location.origin} or enable /ollama proxy.`, 'debug');
-                } else {
-                    aiLog(resp.ok ? 'AI' : 'DEBUG', summary, resp.ok ? 'normal' : 'debug');
-                }
-            } catch (e) {
-                aiLog('DEBUG', `Self-test (cors) failed at ${candidate}: ${e.message || e}`, 'debug');
-            }
-
-            await probeOllamaReachability(candidate);
-        }
-
-        aiLog('DEBUG', 'Self-test complete. If every candidate returns 404, confirm your lighttpd proxy forwards /ollama/* to 127.0.0.1:11434 and preserves trailing slashes.', 'debug');
-        logOllamaRemediation();
     }
 
     async function runAiCycle(options = {}) {
