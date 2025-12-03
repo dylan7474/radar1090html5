@@ -278,6 +278,10 @@ SCAN_NET="__SCAN_NET__"
 CHECK_INTERVAL="__CHECK_INTERVAL__"
 
 run_benchmark() {
+    BENCH_RESULT=""
+    BENCH_ERROR=""
+    BENCH_ERROR_CODE=""
+
     ip="$1"
     prompt="$2"
     samples="${3:-3}"
@@ -289,8 +293,6 @@ run_benchmark() {
 
     TIMES=""
     COMPLETED=0
-    BENCH_ERROR=""
-    BENCH_ERROR_CODE=""
 
     i=1
     while [ "$i" -le "$samples" ]; do
@@ -335,12 +337,12 @@ run_benchmark() {
     done
 
     if [ "$COMPLETED" -eq 0 ]; then
-        echo ""
-        return
+        BENCH_RESULT=""
+        return 1
     fi
 
-    AVG=$(echo "$TIMES" | awk '{sum=0; count=0; for(i=1;i<=NF;i++){if($i ~ /^[0-9.]+$/){sum+=$i; count++}} if(count>0){printf "%.3f", sum/count}}')
-    echo "$AVG"
+    BENCH_RESULT=$(echo "$TIMES" | awk '{sum=0; count=0; for(i=1;i<=NF;i++){if($i ~ /^[0-9.]+$/){sum+=$i; count++}} if(count>0){printf "%.3f", sum/count}}')
+    return 0
 }
 run_scan_and_config() {
     echo "------------------------------------------------"
@@ -379,7 +381,8 @@ run_scan_and_config() {
 
         echo "   ✅ $ip - Ollama reachable with $BENCHMARK_MODEL"
         echo "$ip" >> /tmp/healthy_hosts.txt
-        RESULT=$(run_benchmark "$ip" "Benchmark latency for radar copilots" 3 8)
+        run_benchmark "$ip" "Benchmark latency for radar copilots" 3 8
+        RESULT="$BENCH_RESULT"
 
         if [ -z "$RESULT" ]; then
             SOFT_CODES="000 408 425 429 500 502 503 504"
