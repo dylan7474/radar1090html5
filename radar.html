@@ -391,24 +391,30 @@
         if (!Array.isArray(modelCollections) || modelCollections.length === 0) return [];
 
         const canonicalNames = new Map();
-        const lowerCaseCollections = modelCollections.map((collection, index) => {
-            const lowered = collection.map((name) => {
-                const lower = (name || '').toLowerCase();
-                if (index === 0 && lower) {
-                    canonicalNames.set(lower, name);
-                }
-                return lower;
-            }).filter(Boolean);
-            return new Set(lowered);
-        });
+        const normalized = modelCollections
+            .filter(Array.isArray)
+            .map((collection, index) => {
+                const cleaned = collection
+                    .map((name) => (name || '').trim())
+                    .filter(Boolean)
+                    .map((name) => {
+                        const lower = name.toLowerCase();
+                        if (index === 0 && lower) {
+                            canonicalNames.set(lower, name);
+                        }
+                        return lower;
+                    });
+                return new Set(cleaned);
+            });
 
-        let shared = lowerCaseCollections[0];
-        for (let i = 1; i < lowerCaseCollections.length; i += 1) {
-            shared = new Set([...shared].filter((name) => lowerCaseCollections[i].has(name)));
-            if (shared.size === 0) break;
-        }
+        if (!normalized.length) return [];
 
-        return [...shared]
+        const shared = normalized.reduce((acc, current) => {
+            if (!acc) return new Set(current);
+            return new Set([...acc].filter((name) => current.has(name)));
+        }, null);
+
+        return [...(shared || [])]
             .map((name) => canonicalNames.get(name) || name)
             .sort();
     };
@@ -473,6 +479,19 @@
             ? modelPreference
             : '';
     };
+
+    if (aiModelSelect) {
+        aiModelSelect.addEventListener('change', async (event) => {
+            const selected = (event.target.value || '').trim();
+            persistModelPreference(selected);
+            aiLog('AI', selected ? `Switching to ${selected} (will use only if shared)` : 'Cleared model preference; reverting to shared auto-select.');
+            const ok = await detectModel();
+            if (ok) {
+                aiLog('DEBUG', `Model engaged: ${AI_CONFIG.ollamaModel} @ ${AI_CONFIG.ollamaUrl}`, 'debug');
+                runAiCycle({ forceImmediate: true });
+            }
+        });
+    }
 
     const COMMENTARY_COOLDOWN_MS = 2 * 60 * 1000; // Enforce 2 minute spacing between spoken updates
     let lastCommentaryTimestamp = 0;
