@@ -52,6 +52,7 @@
 
   <!-- INITIALIZATION OVERLAY -->
   <div id="interaction-overlay" onclick="startSystem()">
+    <div class="version-chip" id="overlay-version" aria-label="Application version"></div>
     <div id="start-btn">INITIALIZE RADAR</div>
     <div style="margin-top: 20px; color: #888; font-family: monospace;">CLICK TO ACTIVATE AI & AUDIO LINKS</div>
   </div>
@@ -567,10 +568,10 @@
             });
 
             updateAiStatus("INITIALIZING...", "#ffff00");
-            
+
             // BOOT SEQUENCE: Start with a clear chime before the first broadcast
             setTimeout(() => {
-                 speak("System Online. Sensors Calibrated.");
+                 speak("System Online.");
                  detectModel();
                  setInterval(runAiCycle, AI_CONFIG.scanInterval);
                  setInterval(fetchLocalWeather, 30 * 60 * 1000);
