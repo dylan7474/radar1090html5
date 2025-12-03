@@ -221,6 +221,7 @@ run_scan_and_config() {
 
         TIME=\$(echo "\$RESPONSE" | cut -d: -f1)
         CODE=\$(echo "\$RESPONSE" | cut -d: -f2)
+        CODE=\${CODE:-000}
 
         if [ "\$CODE" = "404" ]; then
             echo "   ⚠️  \$ip - Benchmark model '$BENCHMARK_MODEL' missing (HTTP 404). Skipping latency ranking."
@@ -232,11 +233,19 @@ run_scan_and_config() {
             DIAG_ERR=\$(cat "\$BENCH_ERR" | tr '\n' ' ')
 
             if [ -n "\$DIAG_ERR" ]; then
-                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - curl error: \$DIAG_ERR"
+                DIAG_SUMMARY="curl error: \$DIAG_ERR"
             elif [ -n "\$DIAG_BODY" ]; then
-                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - response: \$DIAG_BODY"
+                DIAG_SUMMARY="response: \$DIAG_BODY"
             else
-                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - no response body"
+                DIAG_SUMMARY="no response body"
+            fi
+
+            SOFT_CODES="000 408 425 429 500 502 503 504"
+            if echo " \$SOFT_CODES " | grep -q " \$CODE "; then
+                echo "   ⚠️  \$ip - Benchmark incomplete (HTTP \$CODE) - \$DIAG_SUMMARY. Using fallback latency to keep host eligible."
+                echo "9999 \$ip" >> /tmp/servers.txt
+            else
+                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - \$DIAG_SUMMARY"
             fi
         else
             echo "   ⚡ \$ip - \${TIME}s"
@@ -245,15 +254,26 @@ run_scan_and_config() {
     done
 
     SORTED_SERVERS=\$(sort -n /tmp/servers.txt | awk '{print \$2}')
+
+    BENCHMARKED_HOSTS=\$(awk '{print \$2}' /tmp/servers.txt)
+    HEALTHY_HOSTS=\$(cat /tmp/healthy_hosts.txt)
+
     if [ -z "\$SORTED_SERVERS" ]; then
-        HEALTHY_FALLBACK=\$(cat /tmp/healthy_hosts.txt)
-        if [ -n "\$HEALTHY_FALLBACK" ]; then
+        if [ -n "\$HEALTHY_HOSTS" ]; then
             echo "⚠️  No benchmarks succeeded; using healthy hosts without ranking."
-            SORTED_SERVERS="\$HEALTHY_FALLBACK"
+            SORTED_SERVERS="\$HEALTHY_HOSTS"
         else
             echo "⚠️  No reachable Ollama servers detected; using raw scan results."
             SORTED_SERVERS="\$RAW_IPS"
         fi
+    else
+        # Append healthy-but-unbenchmarked hosts as backups so they remain eligible.
+        for ip in \$HEALTHY_HOSTS; do
+            if ! echo " \$BENCHMARKED_HOSTS " | grep -q " \$ip "; then
+                echo "   ➕ \$ip - Healthy but no benchmark result; adding as backup."
+                SORTED_SERVERS="\$SORTED_SERVERS \$ip"
+            fi
+        done
     fi
 
     UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
