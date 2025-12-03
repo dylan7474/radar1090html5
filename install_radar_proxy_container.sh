@@ -194,21 +194,36 @@ run_scan_and_config() {
     fi
 
     echo "⏱️  Running 'Sprint' Benchmark ($BENCHMARK_MODEL)..."
-    rm -f /tmp/servers.txt
-    touch /tmp/servers.txt
+    rm -f /tmp/servers.txt /tmp/healthy_hosts.txt
+    touch /tmp/servers.txt /tmp/healthy_hosts.txt
 
     for ip in \$RAW_IPS; do
+        HEALTH_CODE=\$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 -m 4 "http://\$ip:$OLLAMA_PORT/api/version")
+
+        if [ "\$HEALTH_CODE" != "200" ]; then
+            echo "   ❌ \$ip - Health check failed (HTTP \$HEALTH_CODE)"
+            continue
+        fi
+
+        echo "   ✅ \$ip - Ollama reachable"
+        echo "\$ip" >> /tmp/healthy_hosts.txt
+
         # Use double quotes for JSON to allow variable expansion
         JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"1\", \"stream\": false}"
-        
+
         # We silence the output (-o /dev/null) to prevent variable corruption
         RESPONSE=\$(curl -s -o /dev/null -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA")
-        
+
         TIME=\$(echo "\$RESPONSE" | cut -d: -f1)
         CODE=\$(echo "\$RESPONSE" | cut -d: -f2)
 
+        if [ "\$CODE" = "404" ]; then
+            echo "   ⚠️  \$ip - Benchmark model '$BENCHMARK_MODEL' missing (HTTP 404). Skipping latency ranking."
+            continue
+        fi
+
         if [ "\$CODE" != "200" ]; then
-            echo "   ❌ \$ip - Failed (HTTP \$CODE)"
+            echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE)"
         else
             echo "   ⚡ \$ip - \${TIME}s"
             echo "\$TIME \$ip" >> /tmp/servers.txt
@@ -216,6 +231,17 @@ run_scan_and_config() {
     done
 
     SORTED_SERVERS=\$(sort -n /tmp/servers.txt | awk '{print \$2}')
+    if [ -z "\$SORTED_SERVERS" ]; then
+        HEALTHY_FALLBACK=\$(cat /tmp/healthy_hosts.txt)
+        if [ -n "\$HEALTHY_FALLBACK" ]; then
+            echo "⚠️  No benchmarks succeeded; using healthy hosts without ranking."
+            SORTED_SERVERS="\$HEALTHY_FALLBACK"
+        else
+            echo "⚠️  No reachable Ollama servers detected; using raw scan results."
+            SORTED_SERVERS="\$RAW_IPS"
+        fi
+    fi
+
     UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
     TEMP_CONFIG="/tmp/ollama_upstreams.tmp"
     
