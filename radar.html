@@ -217,25 +217,40 @@
   </div>
   <div class="modal" id="persona-editor-modal" hidden aria-hidden="true">
     <div class="modal__backdrop" id="persona-editor-backdrop"></div>
-    <section class="modal__dialog modal__dialog--full" role="dialog" aria-modal="true">
-      <header class="persona-editor__hero">
-        <div class="persona-editor__title-block">
-          <p class="persona-editor__eyebrow">AI Prompt Workspace</p>
-          <h2>AI Persona Prompts</h2>
-          <p class="modal__hint">Tailor each persona's tasking and style. Changes are stored in this browser's localStorage.</p>
+    <section class="modal__dialog modal__dialog--workspace" role="dialog" aria-modal="true">
+      <div class="persona-workspace">
+        <header class="persona-workspace__header">
+          <div class="persona-workspace__titles">
+            <p class="persona-workspace__eyebrow">AI Prompt Studio</p>
+            <h2>Persona Prompts</h2>
+            <p class="persona-workspace__lede">Use the full-screen studio to edit system, tasking, and style guidance. Updates are stored only in this browser.</p>
+          </div>
+          <div class="persona-workspace__actions">
+            <button type="button" class="control-button" id="persona-editor-reset">Reset to defaults</button>
+            <button type="button" class="control-button" id="persona-editor-cancel">Close</button>
+            <button type="button" class="control-button primary" id="persona-editor-save">Save Prompts</button>
+          </div>
+        </header>
+
+        <div class="persona-workspace__main">
+          <aside class="persona-workspace__nav">
+            <div class="persona-workspace__nav-header">
+              <p class="persona-workspace__nav-title">Personas</p>
+              <p class="persona-workspace__nav-help">Switch personas to edit one at a time.</p>
+            </div>
+            <div class="persona-workspace__nav-list" id="persona-editor-nav"></div>
+          </aside>
+
+          <div class="persona-workspace__content">
+            <div class="persona-workspace__intro" id="persona-editor-hint"></div>
+            <div class="persona-workspace__fields" id="persona-editor-fields"></div>
+          </div>
         </div>
-        <div class="persona-editor__toolbar">
-          <button type="button" class="control-button" id="persona-editor-reset">Reset to defaults</button>
-          <button type="button" class="control-button" id="persona-editor-cancel">Close</button>
-          <button type="button" class="control-button primary" id="persona-editor-save">Save Prompts</button>
-        </div>
-      </header>
-      <div class="persona-editor__body">
-        <div class="persona-editor__list" id="persona-editor-list"></div>
+
+        <footer class="persona-workspace__footer">
+          <p class="persona-workspace__footer-note">Edits stay in this browser. Reset restores the built-in defaults.</p>
+        </footer>
       </div>
-      <footer class="persona-editor__footer">
-        <p class="persona-editor__footer-note">Edits live only in this browser. Reset to restore the built-in defaults.</p>
-      </footer>
     </section>
   </div>
   <!-- LOG MODAL -->
@@ -744,74 +759,132 @@
     document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
 
     const personaEditorModal = document.getElementById('persona-editor-modal');
-    const personaEditorList = document.getElementById('persona-editor-list');
     const personaEditorBackdrop = document.getElementById('persona-editor-backdrop');
+    const personaEditorNav = document.getElementById('persona-editor-nav');
+    const personaEditorFields = document.getElementById('persona-editor-fields');
+    const personaEditorHint = document.getElementById('persona-editor-hint');
 
-    const buildPersonaEditorField = (key, field, labelText, value) => {
+    const PERSONA_DESCRIPTIONS = {
+        MILITARY: 'Forward air defense tone focused on threat calls and intent.',
+        ATC: 'ATC cadence with crisp situational readouts for controllers.',
+        SPOTTER: 'Spotter radio flavor with informal airshow callouts.'
+    };
+
+    const cloneProfiles = (profiles) => JSON.parse(JSON.stringify(profiles || {}));
+
+    let personaEditorDrafts = cloneProfiles(personaProfiles);
+    let personaEditorSelected = PERSONA_KEYS[0];
+
+    const buildPersonaEditorField = (key, field, labelText, value, helpText) => {
         const wrapper = document.createElement('div');
         wrapper.className = 'persona-editor__field';
         const label = document.createElement('div');
         label.className = 'persona-editor__label';
         label.textContent = labelText;
+        const hint = document.createElement('p');
+        hint.className = 'persona-editor__hint';
+        hint.textContent = helpText || '';
         const textarea = document.createElement('textarea');
         textarea.className = 'persona-editor__textarea';
+        textarea.rows = 10;
         textarea.dataset.key = key;
         textarea.dataset.field = field;
         textarea.value = value || '';
-        wrapper.append(label, textarea);
+        wrapper.append(label, hint, textarea);
         return wrapper;
     };
 
-    const renderPersonaEditor = () => {
-        if (!personaEditorList) return;
-        personaEditorList.innerHTML = '';
-        PERSONA_KEYS.forEach((key) => {
-            const profile = getPersonaProfile(key) || {};
-            const group = document.createElement('div');
-            group.className = 'persona-editor__group';
-
-            const header = document.createElement('div');
-            header.className = 'persona-editor__header';
-            const title = document.createElement('div');
-            title.className = 'persona-editor__title';
-            title.textContent = profile.label || key;
-            const pill = document.createElement('div');
-            pill.className = 'persona-editor__pill';
-            pill.textContent = key;
-            header.append(title, pill);
-
-            const systemField = buildPersonaEditorField(key, 'system', 'System prompt', profile.system || '');
-            const taskingField = buildPersonaEditorField(key, 'tasking', 'Tasking instructions', profile.tasking || '');
-            const styleField = buildPersonaEditorField(key, 'styleHint', 'Style hints', profile.styleHint || '');
-
-            group.append(header, systemField, taskingField, styleField);
-            personaEditorList.appendChild(group);
+    const syncDraftFromFields = () => {
+        if (!personaEditorFields) return;
+        const inputs = personaEditorFields.querySelectorAll('textarea[data-key][data-field]');
+        inputs.forEach((input) => {
+            const key = input.dataset.key;
+            const field = input.dataset.field;
+            if (!key || !field) return;
+            personaEditorDrafts[key] = {
+                ...personaEditorDrafts[key],
+                ...getPersonaProfile(key),
+                [field]: input.value.trim()
+            };
         });
     };
 
-    const closePersonaEditor = () => { if (personaEditorModal) personaEditorModal.hidden = true; };
+    const renderPersonaFields = () => {
+        if (!personaEditorFields) return;
+        const profile = personaEditorDrafts[personaEditorSelected] || getPersonaProfile(personaEditorSelected) || {};
+        personaEditorFields.innerHTML = '';
+        const helperCopy = PERSONA_DESCRIPTIONS[personaEditorSelected] || 'Tune the persona tone and tasking in these fields.';
+        if (personaEditorHint) personaEditorHint.textContent = helperCopy;
+
+        const systemField = buildPersonaEditorField(
+            personaEditorSelected,
+            'system',
+            'System prompt',
+            profile.system || '',
+            'Explain who the persona is, their mission, and any non-negotiable rules.'
+        );
+        const taskingField = buildPersonaEditorField(
+            personaEditorSelected,
+            'tasking',
+            'Tasking instructions',
+            profile.tasking || '',
+            'Set the output format and brevity—what the model must deliver back.'
+        );
+        const styleField = buildPersonaEditorField(
+            personaEditorSelected,
+            'styleHint',
+            'Style hints',
+            profile.styleHint || '',
+            'Describe the cadence, word choice, and voice color to apply.'
+        );
+
+        personaEditorFields.append(systemField, taskingField, styleField);
+    };
+
+    const renderPersonaNav = () => {
+        if (!personaEditorNav) return;
+        personaEditorNav.innerHTML = '';
+        PERSONA_KEYS.forEach((key) => {
+            const profile = personaEditorDrafts[key] || getPersonaProfile(key) || {};
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = `persona-workspace__nav-item${personaEditorSelected === key ? ' is-active' : ''}`;
+            item.innerHTML = `
+                <div class="persona-workspace__nav-row">
+                  <span class="persona-workspace__nav-label">${profile.label || key}</span>
+                  <span class="persona-workspace__pill">${key}</span>
+                </div>
+                <p class="persona-workspace__nav-sub">${PERSONA_DESCRIPTIONS[key] || ''}</p>
+            `;
+            item.addEventListener('click', () => {
+                if (personaEditorSelected === key) return;
+                syncDraftFromFields();
+                personaEditorSelected = key;
+                renderPersonaNav();
+                renderPersonaFields();
+            });
+            personaEditorNav.appendChild(item);
+        });
+    };
+
+    const closePersonaEditor = () => {
+        if (personaEditorModal) personaEditorModal.hidden = true;
+        personaEditorDrafts = cloneProfiles(personaProfiles);
+    };
 
     const openPersonaEditor = () => {
         if (!personaEditorModal) return;
-        renderPersonaEditor();
+        personaEditorSelected = document.getElementById('ai-persona-select')?.value || PERSONA_KEYS[0];
+        personaEditorDrafts = cloneProfiles(personaProfiles);
+        renderPersonaNav();
+        renderPersonaFields();
         personaEditorModal.hidden = false;
     };
 
     const personaSaveBtn = document.getElementById('persona-editor-save');
     if (personaSaveBtn) personaSaveBtn.addEventListener('click', () => {
-        const updated = { ...personaProfiles };
-        PERSONA_KEYS.forEach((key) => {
-            const system = document.querySelector(`textarea[data-field="system"][data-key="${key}"]`);
-            const tasking = document.querySelector(`textarea[data-field="tasking"][data-key="${key}"]`);
-            const style = document.querySelector(`textarea[data-field="styleHint"][data-key="${key}"]`);
-            updated[key] = {
-                ...getPersonaProfile(key),
-                system: ((system?.value || '').trim()) || DEFAULT_PERSONAS[key].system,
-                tasking: ((tasking?.value || '').trim()) || DEFAULT_PERSONAS[key].tasking,
-                styleHint: (style?.value || '').trim()
-            };
-        });
-        personaProfiles = buildPersonaProfiles(updated);
+        syncDraftFromFields();
+        personaProfiles = buildPersonaProfiles(personaEditorDrafts);
         persistPersonaOverrides(personaProfiles);
         hydratePersonaSelector();
         closePersonaEditor();
@@ -821,8 +894,10 @@
     const personaResetBtn = document.getElementById('persona-editor-reset');
     if (personaResetBtn) personaResetBtn.addEventListener('click', () => {
         localStorage.removeItem(PERSONA_OVERRIDES_KEY);
+        personaEditorDrafts = buildPersonaProfiles({});
         personaProfiles = buildPersonaProfiles({});
-        renderPersonaEditor();
+        renderPersonaNav();
+        renderPersonaFields();
         hydratePersonaSelector();
         aiLog('AI', 'Persona prompts reset to defaults.');
     });
