@@ -21,7 +21,7 @@ const AUDIO_PULSE_PERIOD_MS = 1400;
 const AUDIO_PULSE_RING_COUNT = 3;
 const AUDIO_PULSE_BASE_RADIUS_RATIO = 0.08;
 const AUDIO_PULSE_SPREAD_RATIO = 0.18;
-const APP_VERSION = 'V1.9.72';
+const APP_VERSION = 'V1.9.73';
 const ALT_LOW_FEET = 10000;
 const ALT_HIGH_FEET = 30000;
 const FREQ_LOW = 800;
@@ -173,6 +173,7 @@ const messageEl = document.getElementById('message');
 const messageTickerEl = document.getElementById('message-ticker');
 const messageTickerTrackEl = document.getElementById('message-ticker-track');
 const versionEl = document.getElementById('version');
+const overlayVersionEl = document.getElementById('overlay-version');
 const volumeLabelEl = document.getElementById('volume-label');
 const volumeDescriptionEl = document.getElementById('volume-description');
 const volumeValueEl = document.getElementById('volume-value');
@@ -1476,6 +1477,11 @@ function attemptAudioPlayback() {
 if (versionEl) {
   versionEl.textContent = APP_VERSION;
   versionEl.setAttribute('title', `Build ${APP_VERSION}`);
+}
+
+if (overlayVersionEl) {
+  overlayVersionEl.textContent = APP_VERSION;
+  overlayVersionEl.setAttribute('title', `Build ${APP_VERSION}`);
 }
 
 refreshAircraftDetailsControls();
