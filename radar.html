@@ -485,6 +485,7 @@
     let currentUtterance = null;
     let isSpeaking = false;
     let aiVoiceSuppressed = false;
+    let lastAudioSignalState = 'unknown';
     let pendingHeldUtterance = null;
     let audioContext = null;
     let msgHistory = [];
@@ -578,8 +579,6 @@
     }
 
     function holdAiVoiceForAirband(state) {
-        if (aiVoiceSuppressed) return;
-
         aiVoiceSuppressed = true;
         if (isSpeaking) {
             pendingHeldUtterance = currentUtterance?.text || pendingHeldUtterance;
@@ -609,7 +608,8 @@
     }
 
     window.addEventListener('audio-signal-state-change', (event) => {
-        const state = event.detail?.state;
+        const state = event.detail?.state || 'unknown';
+        lastAudioSignalState = state;
         if (state === 'active') {
             holdAiVoiceForAirband(state);
             return;
@@ -633,10 +633,15 @@
         try { carrierNode.disconnect(); carrierGain.disconnect(); } catch (e) { /* noop */ }
         carrierNode = null; carrierGain = null;
     }
-    
+
     // --- CORE LOGIC ---
     function speak(text) {
         if (!voiceEnabled) return;
+        if (lastAudioSignalState === 'active') {
+            pendingHeldUtterance = pendingHeldUtterance || text;
+            holdAiVoiceForAirband(lastAudioSignalState);
+            return;
+        }
         if (aiVoiceSuppressed) {
             pendingHeldUtterance = text;
             aiLog('DEBUG', 'Holding AI voice while airband traffic is active', 'debug');
