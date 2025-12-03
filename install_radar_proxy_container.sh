@@ -273,14 +273,14 @@ mkdir -p "$RUNTIME_DIR"
 cat > "$RUNTIME_DIR/boot.sh" <<EOF
 #!/bin/sh
 run_benchmark() {
-    ip="$1"
-    prompt="$2"
-    samples="${3:-3}"
-    timeout="${4:-8}"
+    ip="\$1"
+    prompt="\$2"
+    samples="\${3:-3}"
+    timeout="\${4:-8}"
 
     # Always warm the model first so the measured requests aren't penalized by load time.
-    JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"$prompt\", \"stream\": false}"
-    curl -s -o /dev/null --connect-timeout 3 -m 12 -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>/tmp/bench_warmup_"$ip".log || true
+    JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"\\$prompt\", \"stream\": false}"
+    curl -s -o /dev/null --connect-timeout 3 -m 12 -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA" 2>/tmp/bench_warmup_"\$ip".log || true
 
     TIMES=""
     COMPLETED=0
@@ -288,45 +288,53 @@ run_benchmark() {
     BENCH_ERROR_CODE=""
 
     i=1
-    while [ "$i" -le "$samples" ]; do
-        BODY_FILE="/tmp/bench_body_${ip}_$i.txt"
-        ERR_FILE="/tmp/bench_err_${ip}_$i.txt"
-        rm -f "$BODY_FILE" "$ERR_FILE"
+    while [ "\$i" -le "\$samples" ]; do
+        BODY_FILE="/tmp/bench_body_\${ip}_\${i}.txt"
+        ERR_FILE="/tmp/bench_err_\${ip}_\${i}.txt"
+        rm -f "\$BODY_FILE" "\$ERR_FILE"
 
-        RESPONSE=$(curl -s -o "$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "$timeout" \
-                       -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>"$ERR_FILE" || true)
+        RESPONSE=$(curl -s -o "\$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "\$timeout" \
+                       -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA" 2>"\$ERR_FILE" || true)
 
-        TIME=$(echo "$RESPONSE" | cut -d: -f1)
-        CODE=$(echo "$RESPONSE" | cut -d: -f2)
-        CODE=${CODE:-000}
+        TIME=$(echo "\$RESPONSE" | cut -d: -f1)
+        CODE=$(echo "\$RESPONSE" | cut -d: -f2)
+        CODE=\${CODE:-000}
 
-        if [ "$CODE" = "200" ]; then
-            TIMES="$TIMES $TIME"
-            COMPLETED=$((COMPLETED + 1))
+        if [ "\$CODE" = "200" ]; then
+            TIMES="\$TIMES \$TIME"
+            COMPLETED=\$((COMPLETED + 1))
         else
-            DIAG_BODY=$(head -c 200 "$BODY_FILE" | tr '\n' ' ')
-            DIAG_ERR=$(cat "$ERR_FILE" | tr '\n' ' ')
-
-            if [ -n "$DIAG_ERR" ]; then
-                BENCH_ERROR="HTTP $CODE - curl error: $DIAG_ERR"
-            elif [ -n "$DIAG_BODY" ]; then
-                BENCH_ERROR="HTTP $CODE - response: $DIAG_BODY"
+            if [ -f "\$BODY_FILE" ]; then
+                DIAG_BODY=$(head -c 200 "\$BODY_FILE" | tr '\n' ' ')
             else
-                BENCH_ERROR="HTTP $CODE - no response body"
+                DIAG_BODY=""
             fi
-            BENCH_ERROR_CODE="$CODE"
+            if [ -f "\$ERR_FILE" ]; then
+                DIAG_ERR=$(cat "\$ERR_FILE" | tr '\n' ' ')
+            else
+                DIAG_ERR=""
+            fi
+
+            if [ -n "\$DIAG_ERR" ]; then
+                BENCH_ERROR="HTTP \$CODE - curl error: \$DIAG_ERR"
+            elif [ -n "\$DIAG_BODY" ]; then
+                BENCH_ERROR="HTTP \$CODE - response: \$DIAG_BODY"
+            else
+                BENCH_ERROR="HTTP \$CODE - no response body"
+            fi
+            BENCH_ERROR_CODE="\$CODE"
         fi
 
-        i=$((i + 1))
+        i=\$((i + 1))
     done
 
-    if [ "$COMPLETED" -eq 0 ]; then
+    if [ "\$COMPLETED" -eq 0 ]; then
         echo ""
         return
     fi
 
-    AVG=$(echo "$TIMES" | awk '{sum=0; count=0; for(i=1;i<=NF;i++){if($i ~ /^[0-9.]+$/){sum+=$i; count++}} if(count>0){printf "%.3f", sum/count}}')
-    echo "$AVG"
+    AVG=$(echo "\$TIMES" | awk '{sum=0; count=0; for(i=1;i<=NF;i++){if($i ~ /^[0-9.]+$/){sum+=$i; count++}} if(count>0){printf "%.3f", sum/count}}')
+    echo "\$AVG"
 }
 run_scan_and_config() {
     echo "------------------------------------------------"
@@ -404,6 +412,8 @@ run_scan_and_config() {
             fi
         done
     fi
+
+    SORTED_SERVERS=$(echo "\$SORTED_SERVERS" | tr ' ' '\n' | awk 'NF && !seen[$1]++')
 
     UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
     TEMP_CONFIG="/tmp/ollama_upstreams.tmp"
