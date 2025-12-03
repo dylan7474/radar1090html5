@@ -303,7 +303,6 @@ server {
 EOF
 
 cat > "$RUNTIME_DIR/docker-compose.yml" <<EOF
-version: '3.8'
 services:
   radar-gateway:
     image: nginx:alpine
@@ -328,7 +327,11 @@ EOF
 # ==========================================
 echo ">>> [7/7] Launching Container..."
 cd "$RUNTIME_DIR"
-if command -v docker &> /dev/null; then sudo docker compose down --remove-orphans 2>/dev/null; sudo docker compose up -d; fi
+if command -v docker &> /dev/null; then
+    sudo docker rm -f radar1090-gateway 2>/dev/null || true
+    sudo docker compose down --remove-orphans 2>/dev/null || true
+    sudo docker compose up -d
+fi
 
 echo ""
 echo "========================================================"
