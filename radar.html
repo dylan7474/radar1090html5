@@ -87,6 +87,10 @@
                 <option value="ATC">Air Traffic Control</option>
                 <option value="SPOTTER">Plane Spotter</option>
              </select>
+             <div class="ai-editor-actions">
+                <button type="button" class="control-button control-button--ghost" id="edit-persona-btn">Edit Persona Prompts</button>
+                <p class="modal__hint">Updates save locally so you can tune each persona without editing the file.</p>
+             </div>
           </div>
 
           <div class="control-row">
@@ -211,6 +215,45 @@
       </div>
     </section>
   </div>
+  <div class="modal" id="persona-editor-modal" hidden aria-hidden="true">
+    <div class="modal__backdrop" id="persona-editor-backdrop"></div>
+    <section class="modal__dialog modal__dialog--workspace" role="dialog" aria-modal="true">
+      <div class="persona-workspace">
+        <header class="persona-workspace__header">
+          <div class="persona-workspace__titles">
+            <p class="persona-workspace__eyebrow">AI Prompt Studio</p>
+            <h2>Persona Prompts</h2>
+            <p class="persona-workspace__lede">Use the full-screen studio to edit system, tasking, and style guidance. Updates are stored only in this browser.</p>
+          </div>
+          <div class="persona-workspace__actions">
+            <button type="button" class="control-button" id="persona-editor-reset">Reset to defaults</button>
+            <button type="button" class="control-button" id="persona-editor-cancel">Close</button>
+            <button type="button" class="control-button primary" id="persona-editor-save">Save Prompts</button>
+          </div>
+        </header>
+
+        <div class="persona-workspace__main">
+          <aside class="persona-workspace__nav">
+            <div class="persona-workspace__nav-header">
+              <p class="persona-workspace__nav-title">Personas</p>
+              <p class="persona-workspace__nav-help">Switch personas to edit one at a time.</p>
+            </div>
+            <div class="persona-workspace__nav-list" id="persona-editor-nav"></div>
+          </aside>
+
+          <div class="persona-workspace__content">
+            <div class="persona-workspace__active" id="persona-editor-active"></div>
+            <div class="persona-workspace__intro" id="persona-editor-hint"></div>
+            <div class="persona-workspace__fields" id="persona-editor-fields"></div>
+          </div>
+        </div>
+
+        <footer class="persona-workspace__footer">
+          <p class="persona-workspace__footer-note">Edits stay in this browser. Reset restores the built-in defaults.</p>
+        </footer>
+      </div>
+    </section>
+  </div>
   <!-- LOG MODAL -->
   <div class="modal" id="ai-log-modal" hidden aria-hidden="true">
     <div class="modal__backdrop" id="ai-log-backdrop"></div>
@@ -315,17 +358,29 @@
         return hints.some((hint) => name.includes(hint));
     };
 
-    const PERSONAS = {
-        MILITARY: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent—assume every track could be hostile until cleared. Analyze behaviour for threat patterns (rapid climb/descents, formation spacing, racetrack or holding patterns, base approaches). Declare bogeys/bandits, call intent (hot/cold), and issue shoot/no-shoot vibes. Do NOT read out raw transponder stats; focus only on threat calls, intent, and manoeuvre analysis. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
-        ATC: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide one transmission to pilots: lead with conflicts/alerts, then ICAO-style traffic advisories with callout clock position, distance, altitude, and heading. Keep it standard phraseology, neutral delivery, no jokes, no questions.`,
-        SPOTTER: `Role: over-caffeinated plane spotter livestreaming to friends. Tone: goofy git streamer—riff with memes, playful analogies, and self-aware jokes about liveries, types, or wild turns. Sound like you're narrating a chaotic Twitch chat. One hyped-up sentence only—no instructions or questions.`
+    const PERSONA_OVERRIDES_KEY = 'aiPersonaOverrides';
+    const DEFAULT_PERSONAS = {
+        MILITARY: {
+            label: 'Tactical Defense',
+            system: `Role: forward air defense controller in an active war zone. Tone: clenched and urgent—assume every track could be hostile until cleared. Analyze behaviour for threat patterns (rapid climb/descents, formation spacing, racetrack or holding patterns, base approaches). Declare bogeys/bandits, call intent (hot/cold), and issue shoot/no-shoot vibes. Do NOT read out raw transponder stats; focus only on threat calls, intent, and manoeuvre analysis. Use clipped brevity ("bogey", "bandit", "hot", "cold", "spiked"), never polite, no hedging.`,
+            styleHint: 'War-zone sitrep. Rapid-fire, terse, brevity codes, threat priority, behaviour analysis.',
+            tasking: 'TASK: One persona-tuned line under 40 words. Lead with threat calls and pattern/intent analysis (hot/cold, intercept posture, formation spacing, racetrack/holding). Skip raw telemetry (ranges, altitudes, speeds); focus on tactical picture, threat priority, and shifts.'
+        },
+        ATC: {
+            label: 'Air Traffic Control',
+            system: `Role: {LOCATION} RADAR controller. Tone: calm, procedural. Provide one transmission to pilots: lead with conflicts/alerts, then ICAO-style traffic advisories with callout clock position, distance, altitude, and heading. Keep it standard phraseology, neutral delivery, no jokes, no questions.`,
+            styleHint: 'Neutral ATC cadence. Standard phraseology, deconfliction first.',
+            tasking: 'TASK: One persona-tuned line under 40 words. Lead with alerts, then priority contacts with range/altitude/heading/speed/trend and any intent (hot/cold, holding, intercept, formation, base approach). Note overall density and any pattern shifts.'
+        },
+        SPOTTER: {
+            label: 'Plane Spotter',
+            system: `Role: over-caffeinated plane spotter livestreaming to friends. Tone: goofy git streamer—riff with memes, playful analogies, and self-aware jokes about liveries, types, or wild turns. Sound like you're narrating a chaotic Twitch chat. One hyped-up sentence only—no instructions or questions.`,
+            styleHint: 'Chaotic livestream hype. Jokes, memes, playful commentary.',
+            tasking: 'TASK: One persona-tuned line under 40 words. Lead with alerts, then priority contacts with range/altitude/heading/speed/trend and any intent (hot/cold, holding, intercept, formation, base approach). Note overall density and any pattern shifts.'
+        }
     };
 
-    const PERSONA_STYLE_HINTS = {
-        MILITARY: 'War-zone sitrep. Rapid-fire, terse, brevity codes, threat priority, behaviour analysis.',
-        ATC: 'Neutral ATC cadence. Standard phraseology, deconfliction first.',
-        SPOTTER: 'Chaotic livestream hype. Jokes, memes, playful commentary.'
-    };
+    const PERSONA_KEYS = Object.keys(DEFAULT_PERSONAS);
 
     const FEMALE_VOICE_HINTS = ['female', 'woman', 'lady', 'fiona', 'olivia', 'emma', 'amy', 'serena', 'susan', 'victoria', 'kate', 'karen'];
     const MALE_VOICE_HINTS = ['male', 'man', 'guy', 'boy', 'david', 'daniel', 'liam', 'sean', 'declan', 'brian', 'paul', 'peter', 'michael', 'jack', 'ryan', 'george'];
@@ -358,7 +413,72 @@
         ]
     };
 
+    const parsePersonaOverrides = () => {
+        try {
+            const raw = localStorage.getItem(PERSONA_OVERRIDES_KEY);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+            console.warn('Unable to read persona overrides', e);
+            return {};
+        }
+    };
+
+    const buildPersonaProfiles = (overrides = null) => {
+        const stored = overrides ?? parsePersonaOverrides();
+        const merged = {};
+        PERSONA_KEYS.forEach((key) => {
+            const defaults = DEFAULT_PERSONAS[key];
+            const override = stored[key] || {};
+            const system = (override.system ?? '').trim();
+            const styleHint = (override.styleHint ?? '').trim();
+            const tasking = (override.tasking ?? '').trim();
+            merged[key] = {
+                label: defaults.label,
+                system: system || defaults.system,
+                styleHint: styleHint || defaults.styleHint || '',
+                tasking: tasking || defaults.tasking
+            };
+        });
+        return merged;
+    };
+
+    let personaProfiles = buildPersonaProfiles();
+
+    const getPersonaProfile = (key) => personaProfiles[key] || DEFAULT_PERSONAS[key];
+
+    const persistPersonaOverrides = (profiles) => {
+        const overrides = {};
+        PERSONA_KEYS.forEach((key) => {
+            const profile = profiles[key];
+            if (!profile) return;
+            overrides[key] = {
+                system: (profile.system ?? '').trim(),
+                styleHint: (profile.styleHint ?? '').trim(),
+                tasking: (profile.tasking ?? '').trim()
+            };
+        });
+        try {
+            localStorage.setItem(PERSONA_OVERRIDES_KEY, JSON.stringify(overrides));
+        } catch (err) {
+            console.warn('Unable to persist persona overrides', err);
+        }
+        return overrides;
+    };
+
+    const hydratePersonaSelector = () => {
+        const select = document.getElementById('ai-persona-select');
+        if (!select) return;
+        Array.from(select.options).forEach((opt) => {
+            const profile = getPersonaProfile(opt.value);
+            if (profile?.label) opt.textContent = profile.label;
+        });
+    };
+
     const AIRCRAFT_TYPES = { "B738": "Boeing 737", "A320": "Airbus A320", "B77W": "Boeing 777", "B744": "Boeing 747", "A388": "Airbus A380", "C172": "Cessna 172", "B789": "Dreamliner", "A359": "Airbus A350", "H25B": "HondaJet", "F16": "F-16 Fighting Falcon", "F35": "F-35 Lightning", "EUFI": "Eurofighter" };
+
+    hydratePersonaSelector();
 
     let aiProcessing = false;
     let systemActive = false;
@@ -438,7 +558,7 @@
         } catch(e) { console.warn("Web Audio API not supported"); }
 
         const savedPersona = getCookie("aiPersona");
-        if(savedPersona && PERSONAS[savedPersona]) document.getElementById('ai-persona-select').value = savedPersona;
+        if(savedPersona && getPersonaProfile(savedPersona)) document.getElementById('ai-persona-select').value = savedPersona;
 
         updateReceiverLocation().then(() => {
             fetchLocalWeather();
@@ -646,6 +766,175 @@
     document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
     document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
 
+    const personaEditorModal = document.getElementById('persona-editor-modal');
+    const personaEditorBackdrop = document.getElementById('persona-editor-backdrop');
+    const personaEditorNav = document.getElementById('persona-editor-nav');
+    const personaEditorFields = document.getElementById('persona-editor-fields');
+    const personaEditorHint = document.getElementById('persona-editor-hint');
+    const personaEditorActive = document.getElementById('persona-editor-active');
+
+    const PERSONA_DESCRIPTIONS = {
+        MILITARY: 'Forward air defense tone focused on threat calls and intent.',
+        ATC: 'ATC cadence with crisp situational readouts for controllers.',
+        SPOTTER: 'Spotter radio flavor with informal airshow callouts.'
+    };
+
+    const cloneProfiles = (profiles) => JSON.parse(JSON.stringify(profiles || {}));
+
+    let personaEditorDrafts = cloneProfiles(personaProfiles);
+    let personaEditorSelected = PERSONA_KEYS[0];
+
+    const toggleBodyScrollLock = (locked) => {
+        document.body.classList.toggle('no-scroll', !!locked);
+    };
+
+    const buildPersonaEditorField = (key, field, labelText, value, helpText) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'persona-editor__field';
+        const label = document.createElement('div');
+        label.className = 'persona-editor__label';
+        label.textContent = labelText;
+        const hint = document.createElement('p');
+        hint.className = 'persona-editor__hint';
+        hint.textContent = helpText || '';
+        const textarea = document.createElement('textarea');
+        textarea.className = 'persona-editor__textarea';
+        textarea.rows = 10;
+        textarea.dataset.key = key;
+        textarea.dataset.field = field;
+        textarea.value = value || '';
+        wrapper.append(label, hint, textarea);
+        return wrapper;
+    };
+
+    const syncDraftFromFields = () => {
+        if (!personaEditorFields) return;
+        const inputs = personaEditorFields.querySelectorAll('textarea[data-key][data-field]');
+        inputs.forEach((input) => {
+            const key = input.dataset.key;
+            const field = input.dataset.field;
+            if (!key || !field) return;
+            const existing = personaEditorDrafts[key] || getPersonaProfile(key) || {};
+            personaEditorDrafts[key] = {
+                ...existing,
+                [field]: input.value.trim()
+            };
+        });
+    };
+
+    const renderPersonaFields = () => {
+        if (!personaEditorFields) return;
+        const profile = personaEditorDrafts[personaEditorSelected] || getPersonaProfile(personaEditorSelected) || {};
+        personaEditorFields.innerHTML = '';
+        const helperCopy = PERSONA_DESCRIPTIONS[personaEditorSelected] || 'Tune the persona tone and tasking in these fields.';
+        if (personaEditorHint) personaEditorHint.textContent = helperCopy;
+        if (personaEditorActive) {
+            const label = profile.label || personaEditorSelected;
+            personaEditorActive.innerHTML = `
+              <div>
+                <p class="persona-workspace__active-title">${label}</p>
+                <p class="persona-workspace__active-sub">Editing ${personaEditorSelected} persona</p>
+              </div>
+              <span class="persona-workspace__pill">${personaEditorSelected}</span>
+            `;
+        }
+
+        const systemField = buildPersonaEditorField(
+            personaEditorSelected,
+            'system',
+            'System prompt',
+            profile.system || '',
+            'Explain who the persona is, their mission, and any non-negotiable rules.'
+        );
+        const taskingField = buildPersonaEditorField(
+            personaEditorSelected,
+            'tasking',
+            'Tasking instructions',
+            profile.tasking || '',
+            'Set the output format and brevity—what the model must deliver back.'
+        );
+        const styleField = buildPersonaEditorField(
+            personaEditorSelected,
+            'styleHint',
+            'Style hints',
+            profile.styleHint || '',
+            'Describe the cadence, word choice, and voice color to apply.'
+        );
+
+        personaEditorFields.append(systemField, taskingField, styleField);
+    };
+
+    const renderPersonaNav = () => {
+        if (!personaEditorNav) return;
+        personaEditorNav.innerHTML = '';
+        PERSONA_KEYS.forEach((key) => {
+            const profile = personaEditorDrafts[key] || getPersonaProfile(key) || {};
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = `persona-workspace__nav-item${personaEditorSelected === key ? ' is-active' : ''}`;
+            item.innerHTML = `
+                <div class="persona-workspace__nav-row">
+                  <span class="persona-workspace__nav-label">${profile.label || key}</span>
+                  <span class="persona-workspace__pill">${key}</span>
+                </div>
+                <p class="persona-workspace__nav-sub">${PERSONA_DESCRIPTIONS[key] || ''}</p>
+            `;
+            item.addEventListener('click', () => {
+                if (personaEditorSelected === key) return;
+                syncDraftFromFields();
+                personaEditorSelected = key;
+                renderPersonaNav();
+                renderPersonaFields();
+            });
+            personaEditorNav.appendChild(item);
+        });
+    };
+
+    const closePersonaEditor = () => {
+        if (personaEditorModal) personaEditorModal.hidden = true;
+        personaEditorDrafts = cloneProfiles(personaProfiles);
+        toggleBodyScrollLock(false);
+    };
+
+    const openPersonaEditor = () => {
+        if (!personaEditorModal) return;
+        personaProfiles = buildPersonaProfiles();
+        personaEditorSelected = document.getElementById('ai-persona-select')?.value || PERSONA_KEYS[0];
+        personaEditorDrafts = cloneProfiles(personaProfiles);
+        renderPersonaNav();
+        renderPersonaFields();
+        personaEditorModal.hidden = false;
+        toggleBodyScrollLock(true);
+    };
+
+    const personaSaveBtn = document.getElementById('persona-editor-save');
+    if (personaSaveBtn) personaSaveBtn.addEventListener('click', () => {
+        syncDraftFromFields();
+        const overrides = persistPersonaOverrides(personaEditorDrafts);
+        personaProfiles = buildPersonaProfiles(overrides);
+        personaEditorDrafts = cloneProfiles(personaProfiles);
+        hydratePersonaSelector();
+        closePersonaEditor();
+        aiLog('AI', 'Persona prompts saved locally.');
+    });
+
+    const personaResetBtn = document.getElementById('persona-editor-reset');
+    if (personaResetBtn) personaResetBtn.addEventListener('click', () => {
+        localStorage.removeItem(PERSONA_OVERRIDES_KEY);
+        personaEditorDrafts = buildPersonaProfiles({});
+        personaProfiles = buildPersonaProfiles({});
+        renderPersonaNav();
+        renderPersonaFields();
+        hydratePersonaSelector();
+        aiLog('AI', 'Persona prompts reset to defaults.');
+    });
+
+    const personaCancelBtn = document.getElementById('persona-editor-cancel');
+    if (personaCancelBtn) personaCancelBtn.addEventListener('click', closePersonaEditor);
+    if (personaEditorBackdrop) personaEditorBackdrop.addEventListener('click', closePersonaEditor);
+    const personaEditBtn = document.getElementById('edit-persona-btn');
+    if (personaEditBtn) personaEditBtn.addEventListener('click', openPersonaEditor);
+
     async function fetchLocationName(lat, lon) {
         try {
             const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`);
@@ -728,7 +1017,8 @@
         setCookie("aiPersona", e.target.value, 365);
         window.speechSynthesis.cancel();
         stopSpeechSequence();
-        aiLog('AI', `Persona switched to ${e.target.value}`);
+        const profile = getPersonaProfile(e.target.value);
+        aiLog('AI', `Persona switched to ${profile?.label || e.target.value}`);
         updateAiStatus("SWITCHING MODE...", "#ffff00");
         setTimeout(() => { aiProcessing=false; runAiCycle({ forceImmediate: true }); }, 100);
     });
@@ -950,10 +1240,11 @@
 
     async function generateCommentary(targets, count, alerts) {
         const key = document.getElementById('ai-persona-select').value;
-        let persona = PERSONAS[key];
+        const profile = getPersonaProfile(key);
+        let persona = profile?.system || DEFAULT_PERSONAS.MILITARY.system;
         if(key==='ATC' && AI_CONFIG.locationName) persona = persona.replace("{LOCATION}", AI_CONFIG.locationName.toUpperCase());
 
-        const styleHint = PERSONA_STYLE_HINTS[key] || '';
+        const styleHint = profile?.styleHint || '';
 
         const report = targets.map(p => {
             const trend = p.vertRate > 500 ? `climbing ${p.vertRate}fpm` : p.vertRate < -500 ? `descending ${Math.abs(p.vertRate)}fpm` : 'level';
@@ -961,9 +1252,7 @@
         }).join("\n");
         const density = count > 15 ? "HEAVY" : count > 5 ? "MODERATE" : "LIGHT";
 
-        const tasking = key === 'MILITARY'
-            ? 'TASK: One persona-tuned line under 40 words. Lead with threat calls and pattern/intent analysis (hot/cold, intercept posture, formation spacing, racetrack/holding). Skip raw telemetry (ranges, altitudes, speeds); focus on tactical picture, threat priority, and shifts.'
-            : 'TASK: One persona-tuned line under 40 words. Lead with alerts, then priority contacts with range/altitude/heading/speed/trend and any intent (hot/cold, holding, intercept, formation, base approach). Note overall density and any pattern shifts.';
+        const tasking = profile?.tasking || DEFAULT_PERSONAS[key]?.tasking || DEFAULT_PERSONAS.MILITARY.tasking;
 
         const prompt = `TIME: ${new Date().toLocaleTimeString()}. WEATHER: ${AI_CONFIG.weatherData ? AI_CONFIG.weatherData.temp+"C" : "?"}.
         TRAFFIC: ${count} (Density: ${density}). LIST: ${report}. ALERTS: ${alerts.join(",") || "None"}.
