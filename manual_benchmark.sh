@@ -50,6 +50,7 @@ run_benchmark() {
 
     PROMPT_JSON=$(printf '%s' "$prompt" | jq -Rs .)
     JSON_DATA=$(printf '{"model":"%s","prompt":%s,"stream":false}' "$BENCHMARK_MODEL" "$PROMPT_JSON")
+    echo "  🔄 Warm-up request (may take a few seconds)..."
     curl -s -o /dev/null --connect-timeout 3 -m 12 -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>/tmp/bench_warmup_"$ip".log || true
 
     TIMES=""
@@ -61,6 +62,7 @@ run_benchmark() {
         ERR_FILE="/tmp/bench_err_${ip}_${i}.txt"
         rm -f "$BODY_FILE" "$ERR_FILE"
 
+        echo -n "  • Sample $i/$samples: "
         RESPONSE=$(curl -s -o "$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "$timeout" \
             -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>"$ERR_FILE" || true)
 
@@ -71,6 +73,7 @@ run_benchmark() {
         if [ "$CODE" = "200" ]; then
             TIMES="$TIMES $TIME"
             COMPLETED=$((COMPLETED + 1))
+            echo "✅ ${TIME}s"
         else
             if [ -f "$BODY_FILE" ]; then
                 DIAG_BODY=$(head -c 200 "$BODY_FILE" | tr '\n' ' ')
@@ -91,6 +94,7 @@ run_benchmark() {
                 BENCH_ERROR="HTTP $CODE - no response body"
             fi
             BENCH_ERROR_CODE="$CODE"
+            echo "❌ ${BENCH_ERROR}"
         fi
 
         i=$((i + 1))
