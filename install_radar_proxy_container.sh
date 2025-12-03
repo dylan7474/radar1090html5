@@ -2,16 +2,16 @@
 set -euo pipefail
 
 # ==========================================
-# 🔐 CONFIGURATION (HARDCODED STABILITY)
+# 🔐 CONFIGURATION
 # ==========================================
 if [ "$#" -ne 1 ]; then
     echo "❌ Error: You must provide a password."
-    echo "Usage: sudo ./deploy_all_v21.sh 'YourPasswordHere'"
+    echo "Usage: sudo ./deploy_all_v22.sh 'YourPasswordHere'"
     exit 1
 fi
 RAW_PASS="$1"
 
-# --- NETWORK SETTINGS ---
+# --- NETWORK ---
 DUMP1090_IP="192.168.50.100"
 DUMP1090_PORT="8080"
 AUDIO_IP="127.0.0.1"
@@ -19,12 +19,9 @@ AUDIO_PORT="8000"
 OLLAMA_PORT="11434"
 SCAN_NET="192.168.50.0/24"
 CHECK_INTERVAL="600"
-
-# --- AI MODEL (HARDCODED FOR STABILITY) ---
-# We use the specific model you know works.
 BENCHMARK_MODEL="llama3.2:1b"
 
-# --- SYSTEM SETTINGS ---
+# --- SYSTEM ---
 GATEWAY_PORT="80" 
 AIRBAND_REPO="https://github.com/szpajder/RTLSDR-Airband.git"
 AIRBAND_DIR="rtl_airband"
@@ -38,7 +35,7 @@ CURRENT_GROUP=$(id -gn $CURRENT_USER)
 CURRENT_IP=$(hostname -I | awk '{print $1}')
 
 # ==========================================
-# 🔄 HELPER FUNCTION
+# 🔄 HELPER
 # ==========================================
 function run_with_retry() {
     local n=1; local max=5; local delay=5
@@ -56,7 +53,7 @@ function run_with_retry() {
     done
 }
 
-echo ">>> STARTING DEPLOYMENT V21 (Stable V16 + SD Protection)"
+echo ">>> STARTING DEPLOYMENT V22 (Clean Repo Version)"
 echo ">>> Host IP: $CURRENT_IP"
 
 # ==========================================
@@ -69,23 +66,17 @@ if [ ! -f "radar.html" ]; then
     exit 1
 fi
 
-# Stop conflicting web servers
 sudo systemctl stop lighttpd apache2 nginx 2>/dev/null || true
 sudo systemctl disable lighttpd apache2 nginx 2>/dev/null || true
-
-# Clean docker lists
-if [ -f /etc/apt/sources.list.d/docker.list ]; then
-    sudo rm /etc/apt/sources.list.d/docker.list
-fi
+[ -f /etc/apt/sources.list.d/docker.list ] && sudo rm /etc/apt/sources.list.d/docker.list
 
 run_with_retry sudo apt-get update -qq
 
-# Install Docker
 if ! command -v docker &> /dev/null; then
     echo "    Installing Docker..."
     sudo apt-get install -y ca-certificates curl gnupg
     sudo install -m 0755 -d /etc/apt/keyrings
-    if [ -f /etc/apt/keyrings/docker.asc ]; then sudo rm /etc/apt/keyrings/docker.asc; fi
+    [ -f /etc/apt/keyrings/docker.asc ] && sudo rm /etc/apt/keyrings/docker.asc
     run_with_retry curl -fsSL https://download.docker.com/linux/raspbian/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/raspbian bookworm stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
@@ -95,35 +86,30 @@ if ! command -v docker &> /dev/null; then
     sudo usermod -aG docker "$CURRENT_USER"
 fi
 
-# Install Dependencies (Including ZRAM tools)
 sudo apt-get install -y -qq git build-essential cmake libmp3lame-dev libshout3-dev \
   libasound2-dev ffmpeg rtl-sdr pkg-config jq icecast2 netcat-openbsd \
   libconfig++-dev librtlsdr-dev libfftw3-dev liquidsoap curl zram-tools bc
 
 # ==========================================
-# PHASE 1.5: ZRAM (SD CARD PROTECTION)
+# PHASE 1.5: ZRAM
 # ==========================================
 echo ">>> [2/7] Optimizing Memory..."
-
-# 1. Disable slow disk swap
 if systemctl is-active --quiet dphys-swapfile; then
     sudo systemctl stop dphys-swapfile
     sudo systemctl disable dphys-swapfile
     sudo rm -f /var/swap
 fi
 
-# 2. Reset ZRAM to clear locks (The Fix)
+# Reset ZRAM to clear locks
 sudo systemctl stop zramswap 2>/dev/null || true
 sudo swapoff /dev/zram0 2>/dev/null || true
 sudo modprobe -r zram 2>/dev/null || true
 
-# 3. Configure ZRAM
 sudo tee /etc/default/zramswap > /dev/null <<EOF
 ALGO=lz4
 PERCENT=60
 EOF
 
-# 4. Start ZRAM
 sudo modprobe zram
 echo "vm.swappiness=100" | sudo tee /etc/sysctl.d/99-zram.conf > /dev/null
 sudo sysctl -p /etc/sysctl.d/99-zram.conf > /dev/null
@@ -133,7 +119,6 @@ sudo systemctl restart zramswap
 # PHASE 2: AUDIO
 # ==========================================
 echo ">>> [3/7] Configuring Icecast..."
-
 if ! grep -q "<source-password>$SED_SAFE_PASS</source-password>" /etc/icecast2/icecast.xml; then
     sudo sed -i "s|<source-password>.*</source-password>|<source-password>$SED_SAFE_PASS</source-password>|" /etc/icecast2/icecast.xml
     sudo sed -i "s|<relay-password>.*</relay-password>|<relay-password>$SED_SAFE_PASS</relay-password>|" /etc/icecast2/icecast.xml
@@ -143,11 +128,7 @@ sudo sed -i "s|<hostname>.*</hostname>|<hostname>$CURRENT_IP</hostname>|" /etc/i
 sudo systemctl restart icecast2
 
 if ! command -v rtl_airband &> /dev/null; then
-    if [ ! -d "$AIRBAND_DIR" ]; then
-        run_with_retry git clone "$AIRBAND_REPO" "$AIRBAND_DIR"
-    else
-        cd "$AIRBAND_DIR" && git pull && cd ..
-    fi
+    if [ ! -d "$AIRBAND_DIR" ]; then run_with_retry git clone "$AIRBAND_REPO" "$AIRBAND_DIR"; else cd "$AIRBAND_DIR" && git pull && cd ..; fi
     sudo chown -R "$CURRENT_USER":"$CURRENT_GROUP" "$AIRBAND_DIR"
     cd "$AIRBAND_DIR" && mkdir -p build && cd build && make clean || true
     cmake .. -DWITH_WBFM=ON -DWITH_SSBD=ON -DNFM=ON && make -j$(nproc) && sudo make install
@@ -194,7 +175,7 @@ sudo systemctl enable rtl_airband ffmpeg_airband
 sudo systemctl restart rtl_airband ffmpeg_airband
 
 # ==========================================
-# PHASE 3: RUNTIME CONFIG (WATCHDOG)
+# PHASE 3: RUNTIME CONFIG
 # ==========================================
 echo ">>> [4/7] Configuring Runtime..."
 mkdir -p "$RUNTIME_DIR"
@@ -217,19 +198,17 @@ run_scan_and_config() {
     touch /tmp/servers.txt
 
     for ip in \$RAW_IPS; do
-        # THE SPRINT TEST (Using hardcoded model for stability)
-        # Note: We use -o /dev/null to silence the output so it doesn't break the variable
+        # Use double quotes for JSON to allow variable expansion
+        JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"1\", \"stream\": false}"
         
-        JSON_DATA='{"model": "$BENCHMARK_MODEL", "prompt": "1", "stream": false}'
+        # We silence the output (-o /dev/null) to prevent variable corruption
+        RESPONSE=\$(curl -s -o /dev/null -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA")
         
-        TIME=\$(curl -s -o /dev/null -w "%{time_total}" \\
-             --connect-timeout 2 -m 5 \\
-             -X POST "http://\$ip:$OLLAMA_PORT/api/generate" \\
-             -d "\$JSON_DATA")
-        
-        # Validation: If it timed out or failed (0.000), mark as unreachable
-        if [ -z "\$TIME" ] || [ "\$TIME" = "0.000" ]; then
-            echo "   ❌ \$ip - Failed Benchmark"
+        TIME=\$(echo "\$RESPONSE" | cut -d: -f1)
+        CODE=\$(echo "\$RESPONSE" | cut -d: -f2)
+
+        if [ "\$CODE" != "200" ]; then
+            echo "   ❌ \$ip - Failed (HTTP \$CODE)"
         else
             echo "   ⚡ \$ip - \${TIME}s"
             echo "\$TIME \$ip" >> /tmp/servers.txt
@@ -277,7 +256,7 @@ server {
     listen $GATEWAY_PORT; 
     server_name localhost;
     
-    # 🛑 PRODUCTION MODE: DISABLE LOGS TO SAVE SD CARD
+    # 🛑 PRODUCTION: LOGS DISABLED
     access_log off;
     error_log /dev/null crit;
     
@@ -321,9 +300,8 @@ services:
     entrypoint: ["/bin/sh", "/boot.sh"]
 EOF
 
-sed -i 's|const AUDIO_STREAM_URL = .*;|const AUDIO_STREAM_URL = "/airbands";|g' "app.js"
-sed -i 's|dump1090Base: "http.*",|dump1090Base: "/dump1090-fa/data",|g' "radar.html"
-sed -i 's|ollamaUrl: defaultOllamaUrl,|ollamaUrl: window.location.origin + "/ollama",|g' "radar.html"
+# Note: We NO LONGER patch JS/HTML files here.
+# We assume the source code has been updated to use relative paths.
 
 # ==========================================
 # PHASE 5: LAUNCH
@@ -334,7 +312,7 @@ if command -v docker &> /dev/null; then sudo docker compose down --remove-orphan
 
 echo ""
 echo "========================================================"
-echo " 🚀 SYSTEM ONLINE (Stable V16 Logic)"
+echo " 🚀 SYSTEM ONLINE (Clean Repo Mode)"
 echo "========================================================"
 echo " 🌍 Gateway:   http://$CURRENT_IP/"
 echo " 🛡️  Security:  Logs Disabled + ZRAM Enabled"
