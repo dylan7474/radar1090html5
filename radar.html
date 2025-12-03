@@ -452,12 +452,20 @@
             const defaults = DEFAULT_PERSONAS[key];
             if (!profile || !defaults) return;
             const delta = {};
-            if (profile.system && profile.system !== defaults.system) delta.system = profile.system;
-            if (profile.styleHint && profile.styleHint !== defaults.styleHint) delta.styleHint = profile.styleHint;
-            if (profile.tasking && profile.tasking !== defaults.tasking) delta.tasking = profile.tasking;
+            const system = (profile.system || '').trim();
+            const styleHint = (profile.styleHint || '').trim();
+            const tasking = (profile.tasking || '').trim();
+            if (system && system !== defaults.system) delta.system = system;
+            if (styleHint && styleHint !== defaults.styleHint) delta.styleHint = styleHint;
+            if (tasking && tasking !== defaults.tasking) delta.tasking = tasking;
             if (Object.keys(delta).length) overrides[key] = delta;
         });
-        localStorage.setItem(PERSONA_OVERRIDES_KEY, JSON.stringify(overrides));
+        try {
+            localStorage.setItem(PERSONA_OVERRIDES_KEY, JSON.stringify(overrides));
+        } catch (err) {
+            console.warn('Unable to persist persona overrides', err);
+        }
+        return overrides;
     };
 
     const hydratePersonaSelector = () => {
@@ -891,6 +899,7 @@
 
     const openPersonaEditor = () => {
         if (!personaEditorModal) return;
+        personaProfiles = buildPersonaProfiles();
         personaEditorSelected = document.getElementById('ai-persona-select')?.value || PERSONA_KEYS[0];
         personaEditorDrafts = cloneProfiles(personaProfiles);
         renderPersonaNav();
@@ -902,8 +911,9 @@
     const personaSaveBtn = document.getElementById('persona-editor-save');
     if (personaSaveBtn) personaSaveBtn.addEventListener('click', () => {
         syncDraftFromFields();
-        personaProfiles = buildPersonaProfiles(personaEditorDrafts);
-        persistPersonaOverrides(personaProfiles);
+        const overrides = persistPersonaOverrides(personaEditorDrafts);
+        personaProfiles = buildPersonaProfiles(overrides);
+        personaEditorDrafts = cloneProfiles(personaProfiles);
         hydratePersonaSelector();
         closePersonaEditor();
         aiLog('AI', 'Persona prompts saved locally.');
