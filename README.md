@@ -10,7 +10,7 @@ Two entry points are available depending on your deployment:
 - `radar.html`: the AI-enabled dashboard that layers Ollama-assisted commentary and
   controls on top of the standard radar UI.
 
-**Current Version:** V1.9.82
+**Current Version:** V1.9.83
 
 ---
 
@@ -39,6 +39,7 @@ Two entry points are available depending on your deployment:
   server path preferences.
 - AI personas can be edited in-app (system prompt, tasking, and style hints) through a spacious full-screen workspace with
   changes stored locally so custom voice guidance survives reloads.
+- Default AI persona prompts are trimmed for lightweight (<1 GB) local models while keeping tone and tasking distinct for each role.
 - One-tap "Use My Location" control recenters the radar on your current coordinates and keeps them stored for future visits.
 - Manual receiver picker opens an interactive OpenStreetMap-powered picker so you can drop a marker on your station when GPS fixes are unreliable, automatically falling back between multiple CDN sources if the first map library request is blocked.
 - If location permissions are blocked, an in-app help overlay walks through re-enabling access in popular browsers so centering can resume quickly.
