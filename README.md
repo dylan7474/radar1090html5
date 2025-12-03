@@ -10,7 +10,7 @@ Two entry points are available depending on your deployment:
 - `radar.html`: the AI-enabled dashboard that layers Ollama-assisted commentary and
   controls on top of the standard radar UI.
 
-**Current Version:** V1.9.80
+**Current Version:** V1.9.81
 
 ---
 
@@ -226,13 +226,12 @@ the radar rings automatically.
 - Use the **Show Log** button under the AI panel to inspect recent dump1090 and Ollama
   requests with response codes and durations—handy when requests are routed through
   `lighttpd` or another reverse proxy.
-- Click **Run AI Self-Test** in the sidebar to fire CORS and no-cors probes against all
-  detected Ollama endpoints. The results land in the comms log so you can tell whether
-  the browser is blocked by CORS, hitting a proxy 404, or actually reaching the
-  service.
-- After a failed detection or self-test, the comms log now prints an "Ollama
-  remediation checklist" with the exact proxy/CORS commands to run (including a
-  lighttpd snippet and server-side curl tests) based on the observed failures.
+- Tap **AI Core → RECONNECT** when the sidebar status shows **OFFLINE** or **NO HOSTS**.
+  It forces an immediate Ollama re-scan (including proxy/CORS diagnostics), updates the
+  AI status indicator, and triggers a fresh commentary cycle if a model is found.
+- After a failed detection, the comms log prints an "Ollama remediation checklist" with
+  the exact proxy/CORS commands to run (including a lighttpd snippet and server-side
+  curl tests) based on the observed failures.
   If you see HTTP 403 in the log, Ollama is rejecting your dashboard origin;
   set `OLLAMA_ORIGINS` to the URL you use in the browser (e.g.
   `http://192.168.50.123`) or `*` and restart the service.
@@ -284,10 +283,9 @@ the radar rings automatically.
   This helps on older Ollama builds that ignore `*` for security reasons. Use the
   dashboard URL(s) you actually load in the browser.
 - On low-spec hosts, Ollama can take significantly longer to respond during
-  discovery and chat. The app now waits up to 60 seconds for tag discovery,
-  self-tests, and chat requests. If you still see timeouts immediately after
-  booting, wait for the Ollama service to finish loading models before
-  refreshing the dashboard.
+  discovery and chat. The app now waits up to 60 seconds for tag discovery and
+  chat requests. If you still see timeouts immediately after booting, wait for
+  the Ollama service to finish loading models before refreshing the dashboard.
 - If the in-app log shows `opaque/no-cors` probe results for Ollama, the browser could
   reach the service but was blocked by missing CORS headers or proxy rules; add
   `Access-Control-Allow-Origin:*` on Ollama or forward `/ollama/*` to the service on
