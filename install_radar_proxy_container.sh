@@ -21,9 +21,10 @@ OLLAMA_PORT="11434"
 BENCHMARK_MODEL="llama3.2:1b"
 
 # --- SYSTEM ---
-GATEWAY_PORT="80" 
+GATEWAY_PORT="80"
 AIRBAND_REPO="https://github.com/szpajder/RTLSDR-Airband.git"
 AIRBAND_DIR="rtl_airband"
+RUNTIME_DIR="$(pwd)/runtime"
 
 # --- SANITIZATION ---
 SYSTEMD_SAFE_PASS=${RAW_PASS//$/$$}
@@ -302,7 +303,6 @@ server {
 EOF
 
 cat > "$RUNTIME_DIR/docker-compose.yml" <<EOF
-version: '3.8'
 services:
   radar-gateway:
     image: nginx:alpine
@@ -327,7 +327,11 @@ EOF
 # ==========================================
 echo ">>> [7/7] Launching Container..."
 cd "$RUNTIME_DIR"
-if command -v docker &> /dev/null; then sudo docker compose down --remove-orphans 2>/dev/null; sudo docker compose up -d; fi
+if command -v docker &> /dev/null; then
+    sudo docker rm -f radar1090-gateway 2>/dev/null || true
+    sudo docker compose down --remove-orphans 2>/dev/null || true
+    sudo docker compose up -d
+fi
 
 echo ""
 echo "========================================================"
