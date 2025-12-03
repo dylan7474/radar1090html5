@@ -1219,6 +1219,20 @@
             return false;
         }
 
+        const preferenceLower = (modelPreference || '').toLowerCase();
+        const preferredTarget = preferenceLower
+            ? reachableCandidates.find((entry) => entry.models.some((name) => name.toLowerCase() === preferenceLower))
+            : null;
+
+        if (preferredTarget) {
+            const preferredName = preferredTarget.models.find((name) => name.toLowerCase() === preferenceLower) || modelPreference;
+            AI_CONFIG.ollamaUrl = preferredTarget.candidate;
+            AI_CONFIG.ollamaModel = preferredName;
+            aiLog('AI', `Using deployment-selected model ${preferredName} at ${preferredTarget.candidate}.`);
+            updateAiStatus("ONLINE", "#00ff41");
+            return true;
+        }
+
         const sharedModels = computeSharedModels(reachableCandidates.map((entry) => entry.models));
         const selectionPool = sharedModels.length ? sharedModels : reachableCandidates[0].models;
         const selectedModel = pickModel(selectionPool);
