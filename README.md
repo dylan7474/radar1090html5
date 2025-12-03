@@ -10,7 +10,7 @@ Two entry points are available depending on your deployment:
 - `radar.html`: the AI-enabled dashboard that layers Ollama-assisted commentary and
   controls on top of the standard radar UI.
 
-**Current Version:** V1.9.76
+**Current Version:** V1.9.77
 
 ---
 
@@ -135,17 +135,17 @@ The dashboard expects the dump1090-fa JSON endpoints to live at a relative path 
 `/dump1090-fa/data` so it can operate cleanly behind a reverse proxy. Override the base path
 by setting the `dump1090BasePath` cookie if your deployment uses a different subpath.
 
-The AI assistant now targets an Ollama instance exposed at `${window.location.origin}/ollama`.
+The AI assistant targets an Ollama instance exposed at `${window.location.origin}/ollama`.
 Override the target by setting `localStorage.ollamaUrl` in your browser (for example,
 `https://radar.example.com/ollama`). Saved custom targets are normalized to strip trailing
 slashes so `/api/*` requests do not double up and return 404s under strict proxies. Connection
 attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
 when the browser blocks HTTP calls from an HTTPS dashboard.
 
-Choose a model common to every detected Ollama host from the **Language Model** dropdown in the
-AI sidebar. The preference saves to `localStorage.ollamaModel` and falls back to auto-picking the
-first shared option (preferring `llama3` variants) when the saved model is unavailable. When
-multiple hosts advertise different catalogs, the selector only lists names they all support.
+The deployment script now selects an AI model during installation, only offering names that every
+reachable Ollama instance reports via `/api/tags`, and writes the choice to `ai-config.json` at
+the repository root. The dashboard reads that file on startup and engages the selected model
+automatically; rerun the installer if you need to change models later.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 

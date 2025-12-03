@@ -94,14 +94,6 @@
              </div>
           </div>
 
-          <div class="ai-custom-block">
-             <label class="ai-label" for="ai-model-select">Language Model</label>
-             <select id="ai-model-select" class="control-select" aria-label="Shared Ollama model selector">
-                <option value="">Auto-select from shared models</option>
-             </select>
-             <p class="modal__hint">Choose a model common to every detected Ollama host. Saved locally; leave on Auto to pick the first shared option.</p>
-          </div>
-
           <div class="control-row">
             <div class="control-info">
               <span class="control-name">Commentary</span>
@@ -353,23 +345,32 @@
         weatherData: null
     };
 
-    const MODEL_OVERRIDE_KEY = 'ollamaModel';
+    const AI_CONFIG_PATH = '/ai-config.json';
+    let modelPreference = '';
+    let modelPreferenceReady;
 
-    const readModelPreference = () => (localStorage.getItem(MODEL_OVERRIDE_KEY) || '').trim();
-    let modelPreference = readModelPreference();
-    let sharedModelOptions = [];
+    const loadInstalledModelPreference = async () => {
+        try {
+            const response = await fetch(AI_CONFIG_PATH, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`status ${response.status}`);
+            }
 
-    const persistModelPreference = (value) => {
-        const normalized = (value || '').trim();
-        modelPreference = normalized;
-        if (normalized) {
-            localStorage.setItem(MODEL_OVERRIDE_KEY, normalized);
-            aiLog('AI', `Model preference saved: ${normalized}`);
-        } else {
-            localStorage.removeItem(MODEL_OVERRIDE_KEY);
-            aiLog('AI', 'Model preference cleared — reverting to auto-detect.');
+            const config = await response.json();
+            const configuredModel = (config?.ollamaModel || '').trim();
+            if (configuredModel) {
+                modelPreference = configuredModel;
+                aiLog('AI', `Installed model selected during deployment: ${configuredModel}`);
+                return;
+            }
+        } catch (e) {
+            aiLog('DEBUG', `No installed AI config found at ${AI_CONFIG_PATH} (${e.message || e}). Falling back to auto-select.`, 'debug');
         }
+
+        modelPreference = '';
     };
+
+    modelPreferenceReady = loadInstalledModelPreference();
 
     const extractModelNames = (models) => {
         if (!Array.isArray(models)) return [];
@@ -439,59 +440,6 @@
 
         return names[0];
     };
-
-    const aiModelSelect = document.getElementById('ai-model-select');
-
-    const renderModelOptions = () => {
-        if (!aiModelSelect) return;
-
-        aiModelSelect.innerHTML = '';
-        const autoOption = document.createElement('option');
-        autoOption.value = '';
-        autoOption.textContent = sharedModelOptions.length
-            ? 'Auto-select from shared models'
-            : 'Auto-detect (no shared models yet)';
-        aiModelSelect.appendChild(autoOption);
-
-        const normalizedPreference = modelPreference.toLowerCase();
-        let preferencePresent = false;
-        let savedOptionAdded = false;
-
-        for (const name of sharedModelOptions) {
-            const option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
-            aiModelSelect.appendChild(option);
-            if (name.toLowerCase() === normalizedPreference) {
-                preferencePresent = true;
-            }
-        }
-
-        if (modelPreference && !preferencePresent) {
-            const savedOption = document.createElement('option');
-            savedOption.value = modelPreference;
-            savedOption.textContent = `${modelPreference} (saved)`;
-            aiModelSelect.appendChild(savedOption);
-            savedOptionAdded = true;
-        }
-
-        aiModelSelect.value = modelPreference && (preferencePresent || savedOptionAdded || !sharedModelOptions.length)
-            ? modelPreference
-            : '';
-    };
-
-    if (aiModelSelect) {
-        aiModelSelect.addEventListener('change', async (event) => {
-            const selected = (event.target.value || '').trim();
-            persistModelPreference(selected);
-            aiLog('AI', selected ? `Switching to ${selected} (will use only if shared)` : 'Cleared model preference; reverting to shared auto-select.');
-            const ok = await detectModel();
-            if (ok) {
-                aiLog('DEBUG', `Model engaged: ${AI_CONFIG.ollamaModel} @ ${AI_CONFIG.ollamaUrl}`, 'debug');
-                runAiCycle({ forceImmediate: true });
-            }
-        });
-    }
 
     const COMMENTARY_COOLDOWN_MS = 2 * 60 * 1000; // Enforce 2 minute spacing between spoken updates
     let lastCommentaryTimestamp = 0;
@@ -919,17 +867,6 @@
     document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
     document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
 
-    if (aiModelSelect) {
-        renderModelOptions();
-        aiModelSelect.addEventListener('change', (event) => {
-            const newValue = (event.target.value || '').trim();
-            if (newValue === modelPreference) return;
-            persistModelPreference(newValue);
-            renderModelOptions();
-            detectModel();
-        });
-    }
-
     const personaEditorModal = document.getElementById('persona-editor-modal');
     const personaEditorBackdrop = document.getElementById('persona-editor-backdrop');
     const personaEditorNav = document.getElementById('persona-editor-nav');
@@ -1198,6 +1135,7 @@
 
     async function detectModel() {
         updateAiStatus("CONNECTING...", "#ffff00");
+        await modelPreferenceReady;
         if (!ollamaCandidates.length) {
             aiLog('AI ERROR', 'No Ollama endpoints configured. Set localStorage.ollamaUrl or ensure /ollama is proxied to your host.', 'alert');
             updateAiStatus("NO HOSTS", "#ff3333");
@@ -1273,8 +1211,6 @@
         }
 
         if (!reachableCandidates.length) {
-            sharedModelOptions = [];
-            renderModelOptions();
             updateAiStatus("ERROR", "#ff3333");
             if (lastError) {
                 aiLog("AI ERROR", `No Ollama endpoint reachable (${lastError.message || lastError}).`, 'alert');
@@ -1284,7 +1220,6 @@
         }
 
         const sharedModels = computeSharedModels(reachableCandidates.map((entry) => entry.models));
-        sharedModelOptions = sharedModels;
         const selectionPool = sharedModels.length ? sharedModels : reachableCandidates[0].models;
         const selectedModel = pickModel(selectionPool);
         if (!selectedModel) {
@@ -1309,7 +1244,6 @@
             aiLog('DEBUG', `No shared models across ${reachableCandidates.length} host(s); using ${target.candidate} list instead.`, 'debug');
         }
 
-        renderModelOptions();
         updateAiStatus("ONLINE", "#00ff41");
         return true;
     }

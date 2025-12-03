@@ -87,13 +87,103 @@ if ! command -v docker &> /dev/null; then
 fi
 
 sudo apt-get install -y -qq git build-essential cmake libmp3lame-dev libshout3-dev \
-  libasound2-dev ffmpeg rtl-sdr pkg-config jq icecast2 netcat-openbsd \
+  libasound2-dev ffmpeg rtl-sdr pkg-config jq icecast2 netcat-openbsd nmap \
   libconfig++-dev librtlsdr-dev libfftw3-dev liquidsoap curl zram-tools bc
+
+# ==========================================
+# PHASE 1.25: OLLAMA MODEL SELECTION
+# ==========================================
+echo ">>> [2/7] Selecting a shared Ollama model..."
+
+declare -a OLLAMA_HOSTS=()
+declare -a SHARED_MODELS=()
+SELECTED_MODEL="$BENCHMARK_MODEL"
+
+SCAN_RESULTS=$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - 2>/dev/null | grep "/open/" | awk '{print $2}')
+
+if [ -z "$SCAN_RESULTS" ]; then
+    echo "⚠️  No Ollama hosts detected on $SCAN_NET. Falling back to localhost and default model $BENCHMARK_MODEL."
+else
+    for ip in $SCAN_RESULTS; do
+        echo "   🔎 Checking $ip for available models..."
+        TAGS_JSON=$(curl -s --connect-timeout 2 -m 8 "http://$ip:$OLLAMA_PORT/api/tags" || true)
+        if [ -z "$TAGS_JSON" ]; then
+            echo "   ❌ $ip - Unable to read /api/tags"
+            continue
+        fi
+
+        MODELS=$(echo "$TAGS_JSON" | jq -r '.models[] | .name // empty' | sort -u)
+        if [ -z "$MODELS" ]; then
+            echo "   ⚠️  $ip - No models reported; skipping host."
+            continue
+        fi
+
+        OLLAMA_HOSTS+=("$ip")
+
+        if [ ${#SHARED_MODELS[@]} -eq 0 ]; then
+            mapfile -t SHARED_MODELS <<<"$MODELS"
+        else
+            declare -a NEXT_SHARED=()
+            while IFS= read -r model; do
+                for shared in "${SHARED_MODELS[@]}"; do
+                    if [ "$model" = "$shared" ]; then
+                        NEXT_SHARED+=("$model")
+                        break
+                    fi
+                done
+            done <<<"$MODELS"
+            SHARED_MODELS=($(printf "%s\n" "${NEXT_SHARED[@]}" | sort -u))
+        fi
+    done
+
+    if [ ${#OLLAMA_HOSTS[@]} -gt 0 ] && [ ${#SHARED_MODELS[@]} -eq 0 ]; then
+        echo "❌ No shared models found across reachable hosts (${OLLAMA_HOSTS[*]}). Ensure each Ollama instance provides a common model and rerun."
+        exit 1
+    fi
+
+    if [ ${#SHARED_MODELS[@]} -gt 0 ]; then
+        echo "✅ Shared models across ${#OLLAMA_HOSTS[@]} host(s):"
+        for idx in "${!SHARED_MODELS[@]}"; do
+            echo "    $((idx+1)). ${SHARED_MODELS[$idx]}"
+        done
+
+        read -rp "Select model [1-${#SHARED_MODELS[@]}] (default 1): " selection
+        selection=${selection:-1}
+
+        if ! [[ $selection =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#SHARED_MODELS[@]} ]; then
+            echo "⚠️  Invalid choice; defaulting to option 1."
+            selection=1
+        fi
+
+        SELECTED_MODEL=${SHARED_MODELS[$((selection-1))]}
+        echo "   🎯 Using model: $SELECTED_MODEL"
+    fi
+fi
+
+BENCHMARK_MODEL="$SELECTED_MODEL"
+
+HOST_JSON=""
+if [ ${#OLLAMA_HOSTS[@]} -gt 0 ]; then
+    for host in "${OLLAMA_HOSTS[@]}"; do
+        HOST_JSON+=$'    "http://'"$host"':'"$OLLAMA_PORT"$'"\n'
+    done
+    HOST_JSON=${HOST_JSON%$'\n'}
+fi
+
+cat > ai-config.json <<EOF
+{
+  "ollamaModel": "$BENCHMARK_MODEL",
+  "ollamaHosts": [
+$HOST_JSON
+  ]
+}
+EOF
+
 
 # ==========================================
 # PHASE 1.5: ZRAM
 # ==========================================
-echo ">>> [2/7] Optimizing Memory..."
+echo ">>> [3/7] Optimizing Memory..."
 if systemctl is-active --quiet dphys-swapfile; then
     sudo systemctl stop dphys-swapfile
     sudo systemctl disable dphys-swapfile
@@ -118,7 +208,7 @@ sudo systemctl restart zramswap
 # ==========================================
 # PHASE 2: AUDIO
 # ==========================================
-echo ">>> [3/7] Configuring Icecast..."
+echo ">>> [4/7] Configuring Icecast..."
 if ! grep -q "<source-password>$SED_SAFE_PASS</source-password>" /etc/icecast2/icecast.xml; then
     sudo sed -i "s|<source-password>.*</source-password>|<source-password>$SED_SAFE_PASS</source-password>|" /etc/icecast2/icecast.xml
     sudo sed -i "s|<relay-password>.*</relay-password>|<relay-password>$SED_SAFE_PASS</relay-password>|" /etc/icecast2/icecast.xml
@@ -177,7 +267,7 @@ sudo systemctl restart rtl_airband ffmpeg_airband
 # ==========================================
 # PHASE 3: RUNTIME CONFIG
 # ==========================================
-echo ">>> [4/7] Configuring Runtime..."
+echo ">>> [5/7] Configuring Runtime..."
 mkdir -p "$RUNTIME_DIR"
 
 cat > "$RUNTIME_DIR/boot.sh" <<EOF
@@ -205,7 +295,19 @@ run_scan_and_config() {
             continue
         fi
 
-        echo "   ✅ \$ip - Ollama reachable"
+        TAGS_JSON=\$(curl -s --connect-timeout 2 -m 8 "http://\$ip:$OLLAMA_PORT/api/tags" || true)
+        if [ -z "\$TAGS_JSON" ]; then
+            echo "   ❌ \$ip - Unable to read /api/tags"
+            continue
+        fi
+
+        MODEL_PRESENT=\$(echo "\$TAGS_JSON" | jq -r --arg MODEL "$BENCHMARK_MODEL" '.models[]? | (.name // .model // .) | select(. == $MODEL)' | head -n1)
+        if [ -z "\$MODEL_PRESENT" ]; then
+            echo "   ❌ \$ip - Required model '$BENCHMARK_MODEL' missing; skipping host."
+            continue
+        fi
+
+        echo "   ✅ \$ip - Ollama reachable with $BENCHMARK_MODEL"
         echo "\$ip" >> /tmp/healthy_hosts.txt
 
         # Use double quotes for JSON to allow variable expansion
@@ -297,7 +399,7 @@ run_scan_and_config() {
     if pgrep nginx > /dev/null; then nginx -s reload; fi
 }
 
-apk add --no-cache nmap curl > /dev/null 2>&1
+apk add --no-cache nmap curl jq > /dev/null 2>&1
 run_scan_and_config
 ( while true; do sleep $CHECK_INTERVAL; run_scan_and_config; done ) &
 echo "🚀 Starting Nginx Gateway..."
@@ -308,7 +410,7 @@ chmod +x "$RUNTIME_DIR/boot.sh"
 # ==========================================
 # PHASE 4: NGINX & DOCKER
 # ==========================================
-echo ">>> [5/7] Generating Nginx & Docker Config..."
+echo ">>> [6/7] Generating Nginx & Docker Config..."
 
 cat > "$RUNTIME_DIR/nginx.conf" <<EOF
 include /etc/nginx/ollama_upstreams.conf;
@@ -366,7 +468,7 @@ EOF
 # ==========================================
 # PHASE 5: LAUNCH
 # ==========================================
-echo ">>> [6/7] Launching Container..."
+echo ">>> [7/7] Launching Container..."
 cd "$RUNTIME_DIR"
 if command -v docker &> /dev/null; then sudo docker compose down --remove-orphans 2>/dev/null; sudo docker compose up -d; fi
 
