@@ -814,9 +814,9 @@
             const key = input.dataset.key;
             const field = input.dataset.field;
             if (!key || !field) return;
+            const existing = personaEditorDrafts[key] || getPersonaProfile(key) || {};
             personaEditorDrafts[key] = {
-                ...personaEditorDrafts[key],
-                ...getPersonaProfile(key),
+                ...existing,
                 [field]: input.value.trim()
             };
         });
