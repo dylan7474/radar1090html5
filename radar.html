@@ -219,8 +219,10 @@
     <div class="modal__backdrop" id="persona-editor-backdrop"></div>
     <section class="modal__dialog modal__dialog--wide" role="dialog" aria-modal="true">
       <h2>AI Persona Prompts</h2>
-      <p class="modal__hint">Tailor each persona's tasking and style. Changes are stored in this browser's localStorage.</p>
-      <div class="persona-editor__list" id="persona-editor-list"></div>
+      <div class="persona-editor__scroll">
+        <p class="modal__hint">Tailor each persona's tasking and style. Changes are stored in this browser's localStorage.</p>
+        <div class="persona-editor__list" id="persona-editor-list"></div>
+      </div>
       <div class="modal__actions persona-editor__actions">
         <button type="button" class="control-button" id="persona-editor-reset">Reset to defaults</button>
         <div class="persona-editor__action-spacer"></div>
