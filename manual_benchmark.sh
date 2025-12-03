@@ -112,7 +112,7 @@ function has_model() {
 
 total_success=0
 
-echo "Using model '$BENCHMARK_MODEL' on port $OLLAMA_PORT (samples: $SAMPLES, timeout: $TIMEOUTs)"
+echo "Using model '$BENCHMARK_MODEL' on port $OLLAMA_PORT (samples: $SAMPLES, timeout: $TIMEOUT)"
 for host in "$@"; do
   echo "------------------------------------------------"
   echo "Benchmarking $host..."
