@@ -147,6 +147,25 @@ reachable Ollama instance reports via `/api/tags`, and writes the choice to `ai-
 the repository root. The dashboard reads that file on startup and engages the selected model
 automatically; rerun the installer if you need to change models later.
 
+### Manually benchmarking Ollama hosts
+
+Use `manual_benchmark.sh` when you want to mirror the installer's watchdog checks against specific
+hosts without rerunning the full deployment:
+
+```bash
+./manual_benchmark.sh 192.168.50.3 192.168.50.5 192.168.50.136
+```
+
+- Default model: reads `ai-config.json` (if present) or falls back to `llama3.2:1b` so the prompt
+  matches the installer.
+- Health preflight: runs `/api/version` and `/api/tags` first, skipping hosts that do not expose the
+  target model.
+- Timing loop: warms the model then averages three timed `/api/generate` calls (override with
+  `SAMPLES`, `TIMEOUT`, `BENCHMARK_MODEL`, and `OLLAMA_PORT` env vars).
+
+If every host fails, double-check the model list on each target with `curl http://HOST:11434/api/tags
+| jq '.models[]?.name'` and align `BENCHMARK_MODEL` accordingly.
+
 Example lighttpd reverse proxy (requires `mod_proxy`):
 
 ```conf
