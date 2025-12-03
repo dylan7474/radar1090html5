@@ -217,18 +217,25 @@
   </div>
   <div class="modal" id="persona-editor-modal" hidden aria-hidden="true">
     <div class="modal__backdrop" id="persona-editor-backdrop"></div>
-    <section class="modal__dialog modal__dialog--wide" role="dialog" aria-modal="true">
-      <h2>AI Persona Prompts</h2>
-      <div class="persona-editor__scroll">
-        <p class="modal__hint">Tailor each persona's tasking and style. Changes are stored in this browser's localStorage.</p>
+    <section class="modal__dialog modal__dialog--full" role="dialog" aria-modal="true">
+      <header class="persona-editor__hero">
+        <div class="persona-editor__title-block">
+          <p class="persona-editor__eyebrow">AI Prompt Workspace</p>
+          <h2>AI Persona Prompts</h2>
+          <p class="modal__hint">Tailor each persona's tasking and style. Changes are stored in this browser's localStorage.</p>
+        </div>
+        <div class="persona-editor__toolbar">
+          <button type="button" class="control-button" id="persona-editor-reset">Reset to defaults</button>
+          <button type="button" class="control-button" id="persona-editor-cancel">Close</button>
+          <button type="button" class="control-button primary" id="persona-editor-save">Save Prompts</button>
+        </div>
+      </header>
+      <div class="persona-editor__body">
         <div class="persona-editor__list" id="persona-editor-list"></div>
       </div>
-      <div class="modal__actions persona-editor__actions">
-        <button type="button" class="control-button" id="persona-editor-reset">Reset to defaults</button>
-        <div class="persona-editor__action-spacer"></div>
-        <button type="button" class="control-button" id="persona-editor-cancel">Cancel</button>
-        <button type="button" class="control-button primary" id="persona-editor-save">Save Prompts</button>
-      </div>
+      <footer class="persona-editor__footer">
+        <p class="persona-editor__footer-note">Edits live only in this browser. Reset to restore the built-in defaults.</p>
+      </footer>
     </section>
   </div>
   <!-- LOG MODAL -->

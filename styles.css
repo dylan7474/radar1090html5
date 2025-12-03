@@ -597,6 +597,12 @@ canvas#radar {
   width: min(720px, 100%);
 }
 
+.modal__dialog--full {
+  width: min(1180px, 96vw);
+  max-height: min(92vh, 1100px);
+  height: min(92vh, 1100px);
+}
+
 .modal__dialog h2 {
   margin: 0;
   font-size: 1.1rem;
@@ -646,17 +652,18 @@ canvas#radar {
 
 .persona-editor__list {
   display: grid;
-  gap: 0.9rem;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .persona-editor__group {
   display: grid;
-  gap: 0.6rem;
-  padding: 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .persona-editor__field {
@@ -672,7 +679,7 @@ canvas#radar {
 }
 
 .persona-editor__title {
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -680,10 +687,11 @@ canvas#radar {
 
 .persona-editor__pill {
   font-size: 0.75rem;
-  padding: 0.15rem 0.45rem;
+  padding: 0.25rem 0.55rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .persona-editor__label {
@@ -692,37 +700,27 @@ canvas#radar {
   margin-bottom: 0.25rem;
 }
 
-.persona-editor__scroll {
-  display: grid;
-  gap: 0.75rem;
+.persona-editor__body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 0.25rem 0.1rem 0.35rem;
-  scrollbar-width: thin;
-}
-
-.persona-editor__scroll::-webkit-scrollbar {
-  width: 8px;
-}
-
-.persona-editor__scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  padding-right: 0.35rem;
+  display: grid;
 }
 
 .persona-editor__textarea {
   width: 100%;
-  min-height: 120px;
-  padding: 0.65rem 0.75rem;
+  min-height: 180px;
+  padding: 0.75rem 0.85rem;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(6, 10, 18, 0.9);
   color: var(--text);
   font-family: inherit;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 0.95rem;
+  line-height: 1.55;
   resize: vertical;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .persona-editor__textarea:focus-visible {
@@ -730,16 +728,72 @@ canvas#radar {
   border-color: var(--accent);
 }
 
-.persona-editor__actions {
-  gap: 0.5rem;
-  align-items: center;
-  padding-top: 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(12, 17, 28, 0.9) 0%, rgba(12, 17, 28, 0.98) 60%);
+.persona-editor__hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  position: sticky;
+  top: 0;
+  background: linear-gradient(180deg, rgba(12, 17, 28, 0.96) 0%, rgba(12, 17, 28, 0.9) 100%);
+  z-index: 1;
 }
 
-.persona-editor__action-spacer {
-  flex: 1;
+.persona-editor__title-block h2 {
+  font-size: 1.2rem;
+  margin: 0.15rem 0 0.25rem;
+}
+
+.persona-editor__eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.persona-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.persona-editor__footer {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.persona-editor__footer-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  .modal__dialog--full {
+    width: 100%;
+    max-height: 96vh;
+  }
+
+  .persona-editor__hero {
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    align-items: flex-start;
+  }
+
+  .persona-editor__toolbar {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .persona-editor__list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .manual-location__map {

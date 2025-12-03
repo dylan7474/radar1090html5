@@ -10,7 +10,7 @@ Two entry points are available depending on your deployment:
 - `radar.html`: the AI-enabled dashboard that layers Ollama-assisted commentary and
   controls on top of the standard radar UI.
 
-**Current Version:** V1.9.64
+**Current Version:** V1.9.65
 
 ---
 
@@ -37,8 +37,8 @@ Two entry points are available depending on your deployment:
 - AI commentary now automatically pauses and resumes around live airband broadcasts so controller traffic is never talked over.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
-- AI personas can be edited in-app (system prompt, tasking, and style hints) with changes stored locally so custom voice
-  guidance survives reloads.
+- AI personas can be edited in-app (system prompt, tasking, and style hints) through a spacious full-screen workspace with
+  changes stored locally so custom voice guidance survives reloads.
 - One-tap "Use My Location" control recenters the radar on your current coordinates and keeps them stored for future visits.
 - Manual receiver picker opens an interactive OpenStreetMap-powered picker so you can drop a marker on your station when GPS fixes are unreliable, automatically falling back between multiple CDN sources if the first map library request is blocked.
 - If location permissions are blocked, an in-app help overlay walks through re-enabling access in popular browsers so centering can resume quickly.
