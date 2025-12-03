@@ -112,7 +112,7 @@ else
             continue
         fi
 
-        MODELS=$(echo "$TAGS_JSON" | jq -r '.models[] | .name // empty' | sort -u)
+        MODELS=$(echo "$TAGS_JSON" | jq -r '.models[]? | (.name // .model // empty)' | sort -u)
         if [ -z "$MODELS" ]; then
             echo "   ⚠️  $ip - No models reported; skipping host."
             continue
@@ -301,7 +301,7 @@ run_scan_and_config() {
             continue
         fi
 
-        MODEL_PRESENT=\$(echo "\$TAGS_JSON" | jq -r --arg MODEL "$BENCHMARK_MODEL" '.models[]? | (.name // .model // .) | select(. == $MODEL)' | head -n1)
+        MODEL_PRESENT=\$(echo "\$TAGS_JSON" | jq -r --arg MODEL "$BENCHMARK_MODEL" '.models[]? | (.name // .model // .) | select(. == \$MODEL)' | head -n1)
         if [ -z "\$MODEL_PRESENT" ]; then
             echo "   ❌ \$ip - Required model '$BENCHMARK_MODEL' missing; skipping host."
             continue
