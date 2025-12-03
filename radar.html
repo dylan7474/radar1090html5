@@ -94,6 +94,12 @@
              </div>
           </div>
 
+          <div class="ai-custom-block">
+             <label class="ai-label" for="ai-model-input">Language Model</label>
+             <input id="ai-model-input" class="control-input" type="text" placeholder="Auto-detect (e.g., llama3:8b)" aria-label="Preferred Ollama model name" />
+             <p class="modal__hint">Saved locally. Leave blank to auto-pick the first available model (prefers llama3).</p>
+          </div>
+
           <div class="control-row">
             <div class="control-info">
               <span class="control-name">Commentary</span>
@@ -343,6 +349,43 @@
         scanInterval: 20000,
         maxPlanes: 5,
         weatherData: null
+    };
+
+    const MODEL_OVERRIDE_KEY = 'ollamaModel';
+
+    const readModelPreference = () => (localStorage.getItem(MODEL_OVERRIDE_KEY) || '').trim();
+    let modelPreference = readModelPreference();
+
+    const persistModelPreference = (value) => {
+        const normalized = (value || '').trim();
+        modelPreference = normalized;
+        if (normalized) {
+            localStorage.setItem(MODEL_OVERRIDE_KEY, normalized);
+            aiLog('AI', `Model preference saved: ${normalized}`);
+        } else {
+            localStorage.removeItem(MODEL_OVERRIDE_KEY);
+            aiLog('AI', 'Model preference cleared — reverting to auto-detect.');
+        }
+    };
+
+    const pickModel = (models) => {
+        if (!Array.isArray(models) || models.length === 0) return null;
+
+        const normalizedPreference = modelPreference.toLowerCase();
+        const exactMatch = normalizedPreference
+            ? models.find((entry) => (entry.name || '').toLowerCase() === normalizedPreference)
+            : null;
+        if (exactMatch) return exactMatch.name;
+
+        const partialMatch = normalizedPreference
+            ? models.find((entry) => (entry.name || '').toLowerCase().includes(normalizedPreference))
+            : null;
+        if (partialMatch) return partialMatch.name;
+
+        const llamaCandidate = models.find((x) => (x.name || '').toLowerCase().includes('llama3'));
+        if (llamaCandidate) return llamaCandidate.name;
+
+        return models[0].name;
     };
 
     const COMMENTARY_COOLDOWN_MS = 2 * 60 * 1000; // Enforce 2 minute spacing between spoken updates
@@ -771,6 +814,17 @@
     document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
     document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
 
+    const aiModelInput = document.getElementById('ai-model-input');
+    if (aiModelInput) {
+        aiModelInput.value = modelPreference;
+        aiModelInput.addEventListener('change', (event) => {
+            const newValue = (event.target.value || '').trim();
+            if (newValue === modelPreference) return;
+            persistModelPreference(newValue);
+            detectModel();
+        });
+    }
+
     const personaEditorModal = document.getElementById('persona-editor-modal');
     const personaEditorBackdrop = document.getElementById('persona-editor-backdrop');
     const personaEditorNav = document.getElementById('persona-editor-nav');
@@ -1057,9 +1111,15 @@
                 const d = await r.json();
                 if (!d.models || d.models.length === 0) throw new Error('No models available');
 
-                const m = d.models.find(x => x.name.includes('llama3')) || d.models[0];
-                AI_CONFIG.ollamaModel = m.name;
-                aiLog("AI", `Connected to ${candidate} using ${AI_CONFIG.ollamaModel}`);
+                const selectedModel = pickModel(d.models);
+                if (!selectedModel) throw new Error('No models available');
+
+                AI_CONFIG.ollamaModel = selectedModel;
+                if (modelPreference && selectedModel.toLowerCase() !== modelPreference.toLowerCase()) {
+                    aiLog('AI', `Preferred model "${modelPreference}" not found; using ${selectedModel} instead.`);
+                } else {
+                    aiLog("AI", `Connected to ${candidate} using ${AI_CONFIG.ollamaModel}${modelPreference ? ' (preferred)' : ''}`);
+                }
                 updateAiStatus("ONLINE", "#00ff41");
                 return true;
             } catch (e) {
