@@ -95,9 +95,11 @@
           </div>
 
           <div class="ai-custom-block">
-             <label class="ai-label" for="ai-model-input">Language Model</label>
-             <input id="ai-model-input" class="control-input" type="text" placeholder="Auto-detect (e.g., llama3:8b)" aria-label="Preferred Ollama model name" />
-             <p class="modal__hint">Saved locally. Leave blank to auto-pick the first available model (prefers llama3).</p>
+             <label class="ai-label" for="ai-model-select">Language Model</label>
+             <select id="ai-model-select" class="control-select" aria-label="Shared Ollama model selector">
+                <option value="">Auto-select from shared models</option>
+             </select>
+             <p class="modal__hint">Choose a model common to every detected Ollama host. Saved locally; leave on Auto to pick the first shared option.</p>
           </div>
 
           <div class="control-row">
@@ -355,6 +357,7 @@
 
     const readModelPreference = () => (localStorage.getItem(MODEL_OVERRIDE_KEY) || '').trim();
     let modelPreference = readModelPreference();
+    let sharedModelOptions = [];
 
     const persistModelPreference = (value) => {
         const normalized = (value || '').trim();
@@ -368,24 +371,107 @@
         }
     };
 
+    const extractModelNames = (models) => {
+        if (!Array.isArray(models)) return [];
+
+        const seen = new Set();
+        const names = [];
+        for (const entry of models) {
+            const name = typeof entry === 'string' ? entry : entry?.name;
+            if (!name) continue;
+            const lower = name.toLowerCase();
+            if (seen.has(lower)) continue;
+            seen.add(lower);
+            names.push(name);
+        }
+        return names;
+    };
+
+    const computeSharedModels = (modelCollections) => {
+        if (!Array.isArray(modelCollections) || modelCollections.length === 0) return [];
+
+        const canonicalNames = new Map();
+        const lowerCaseCollections = modelCollections.map((collection, index) => {
+            const lowered = collection.map((name) => {
+                const lower = (name || '').toLowerCase();
+                if (index === 0 && lower) {
+                    canonicalNames.set(lower, name);
+                }
+                return lower;
+            }).filter(Boolean);
+            return new Set(lowered);
+        });
+
+        let shared = lowerCaseCollections[0];
+        for (let i = 1; i < lowerCaseCollections.length; i += 1) {
+            shared = new Set([...shared].filter((name) => lowerCaseCollections[i].has(name)));
+            if (shared.size === 0) break;
+        }
+
+        return [...shared]
+            .map((name) => canonicalNames.get(name) || name)
+            .sort();
+    };
+
     const pickModel = (models) => {
-        if (!Array.isArray(models) || models.length === 0) return null;
+        const names = extractModelNames(models);
+        if (names.length === 0) return null;
 
         const normalizedPreference = modelPreference.toLowerCase();
         const exactMatch = normalizedPreference
-            ? models.find((entry) => (entry.name || '').toLowerCase() === normalizedPreference)
+            ? names.find((name) => name.toLowerCase() === normalizedPreference)
             : null;
-        if (exactMatch) return exactMatch.name;
+        if (exactMatch) return exactMatch;
 
         const partialMatch = normalizedPreference
-            ? models.find((entry) => (entry.name || '').toLowerCase().includes(normalizedPreference))
+            ? names.find((name) => name.toLowerCase().includes(normalizedPreference))
             : null;
-        if (partialMatch) return partialMatch.name;
+        if (partialMatch) return partialMatch;
 
-        const llamaCandidate = models.find((x) => (x.name || '').toLowerCase().includes('llama3'));
-        if (llamaCandidate) return llamaCandidate.name;
+        const llamaCandidate = names.find((name) => name.toLowerCase().includes('llama3'));
+        if (llamaCandidate) return llamaCandidate;
 
-        return models[0].name;
+        return names[0];
+    };
+
+    const aiModelSelect = document.getElementById('ai-model-select');
+
+    const renderModelOptions = () => {
+        if (!aiModelSelect) return;
+
+        aiModelSelect.innerHTML = '';
+        const autoOption = document.createElement('option');
+        autoOption.value = '';
+        autoOption.textContent = sharedModelOptions.length
+            ? 'Auto-select from shared models'
+            : 'Auto-detect (no shared models yet)';
+        aiModelSelect.appendChild(autoOption);
+
+        const normalizedPreference = modelPreference.toLowerCase();
+        let preferencePresent = false;
+        let savedOptionAdded = false;
+
+        for (const name of sharedModelOptions) {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            aiModelSelect.appendChild(option);
+            if (name.toLowerCase() === normalizedPreference) {
+                preferencePresent = true;
+            }
+        }
+
+        if (modelPreference && !preferencePresent) {
+            const savedOption = document.createElement('option');
+            savedOption.value = modelPreference;
+            savedOption.textContent = `${modelPreference} (saved)`;
+            aiModelSelect.appendChild(savedOption);
+            savedOptionAdded = true;
+        }
+
+        aiModelSelect.value = modelPreference && (preferencePresent || savedOptionAdded || !sharedModelOptions.length)
+            ? modelPreference
+            : '';
     };
 
     const COMMENTARY_COOLDOWN_MS = 2 * 60 * 1000; // Enforce 2 minute spacing between spoken updates
@@ -814,13 +900,13 @@
     document.getElementById('ai-log-close').addEventListener('click', () => logModal.hidden = true);
     document.getElementById('ai-log-backdrop').addEventListener('click', () => logModal.hidden = true);
 
-    const aiModelInput = document.getElementById('ai-model-input');
-    if (aiModelInput) {
-        aiModelInput.value = modelPreference;
-        aiModelInput.addEventListener('change', (event) => {
+    if (aiModelSelect) {
+        renderModelOptions();
+        aiModelSelect.addEventListener('change', (event) => {
             const newValue = (event.target.value || '').trim();
             if (newValue === modelPreference) return;
             persistModelPreference(newValue);
+            renderModelOptions();
             detectModel();
         });
     }
@@ -1102,26 +1188,18 @@
         aiLog("DEBUG", `Attempting Ollama detection across ${ollamaCandidates.length} candidates`, 'debug');
 
         let lastError = null;
+        const reachableCandidates = [];
+
         for (const candidate of ollamaCandidates) {
-            AI_CONFIG.ollamaUrl = candidate;
             aiLog("AI", `Detecting Ollama at ${candidate}`);
             try {
                 const r = await fetchWithTimeout(`${candidate}/api/tags`, {}, OLLAMA_CONNECT_TIMEOUT_MS, `Ollama tags @ ${candidate}`);
                 if (!r.ok) throw new Error(`Status ${r.status}`);
                 const d = await r.json();
-                if (!d.models || d.models.length === 0) throw new Error('No models available');
+                const models = extractModelNames(d.models);
+                if (models.length === 0) throw new Error('No models available');
 
-                const selectedModel = pickModel(d.models);
-                if (!selectedModel) throw new Error('No models available');
-
-                AI_CONFIG.ollamaModel = selectedModel;
-                if (modelPreference && selectedModel.toLowerCase() !== modelPreference.toLowerCase()) {
-                    aiLog('AI', `Preferred model "${modelPreference}" not found; using ${selectedModel} instead.`);
-                } else {
-                    aiLog("AI", `Connected to ${candidate} using ${AI_CONFIG.ollamaModel}${modelPreference ? ' (preferred)' : ''}`);
-                }
-                updateAiStatus("ONLINE", "#00ff41");
-                return true;
+                reachableCandidates.push({ candidate, models });
             } catch (e) {
                 lastError = e;
                 console.error(`Ollama detection failed at ${candidate}`, e);
@@ -1175,13 +1253,46 @@
             }
         }
 
-        updateAiStatus("ERROR", "#ff3333");
-        if (lastError) {
-            aiLog("AI ERROR", `No Ollama endpoint reachable (${lastError.message || lastError}).`, 'alert');
+        if (!reachableCandidates.length) {
+            sharedModelOptions = [];
+            renderModelOptions();
+            updateAiStatus("ERROR", "#ff3333");
+            if (lastError) {
+                aiLog("AI ERROR", `No Ollama endpoint reachable (${lastError.message || lastError}).`, 'alert');
+            }
+            logOllamaRemediation();
+            return false;
         }
 
-        logOllamaRemediation();
-        return false;
+        const sharedModels = computeSharedModels(reachableCandidates.map((entry) => entry.models));
+        sharedModelOptions = sharedModels;
+        const selectionPool = sharedModels.length ? sharedModels : reachableCandidates[0].models;
+        const selectedModel = pickModel(selectionPool);
+        if (!selectedModel) {
+            updateAiStatus("ERROR", "#ff3333");
+            aiLog('AI ERROR', 'No selectable models found across detected Ollama instances.', 'alert');
+            return false;
+        }
+
+        const target = reachableCandidates.find((entry) => entry.models.some((name) => name.toLowerCase() === selectedModel.toLowerCase())) || reachableCandidates[0];
+        AI_CONFIG.ollamaUrl = target.candidate;
+        AI_CONFIG.ollamaModel = selectedModel;
+
+        if (modelPreference && selectedModel.toLowerCase() !== modelPreference.toLowerCase()) {
+            aiLog('AI', `Preferred model "${modelPreference}" not found; using ${selectedModel} instead.`);
+        } else {
+            aiLog("AI", `Connected to ${target.candidate} using ${AI_CONFIG.ollamaModel}${modelPreference ? ' (preferred)' : ''}${sharedModels.length ? ' [shared]' : ''}`);
+        }
+
+        if (sharedModels.length) {
+            aiLog('DEBUG', `Shared models across ${reachableCandidates.length} host(s): ${sharedModels.join(', ')}`, 'debug');
+        } else {
+            aiLog('DEBUG', `No shared models across ${reachableCandidates.length} host(s); using ${target.candidate} list instead.`, 'debug');
+        }
+
+        renderModelOptions();
+        updateAiStatus("ONLINE", "#00ff41");
+        return true;
     }
 
     async function probeOllamaReachability(candidate) {

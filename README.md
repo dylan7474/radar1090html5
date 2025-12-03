@@ -142,9 +142,10 @@ slashes so `/api/*` requests do not double up and return 404s under strict proxi
 attempts and failures are surfaced in the in-app comms log for quick debugging, including hints
 when the browser blocks HTTP calls from an HTTPS dashboard.
 
-Set `localStorage.ollamaModel` to pin the preferred model name (for example, `llama3:8b`).
-The dashboard remembers the value locally and will fall back to auto-detecting the first
-available model—preferring `llama3` variants—when your preference is unavailable.
+Choose a model common to every detected Ollama host from the **Language Model** dropdown in the
+AI sidebar. The preference saves to `localStorage.ollamaModel` and falls back to auto-picking the
+first shared option (preferring `llama3` variants) when the saved model is unavailable. When
+multiple hosts advertise different catalogs, the selector only lists names they all support.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 
