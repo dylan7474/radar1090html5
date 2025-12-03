@@ -16,16 +16,14 @@ DUMP1090_IP="192.168.50.100"
 DUMP1090_PORT="8080"
 AUDIO_IP="127.0.0.1"
 AUDIO_PORT="8000"
+OLLAMA_HOST="127.0.0.1"
 OLLAMA_PORT="11434"
-SCAN_NET="192.168.50.0/24"
-CHECK_INTERVAL="600"
 BENCHMARK_MODEL="llama3.2:1b"
 
 # --- SYSTEM ---
 GATEWAY_PORT="80" 
 AIRBAND_REPO="https://github.com/szpajder/RTLSDR-Airband.git"
 AIRBAND_DIR="rtl_airband"
-RUNTIME_DIR="radar-runtime"
 
 # --- SANITIZATION ---
 SYSTEMD_SAFE_PASS=${RAW_PASS//$/$$}
@@ -87,98 +85,74 @@ if ! command -v docker &> /dev/null; then
 fi
 
 sudo apt-get install -y -qq git build-essential cmake libmp3lame-dev libshout3-dev \
-  libasound2-dev ffmpeg rtl-sdr pkg-config jq icecast2 netcat-openbsd nmap \
+  libasound2-dev ffmpeg rtl-sdr pkg-config jq icecast2 netcat-openbsd \
   libconfig++-dev librtlsdr-dev libfftw3-dev liquidsoap curl zram-tools bc
 
 # ==========================================
-# PHASE 1.25: OLLAMA MODEL SELECTION
+# PHASE 1.25: OLLAMA HOST & MODEL SELECTION
 # ==========================================
-echo ">>> [2/7] Selecting a shared Ollama model..."
 
-declare -a OLLAMA_HOSTS=()
-declare -a SHARED_MODELS=()
-SELECTED_MODEL="$BENCHMARK_MODEL"
+echo ">>> [2/7] Pointing at your Ollama host..."
 
-SCAN_RESULTS=$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - 2>/dev/null | grep "/open/" | awk '{print $2}')
-
-if [ -z "$SCAN_RESULTS" ]; then
-    echo "⚠️  No Ollama hosts detected on $SCAN_NET. Falling back to localhost and default model $BENCHMARK_MODEL."
-else
-    for ip in $SCAN_RESULTS; do
-        echo "   🔎 Checking $ip for available models..."
-        TAGS_JSON=$(curl -s --connect-timeout 2 -m 8 "http://$ip:$OLLAMA_PORT/api/tags" || true)
-        if [ -z "$TAGS_JSON" ]; then
-            echo "   ❌ $ip - Unable to read /api/tags"
-            continue
-        fi
-
-        MODELS=$(echo "$TAGS_JSON" | jq -r '.models[]? | (.name // .model // empty)' | sort -u)
-        if [ -z "$MODELS" ]; then
-            echo "   ⚠️  $ip - No models reported; skipping host."
-            continue
-        fi
-
-        OLLAMA_HOSTS+=("$ip")
-
-        if [ ${#SHARED_MODELS[@]} -eq 0 ]; then
-            mapfile -t SHARED_MODELS <<<"$MODELS"
-        else
-            declare -a NEXT_SHARED=()
-            while IFS= read -r model; do
-                for shared in "${SHARED_MODELS[@]}"; do
-                    if [ "$model" = "$shared" ]; then
-                        NEXT_SHARED+=("$model")
-                        break
-                    fi
-                done
-            done <<<"$MODELS"
-            SHARED_MODELS=($(printf "%s\n" "${NEXT_SHARED[@]}" | sort -u))
-        fi
-    done
-
-    if [ ${#OLLAMA_HOSTS[@]} -gt 0 ] && [ ${#SHARED_MODELS[@]} -eq 0 ]; then
-        echo "❌ No shared models found across reachable hosts (${OLLAMA_HOSTS[*]}). Ensure each Ollama instance provides a common model and rerun."
-        exit 1
-    fi
-
-    if [ ${#SHARED_MODELS[@]} -gt 0 ]; then
-        echo "✅ Shared models across ${#OLLAMA_HOSTS[@]} host(s):"
-        for idx in "${!SHARED_MODELS[@]}"; do
-            echo "    $((idx+1)). ${SHARED_MODELS[$idx]}"
-        done
-
-        read -rp "Select model [1-${#SHARED_MODELS[@]}] (default 1): " selection
-        selection=${selection:-1}
-
-        if ! [[ $selection =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#SHARED_MODELS[@]} ]; then
-            echo "⚠️  Invalid choice; defaulting to option 1."
-            selection=1
-        fi
-
-        SELECTED_MODEL=${SHARED_MODELS[$((selection-1))]}
-        echo "   🎯 Using model: $SELECTED_MODEL"
-    fi
+read -rp "Enter Ollama host/IP [default $OLLAMA_HOST]: " host_input
+if [ -n "$host_input" ]; then
+    OLLAMA_HOST="$host_input"
 fi
 
-BENCHMARK_MODEL="$SELECTED_MODEL"
+echo "   🔎 Fetching models from http://$OLLAMA_HOST:$OLLAMA_PORT/api/tags..."
+TAGS_JSON=$(curl -s --connect-timeout 5 -m 20 "http://$OLLAMA_HOST:$OLLAMA_PORT/api/tags" || true)
 
-HOST_JSON=""
-if [ ${#OLLAMA_HOSTS[@]} -gt 0 ]; then
-    for host in "${OLLAMA_HOSTS[@]}"; do
-        HOST_JSON+=$'    "http://'"$host"':'"$OLLAMA_PORT"$'"\n'
-    done
-    HOST_JSON=${HOST_JSON%$'\n'}
+if [ -z "$TAGS_JSON" ]; then
+    echo "❌ Unable to reach Ollama at http://$OLLAMA_HOST:$OLLAMA_PORT."
+    exit 1
 fi
+
+if ! printf '%s' "$TAGS_JSON" | jq -e . >/dev/null 2>&1; then
+    echo "❌ /api/tags returned invalid JSON from $OLLAMA_HOST."
+    exit 1
+fi
+
+mapfile -t HOST_MODELS < <(printf '%s' "$TAGS_JSON" | jq -r '.models[]? | (.name // .model // empty)' | sort -u)
+
+if [ ${#HOST_MODELS[@]} -eq 0 ]; then
+    echo "❌ $OLLAMA_HOST did not report any models."
+    exit 1
+fi
+
+DEFAULT_SELECTION=1
+if [ -n "$BENCHMARK_MODEL" ]; then
+    for idx in "${!HOST_MODELS[@]}"; do
+        if [ "${HOST_MODELS[$idx]}" = "$BENCHMARK_MODEL" ]; then
+            DEFAULT_SELECTION=$((idx+1))
+            break
+        fi
+    done
+fi
+
+echo "Available models on $OLLAMA_HOST:"
+for idx in "${!HOST_MODELS[@]}"; do
+    echo "    $((idx+1)). ${HOST_MODELS[$idx]}"
+done
+
+read -rp "Select model [1-${#HOST_MODELS[@]}] (default $DEFAULT_SELECTION): " selection
+selection=${selection:-$DEFAULT_SELECTION}
+
+if ! [[ $selection =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#HOST_MODELS[@]} ]; then
+    echo "⚠️  Invalid choice; defaulting to option $DEFAULT_SELECTION."
+    selection=$DEFAULT_SELECTION
+fi
+
+BENCHMARK_MODEL=${HOST_MODELS[$((selection-1))]}
+echo "   🎯 Using host $OLLAMA_HOST with model $BENCHMARK_MODEL"
 
 cat > ai-config.json <<EOF
 {
   "ollamaModel": "$BENCHMARK_MODEL",
   "ollamaHosts": [
-$HOST_JSON
+    "http://$OLLAMA_HOST:$OLLAMA_PORT"
   ]
 }
 EOF
-
 
 # ==========================================
 # PHASE 1.5: ZRAM
@@ -272,190 +246,21 @@ mkdir -p "$RUNTIME_DIR"
 
 cat > "$RUNTIME_DIR/boot.template" <<'EOF'
 #!/bin/sh
-BENCHMARK_MODEL="__BENCHMARK_MODEL__"
+OLLAMA_HOST="__OLLAMA_HOST__"
 OLLAMA_PORT="__OLLAMA_PORT__"
-SCAN_NET="__SCAN_NET__"
-CHECK_INTERVAL="__CHECK_INTERVAL__"
 
-run_benchmark() {
-    BENCH_RESULT=""
-    BENCH_ERROR=""
-    BENCH_ERROR_CODE=""
-
-    ip="$1"
-    prompt="$2"
-    samples="${3:-3}"
-    timeout="${4:-8}"
-
-    # Always warm the model first so the measured requests aren't penalized by load time.
-    PROMPT_JSON=$(printf '%s' "$prompt" | jq -Rs .)
-    JSON_DATA=$(printf '{"model":"%s","prompt":%s,"stream":false}' "$BENCHMARK_MODEL" "$PROMPT_JSON")
-    curl -s -o /dev/null --connect-timeout 3 -m 12 -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>/tmp/bench_warmup_"$ip".log || true
-
-    TIMES=""
-    COMPLETED=0
-
-    i=1
-    while [ "$i" -le "$samples" ]; do
-        BODY_FILE="/tmp/bench_body_${ip}_${i}.txt"
-        ERR_FILE="/tmp/bench_err_${ip}_${i}.txt"
-        rm -f "$BODY_FILE" "$ERR_FILE"
-
-        RESPONSE=$(curl -s -o "$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "$timeout" \
-            -H "Content-Type: application/json" -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>"$ERR_FILE" || true)
-
-        TIME=$(echo "$RESPONSE" | cut -d: -f1)
-        CODE=$(echo "$RESPONSE" | cut -d: -f2)
-        CODE=${CODE:-000}
-
-        if [ "$CODE" = "200" ]; then
-            TIMES="$TIMES $TIME"
-            COMPLETED=$((COMPLETED + 1))
-        else
-            if [ -f "$BODY_FILE" ]; then
-                DIAG_BODY=$(head -c 200 "$BODY_FILE" | tr '
-' ' ')
-            else
-                DIAG_BODY=""
-            fi
-            if [ -f "$ERR_FILE" ]; then
-                DIAG_ERR=$(cat "$ERR_FILE" | tr '
-' ' ')
-            else
-                DIAG_ERR=""
-            fi
-
-            if [ -n "$DIAG_ERR" ]; then
-                BENCH_ERROR="HTTP $CODE - curl error: $DIAG_ERR"
-            elif [ -n "$DIAG_BODY" ]; then
-                BENCH_ERROR="HTTP $CODE - response: $DIAG_BODY"
-            else
-                BENCH_ERROR="HTTP $CODE - no response body"
-            fi
-            BENCH_ERROR_CODE="$CODE"
-        fi
-
-        i=$((i + 1))
-    done
-
-    if [ "$COMPLETED" -eq 0 ]; then
-        BENCH_RESULT=""
-        return 1
-    fi
-
-    BENCH_RESULT=$(echo "$TIMES" | awk '{sum=0; count=0; for(i=1;i<=NF;i++){if($i ~ /^[0-9.]+$/){sum+=$i; count++}} if(count>0){printf "%.3f", sum/count}}')
-    return 0
+echo "Configuring Ollama upstream at ${OLLAMA_HOST}:${OLLAMA_PORT}..."
+cat > /etc/nginx/ollama_upstreams.conf <<UPSTREAM
+upstream ollama_backend {
+    server ${OLLAMA_HOST}:${OLLAMA_PORT};
 }
-run_scan_and_config() {
-    echo "------------------------------------------------"
-    echo "🔍 WATCHDOG: Scanning for AI Servers on $SCAN_NET..."
-    RAW_IPS=$(nmap -p $OLLAMA_PORT --open $SCAN_NET -oG - | grep "/open/" | awk '{print $2}')
+UPSTREAM
 
-    if [ -z "$RAW_IPS" ]; then
-        echo "⚠️  No servers found. Defaulting to localhost."
-        echo "upstream ollama_backend { server 127.0.0.1:$OLLAMA_PORT; }" > /etc/nginx/ollama_upstreams.conf
-        return
-    fi
-
-    echo "⏱️  Running 'Sprint' Benchmark ($BENCHMARK_MODEL)..."
-    rm -f /tmp/servers.txt /tmp/healthy_hosts.txt
-    touch /tmp/servers.txt /tmp/healthy_hosts.txt
-
-    for ip in $RAW_IPS; do
-        HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 -m 4 "http://$ip:$OLLAMA_PORT/api/version")
-
-        if [ "$HEALTH_CODE" != "200" ]; then
-            echo "   ❌ $ip - Health check failed (HTTP $HEALTH_CODE)"
-            continue
-        fi
-
-        TAGS_JSON=$(curl -s --connect-timeout 2 -m 8 "http://$ip:$OLLAMA_PORT/api/tags" || true)
-        if [ -z "$TAGS_JSON" ]; then
-            echo "   ❌ $ip - Unable to read /api/tags"
-            continue
-        fi
-
-        MODEL_PRESENT=$(echo "$TAGS_JSON" | jq -r --arg MODEL "$BENCHMARK_MODEL" '.models[]? | (.name // .model // .) | select(. == $MODEL)' | head -n1)
-        if [ -z "$MODEL_PRESENT" ]; then
-            echo "   ❌ $ip - Required model '$BENCHMARK_MODEL' missing; skipping host."
-            continue
-        fi
-
-        echo "   ✅ $ip - Ollama reachable with $BENCHMARK_MODEL"
-        echo "$ip" >> /tmp/healthy_hosts.txt
-        run_benchmark "$ip" "Benchmark latency for radar copilots" 3 8
-        RESULT="$BENCH_RESULT"
-
-        if [ -z "$RESULT" ]; then
-            SOFT_CODES="000 408 425 429 500 502 503 504"
-            if echo " $SOFT_CODES " | grep -q " ${BENCH_ERROR_CODE:-000} "; then
-                echo "   ⚠️  $ip - Benchmark incomplete (${BENCH_ERROR:-unknown error}). Using fallback latency to keep host eligible."
-                echo "9999 $ip" >> /tmp/servers.txt
-            else
-                echo "   ❌ $ip - Benchmark failed (${BENCH_ERROR:-no response captured})"
-            fi
-            continue
-        fi
-
-        echo "   ⚡ $ip - ${RESULT}s (avg of 3 warm runs)"
-        echo "$RESULT $ip" >> /tmp/servers.txt
-    done
-
-    SORTED_SERVERS=$(sort -n /tmp/servers.txt | awk '{print $2}')
-
-    BENCHMARKED_HOSTS=$(awk '{print $2}' /tmp/servers.txt)
-    HEALTHY_HOSTS=$(cat /tmp/healthy_hosts.txt)
-
-    if [ -z "$SORTED_SERVERS" ]; then
-        if [ -n "$HEALTHY_HOSTS" ]; then
-            echo "⚠️  No benchmarks succeeded; using healthy hosts without ranking."
-            SORTED_SERVERS="$HEALTHY_HOSTS"
-        else
-            echo "⚠️  No reachable Ollama servers detected; using raw scan results."
-            SORTED_SERVERS="$RAW_IPS"
-        fi
-    else
-        # Append healthy-but-unbenchmarked hosts as backups so they remain eligible.
-        for ip in $HEALTHY_HOSTS; do
-            if ! echo " $BENCHMARKED_HOSTS " | grep -q " $ip "; then
-                echo "   ➕ $ip - Healthy but no benchmark result; adding as backup."
-                SORTED_SERVERS="$SORTED_SERVERS $ip"
-            fi
-        done
-    fi
-
-    SORTED_SERVERS=$(echo "$SORTED_SERVERS" | tr ' ' '
-' | awk 'NF && !seen[$1]++')
-
-    UPSTREAM_FILE="/etc/nginx/ollama_upstreams.conf"
-    TEMP_CONFIG="/tmp/ollama_upstreams.tmp"
-
-    echo "upstream ollama_backend {" > $TEMP_CONFIG
-    IS_FIRST=1
-    for ip in $SORTED_SERVERS; do
-        if [ "$IS_FIRST" -eq "1" ]; then
-            echo "   🏆 PRIMARY: $ip"
-            echo "    server $ip:$OLLAMA_PORT;" >> $TEMP_CONFIG
-            IS_FIRST=0
-        else
-            echo "   🥈 BACKUP:  $ip"
-            echo "    server $ip:$OLLAMA_PORT backup;" >> $TEMP_CONFIG
-        fi
-    done
-    echo "}" >> $TEMP_CONFIG
-
-    mv $TEMP_CONFIG $UPSTREAM_FILE
-    if pgrep nginx > /dev/null; then nginx -s reload; fi
-}
-
-apk add --no-cache nmap curl jq > /dev/null 2>&1
-run_scan_and_config
-( while true; do sleep "$CHECK_INTERVAL"; run_scan_and_config; done ) &
 echo "🚀 Starting Nginx Gateway..."
 nginx -g "daemon off;"
 EOF
 
-sed -e "s|__BENCHMARK_MODEL__|$BENCHMARK_MODEL|g"     -e "s|__OLLAMA_PORT__|$OLLAMA_PORT|g"     -e "s|__SCAN_NET__|$SCAN_NET|g"     -e "s|__CHECK_INTERVAL__|$CHECK_INTERVAL|g"     "$RUNTIME_DIR/boot.template" > "$RUNTIME_DIR/boot.sh"
+sed -e "s|__OLLAMA_HOST__|$OLLAMA_HOST|g"     -e "s|__OLLAMA_PORT__|$OLLAMA_PORT|g"     "$RUNTIME_DIR/boot.template" > "$RUNTIME_DIR/boot.sh"
 rm -f "$RUNTIME_DIR/boot.template"
 chmod +x "$RUNTIME_DIR/boot.sh"
 
