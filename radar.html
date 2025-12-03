@@ -331,11 +331,10 @@
     }
 
     let ollamaCandidates = resolveOllamaCandidates();
-    const defaultOllamaUrl = ollamaCandidates[0] || null;
 
     const AI_CONFIG = {
         dump1090Base: "/dump1090-fa/data",
-        ollamaUrl: defaultOllamaUrl,
+        ollamaUrl: window.location.origin + "/ollama",
         ollamaModel: null,
         myLat: 54.531836,
         myLon: -1.087954,
