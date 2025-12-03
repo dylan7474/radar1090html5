@@ -102,8 +102,7 @@ run_benchmark() {
 }
 
 function has_model() {
-  ip="$1"
-  MODEL_PRESENT=$(echo "$2" | jq -r --arg MODEL "$BENCHMARK_MODEL" '.models[]? | (.name // .model // .) | select(. == $MODEL)' | head -n1)
+  MODEL_PRESENT=$(printf '%s' "$1" | jq -r --arg MODEL "$BENCHMARK_MODEL" '.models[]? | (.name // .model // .) | select(. == $MODEL)' | head -n1)
   [ -n "$MODEL_PRESENT" ]
 }
 
@@ -126,7 +125,12 @@ for host in "$@"; do
     continue
   fi
 
-  if ! has_model "$host" "$TAGS_JSON"; then
+  if ! printf '%s' "$TAGS_JSON" | jq -e . >/dev/null 2>&1; then
+    echo "  ❌ /api/tags returned invalid JSON"
+    continue
+  fi
+
+  if ! has_model "$TAGS_JSON"; then
     echo "  ❌ Required model '$BENCHMARK_MODEL' missing on host"
     echo "$TAGS_JSON" | jq -r '.models[]? | "    - " + (.name // .model // .)' || true
     continue
