@@ -160,8 +160,10 @@ hosts without rerunning the full deployment:
   matches the installer.
 - Health preflight: runs `/api/version` and `/api/tags` first, skipping hosts that do not expose the
   target model.
-- Timing loop: warms the model then averages three timed `/api/generate` calls (override with
-  `SAMPLES`, `TIMEOUT`, `BENCHMARK_MODEL`, and `OLLAMA_PORT` env vars).
+- Timing loop: warms the model then averages three timed `/api/generate` calls. Defaults can be
+  overridden via flags or env vars (`--samples`, `--timeout`/`TIMEOUT`, `--connect-timeout`/`CONNECT_TIMEOUT`,
+  `--model`/`BENCHMARK_MODEL`, `--port`/`OLLAMA_PORT`, `--debug`). The default per-request timeout is 20s
+  with a 30s warm-up to avoid false negatives on slower hosts.
 
 If every host fails, double-check the model list on each target with `curl http://HOST:11434/api/tags
 | jq '.models[]?.name'` and align `BENCHMARK_MODEL` accordingly.

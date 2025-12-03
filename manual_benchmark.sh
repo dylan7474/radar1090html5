@@ -4,31 +4,63 @@ set -euo pipefail
 usage() {
   cat <<USAGE
 Manual benchmark runner for Ollama hosts.
-Usage: $0 <host1> [host2 ...]
+Usage: $0 [options] <host1> [host2 ...]
+
+Options (flags override env vars):
+  -m, --model NAME         Model name (default: ai-config.json -> llama3.2:1b)
+  -p, --port PORT          Ollama port (default: 11434)
+  -s, --samples N          Timed requests per host (default: 3)
+  -t, --timeout SEC        Per-request timeout (default: 20 seconds)
+      --connect-timeout S  Connect timeout (default: 5 seconds)
+  -d, --debug              Print curl diagnostics (or pass literal DEBUG as arg)
+  -h, --help               Show this help
 
 Environment overrides:
-  BENCHMARK_MODEL   Model name to test. Defaults to ai-config.json -> llama3.2:1b.
-  OLLAMA_PORT       Port for Ollama (default: 11434).
-  SAMPLES           Number of timed requests per host (default: 3).
-  TIMEOUT           Per-request timeout in seconds (default: 8).
-  DEBUG             Set to 1 to print curl diagnostics for each sample.
+  BENCHMARK_MODEL, OLLAMA_PORT, SAMPLES, TIMEOUT, CONNECT_TIMEOUT, DEBUG
 USAGE
 }
 
-if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
-  usage
-  exit 0
-fi
+BENCHMARK_MODEL="${BENCHMARK_MODEL:-}"
+OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+SAMPLES="${SAMPLES:-3}"
+TIMEOUT="${TIMEOUT:-20}"
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-5}"
+WARMUP_TIMEOUT="${WARMUP_TIMEOUT:-30}"
+DEBUG="${DEBUG:-0}"
 
-if [ "$#" -lt 1 ]; then
+HOSTS=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -m|--model)
+      BENCHMARK_MODEL="$2"; shift 2 ;;
+    -p|--port)
+      OLLAMA_PORT="$2"; shift 2 ;;
+    -s|--samples)
+      SAMPLES="$2"; shift 2 ;;
+    -t|--timeout)
+      TIMEOUT="$2"; shift 2 ;;
+    --connect-timeout)
+      CONNECT_TIMEOUT="$2"; shift 2 ;;
+    -d|--debug)
+      DEBUG=1; shift ;;
+    --)
+      shift; HOSTS+=("$@"); break ;;
+    DEBUG)
+      DEBUG=1; shift ;;
+    *)
+      HOSTS+=("$1"); shift ;;
+  esac
+done
+
+if [ "${#HOSTS[@]}" -lt 1 ]; then
   echo "❌ Provide at least one host to benchmark."
   usage
   exit 1
 fi
-
-OLLAMA_PORT="${OLLAMA_PORT:-11434}"
-SAMPLES="${SAMPLES:-3}"
-TIMEOUT="${TIMEOUT:-8}"
 
 if [ -z "${BENCHMARK_MODEL:-}" ] && [ -f ai-config.json ]; then
   if jq -e . >/dev/null 2>&1 < ai-config.json; then
@@ -52,19 +84,24 @@ run_benchmark() {
     PROMPT_JSON=$(printf '%s' "$prompt" | jq -Rs .)
     JSON_DATA=$(printf '{"model":"%s","prompt":%s,"stream":false}' "$BENCHMARK_MODEL" "$PROMPT_JSON")
 
-    CURL_ARGS=("-s" "-S" "--connect-timeout" "3" "-H" "Content-Type: application/json" "-X" "POST" "http://$ip:$OLLAMA_PORT/api/generate" "-d" "$JSON_DATA")
+    CURL_ARGS=("-s" "-S" "--connect-timeout" "$CONNECT_TIMEOUT" "-H" "Content-Type: application/json" "-X" "POST" "http://$ip:$OLLAMA_PORT/api/generate" "-d" "$JSON_DATA")
     DEBUG_FLAG=""
     if [ "${DEBUG:-0}" -eq 1 ]; then
       DEBUG_FLAG="-v"
     fi
 
     echo "  🔄 Warm-up request (may take a few seconds)..."
-    curl ${DEBUG_FLAG:-} "${CURL_ARGS[@]}" -m 12 -o /dev/null 2>/tmp/bench_warmup_"$ip".log || true
+    WARM_LOG="/tmp/bench_warmup_${ip}.log"
+    curl ${DEBUG_FLAG:-} "${CURL_ARGS[@]}" -m "$WARMUP_TIMEOUT" -o /dev/null 2>"$WARM_LOG" || true
 
-    if [ ! -s /tmp/bench_warmup_"$ip".log ] && [ "${DEBUG:-0}" -eq 1 ]; then
+    if [ ! -s "$WARM_LOG" ] && [ "${DEBUG:-0}" -eq 1 ]; then
       echo "    (warm-up curl produced no stderr output; checking connectivity)"
-    elif [ -s /tmp/bench_warmup_"$ip".log ]; then
-      echo "    Warm-up stderr: $(head -c 160 /tmp/bench_warmup_"$ip".log | tr '\n' ' ')"
+    elif [ -s "$WARM_LOG" ]; then
+      WARM_DIAG=$(head -c 200 "$WARM_LOG" | tr '\n' ' ')
+      echo "    Warm-up stderr: ${WARM_DIAG}"
+      if printf '%s' "$WARM_DIAG" | grep -qi "Operation timed out"; then
+        echo "    Hint: increase --timeout (now $timeout)s or --connect-timeout (now $CONNECT_TIMEOUT)s if the host is slow."
+      fi
     fi
 
     TIMES=""
@@ -77,7 +114,7 @@ run_benchmark() {
         rm -f "$BODY_FILE" "$ERR_FILE"
 
         echo -n "  • Sample $i/$samples: "
-        RESPONSE=$(curl ${DEBUG_FLAG:-} -o "$BODY_FILE" -w "%{time_total}:%{http_code}" "${CURL_ARGS[@]}" --connect-timeout 3 -m "$timeout" 2>"$ERR_FILE" || true)
+        RESPONSE=$(curl ${DEBUG_FLAG:-} -o "$BODY_FILE" -w "%{time_total}:%{http_code}" "${CURL_ARGS[@]}" --connect-timeout "$CONNECT_TIMEOUT" -m "$timeout" 2>"$ERR_FILE" || true)
 
         TIME=$(echo "$RESPONSE" | cut -d: -f1)
         CODE=$(echo "$RESPONSE" | cut -d: -f2)
@@ -133,8 +170,8 @@ function has_model() {
 
 total_success=0
 
-echo "Using model '$BENCHMARK_MODEL' on port $OLLAMA_PORT (samples: $SAMPLES, timeout: $TIMEOUT)"
-for host in "$@"; do
+echo "Using model '$BENCHMARK_MODEL' on port $OLLAMA_PORT (samples: $SAMPLES, timeout: $TIMEOUT, connect-timeout: $CONNECT_TIMEOUT)"
+for host in "${HOSTS[@]}"; do
   echo "------------------------------------------------"
   echo "Benchmarking $host..."
 
