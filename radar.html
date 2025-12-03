@@ -431,11 +431,14 @@
         PERSONA_KEYS.forEach((key) => {
             const defaults = DEFAULT_PERSONAS[key];
             const override = stored[key] || {};
+            const system = (override.system ?? '').trim();
+            const styleHint = (override.styleHint ?? '').trim();
+            const tasking = (override.tasking ?? '').trim();
             merged[key] = {
                 label: defaults.label,
-                system: override.system || defaults.system,
-                styleHint: override.styleHint || defaults.styleHint || '',
-                tasking: override.tasking || defaults.tasking
+                system: system || defaults.system,
+                styleHint: styleHint || defaults.styleHint || '',
+                tasking: tasking || defaults.tasking
             };
         });
         return merged;
@@ -449,16 +452,12 @@
         const overrides = {};
         PERSONA_KEYS.forEach((key) => {
             const profile = profiles[key];
-            const defaults = DEFAULT_PERSONAS[key];
-            if (!profile || !defaults) return;
-            const delta = {};
-            const system = (profile.system || '').trim();
-            const styleHint = (profile.styleHint || '').trim();
-            const tasking = (profile.tasking || '').trim();
-            if (system && system !== defaults.system) delta.system = system;
-            if (styleHint && styleHint !== defaults.styleHint) delta.styleHint = styleHint;
-            if (tasking && tasking !== defaults.tasking) delta.tasking = tasking;
-            if (Object.keys(delta).length) overrides[key] = delta;
+            if (!profile) return;
+            overrides[key] = {
+                system: (profile.system ?? '').trim(),
+                styleHint: (profile.styleHint ?? '').trim(),
+                tasking: (profile.tasking ?? '').trim()
+            };
         });
         try {
             localStorage.setItem(PERSONA_OVERRIDES_KEY, JSON.stringify(overrides));
