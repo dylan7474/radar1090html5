@@ -730,15 +730,25 @@
     }
 
     // --- CORE LOGIC ---
+    const sanitizeForSpeech = (input) => {
+        if (!input) return '';
+
+        const normalized = String(input).replace(/°/g, ' degrees ');
+        const withoutEmoji = normalized.replace(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE0F}\u{200D}]/gu, '');
+        const plainAscii = withoutEmoji.replace(/[^a-zA-Z0-9 .,;:!?"'()\[\]\-\/\n]/g, ' ');
+        return plainAscii.replace(/\s+/g, ' ').trim();
+    };
+
     function speak(text) {
-        if (!voiceEnabled) return;
+        const sanitized = sanitizeForSpeech(text);
+        if (!voiceEnabled || !sanitized) return;
         if (lastAudioSignalState === 'active') {
-            pendingHeldUtterance = pendingHeldUtterance || text;
+            pendingHeldUtterance = pendingHeldUtterance || sanitized;
             holdAiVoiceForAirband(lastAudioSignalState);
             return;
         }
         if (aiVoiceSuppressed) {
-            pendingHeldUtterance = text;
+            pendingHeldUtterance = sanitized;
             aiLog('DEBUG', 'Holding AI voice while airband traffic is active', 'debug');
             updateAiStatus("HOLDING FOR ATC", "#ffaa00");
             return;
@@ -749,7 +759,7 @@
         window.speechSynthesis.cancel();
         stopSpeechSequence();
 
-        currentUtterance = new SpeechSynthesisUtterance(text);
+        currentUtterance = new SpeechSynthesisUtterance(sanitized);
         const persona = document.getElementById('ai-persona-select').value;
         currentUtterance.rate = persona === 'ATC' ? 0.95 : persona === 'SPOTTER' ? 1.18 : 1.1;
         currentUtterance.pitch = persona === 'ATC' ? 1.12 : persona === 'SPOTTER' ? 0.85 : 1.0;
@@ -1349,15 +1359,16 @@
                 const alerts = analyzeConditions(inRange);
                 const top = inRange.slice(0, AI_CONFIG.maxPlanes);
                 const comms = await generateCommentary(top, inRange.length, alerts);
+                const sanitizedComms = sanitizeForSpeech(comms) || 'AI COMMS LINK DOWN.';
 
                 const isAlert = alerts.length > 0 || top[0].dist < 15;
                 if(comms.includes("7700")) {
                     document.body.classList.add('emergency-active');
                     setTimeout(() => document.body.classList.remove('emergency-active'), 5000);
                 }
-                aiLog(isAlert ? "ALERT" : "STATUS", comms, isAlert ? 'alert' : 'normal');
+                aiLog(isAlert ? "ALERT" : "STATUS", sanitizedComms, isAlert ? 'alert' : 'normal');
                 lastCommentaryTimestamp = Date.now();
-                speak(comms);
+                speak(sanitizedComms);
             }
         } catch (e) {
             console.error("AI processing failed", e);
