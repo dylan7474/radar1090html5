@@ -242,6 +242,7 @@
           </aside>
 
           <div class="persona-workspace__content">
+            <div class="persona-workspace__active" id="persona-editor-active"></div>
             <div class="persona-workspace__intro" id="persona-editor-hint"></div>
             <div class="persona-workspace__fields" id="persona-editor-fields"></div>
           </div>
@@ -763,6 +764,7 @@
     const personaEditorNav = document.getElementById('persona-editor-nav');
     const personaEditorFields = document.getElementById('persona-editor-fields');
     const personaEditorHint = document.getElementById('persona-editor-hint');
+    const personaEditorActive = document.getElementById('persona-editor-active');
 
     const PERSONA_DESCRIPTIONS = {
         MILITARY: 'Forward air defense tone focused on threat calls and intent.',
@@ -774,6 +776,10 @@
 
     let personaEditorDrafts = cloneProfiles(personaProfiles);
     let personaEditorSelected = PERSONA_KEYS[0];
+
+    const toggleBodyScrollLock = (locked) => {
+        document.body.classList.toggle('no-scroll', !!locked);
+    };
 
     const buildPersonaEditorField = (key, field, labelText, value, helpText) => {
         const wrapper = document.createElement('div');
@@ -815,6 +821,16 @@
         personaEditorFields.innerHTML = '';
         const helperCopy = PERSONA_DESCRIPTIONS[personaEditorSelected] || 'Tune the persona tone and tasking in these fields.';
         if (personaEditorHint) personaEditorHint.textContent = helperCopy;
+        if (personaEditorActive) {
+            const label = profile.label || personaEditorSelected;
+            personaEditorActive.innerHTML = `
+              <div>
+                <p class="persona-workspace__active-title">${label}</p>
+                <p class="persona-workspace__active-sub">Editing ${personaEditorSelected} persona</p>
+              </div>
+              <span class="persona-workspace__pill">${personaEditorSelected}</span>
+            `;
+        }
 
         const systemField = buildPersonaEditorField(
             personaEditorSelected,
@@ -870,6 +886,7 @@
     const closePersonaEditor = () => {
         if (personaEditorModal) personaEditorModal.hidden = true;
         personaEditorDrafts = cloneProfiles(personaProfiles);
+        toggleBodyScrollLock(false);
     };
 
     const openPersonaEditor = () => {
@@ -879,6 +896,7 @@
         renderPersonaNav();
         renderPersonaFields();
         personaEditorModal.hidden = false;
+        toggleBodyScrollLock(true);
     };
 
     const personaSaveBtn = document.getElementById('persona-editor-save');
