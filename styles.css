@@ -357,6 +357,17 @@ main.app.data-hidden .data-panel {
   transform: translateY(1px);
 }
 
+.control-button.control-button--ghost {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--muted);
+}
+
+.control-button.control-button--ghost:hover,
+.control-button.control-button--ghost:focus-visible {
+  color: var(--text);
+}
+
 .settings label {
   display: grid;
   gap: 0.35rem;
@@ -622,6 +633,86 @@ canvas#radar {
 
 .modal__actions .control-button {
   min-width: 120px;
+}
+
+.ai-editor-actions {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.persona-editor__list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.persona-editor__group {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.persona-editor__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.persona-editor__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.persona-editor__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.persona-editor__pill {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--muted);
+}
+
+.persona-editor__label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.persona-editor__textarea {
+  width: 100%;
+  min-height: 92px;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(6, 10, 18, 0.9);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.persona-editor__textarea:focus-visible {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.persona-editor__actions {
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.persona-editor__action-spacer {
+  flex: 1;
 }
 
 .manual-location__map {

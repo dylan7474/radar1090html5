@@ -10,7 +10,7 @@ Two entry points are available depending on your deployment:
 - `radar.html`: the AI-enabled dashboard that layers Ollama-assisted commentary and
   controls on top of the standard radar UI.
 
-**Current Version:** V1.9.62
+**Current Version:** V1.9.63
 
 ---
 
@@ -37,6 +37,8 @@ Two entry points are available depending on your deployment:
 - AI commentary now automatically pauses and resumes around live airband broadcasts so controller traffic is never talked over.
 - Persistent configuration stored in browser cookies, covering receiver coordinates, audio mute state, radar controls, and
   server path preferences.
+- AI personas can be edited in-app (system prompt, tasking, and style hints) with changes stored locally so custom voice
+  guidance survives reloads.
 - One-tap "Use My Location" control recenters the radar on your current coordinates and keeps them stored for future visits.
 - Manual receiver picker opens an interactive OpenStreetMap-powered picker so you can drop a marker on your station when GPS fixes are unreliable, automatically falling back between multiple CDN sources if the first map library request is blocked.
 - If location permissions are blocked, an in-app help overlay walks through re-enabling access in popular browsers so centering can resume quickly.
@@ -301,6 +303,8 @@ deployments alike include:
 - **In-app server configuration UI** – allow operators to adjust the dump1090 host,
   port, and base path from the sidebar instead of editing `app.js` or clearing
   cookies between sites.
+- **Persona import/export** – let operators back up or share custom persona prompt
+  sets across browsers or crews.
 - **Ollama host picker** – surface discovered AI endpoints in the UI with latency
   hints and a manual override instead of relying solely on `localStorage` settings.
 - **Improved offline handling** – surface cached aircraft history or a dedicated
