@@ -272,6 +272,62 @@ mkdir -p "$RUNTIME_DIR"
 
 cat > "$RUNTIME_DIR/boot.sh" <<EOF
 #!/bin/sh
+run_benchmark() {
+    ip="$1"
+    prompt="$2"
+    samples="${3:-3}"
+    timeout="${4:-8}"
+
+    # Always warm the model first so the measured requests aren't penalized by load time.
+    JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"$prompt\", \"stream\": false}"
+    curl -s -o /dev/null --connect-timeout 3 -m 12 -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>/tmp/bench_warmup_"$ip".log || true
+
+    TIMES=""
+    COMPLETED=0
+    BENCH_ERROR=""
+    BENCH_ERROR_CODE=""
+
+    i=1
+    while [ "$i" -le "$samples" ]; do
+        BODY_FILE="/tmp/bench_body_${ip}_$i.txt"
+        ERR_FILE="/tmp/bench_err_${ip}_$i.txt"
+        rm -f "$BODY_FILE" "$ERR_FILE"
+
+        RESPONSE=$(curl -s -o "$BODY_FILE" -w "%{time_total}:%{http_code}" --connect-timeout 3 -m "$timeout" \
+                       -X POST "http://$ip:$OLLAMA_PORT/api/generate" -d "$JSON_DATA" 2>"$ERR_FILE" || true)
+
+        TIME=$(echo "$RESPONSE" | cut -d: -f1)
+        CODE=$(echo "$RESPONSE" | cut -d: -f2)
+        CODE=${CODE:-000}
+
+        if [ "$CODE" = "200" ]; then
+            TIMES="$TIMES $TIME"
+            COMPLETED=$((COMPLETED + 1))
+        else
+            DIAG_BODY=$(head -c 200 "$BODY_FILE" | tr '\n' ' ')
+            DIAG_ERR=$(cat "$ERR_FILE" | tr '\n' ' ')
+
+            if [ -n "$DIAG_ERR" ]; then
+                BENCH_ERROR="HTTP $CODE - curl error: $DIAG_ERR"
+            elif [ -n "$DIAG_BODY" ]; then
+                BENCH_ERROR="HTTP $CODE - response: $DIAG_BODY"
+            else
+                BENCH_ERROR="HTTP $CODE - no response body"
+            fi
+            BENCH_ERROR_CODE="$CODE"
+        fi
+
+        i=$((i + 1))
+    done
+
+    if [ "$COMPLETED" -eq 0 ]; then
+        echo ""
+        return
+    fi
+
+    AVG=$(echo "$TIMES" | awk '{sum=0; count=0; for(i=1;i<=NF;i++){if($i ~ /^[0-9.]+$/){sum+=$i; count++}} if(count>0){printf "%.3f", sum/count}}')
+    echo "$AVG"
+}
 run_scan_and_config() {
     echo "------------------------------------------------"
     echo "🔍 WATCHDOG: Scanning for AI Servers on $SCAN_NET..."
@@ -309,50 +365,21 @@ run_scan_and_config() {
 
         echo "   ✅ \$ip - Ollama reachable with $BENCHMARK_MODEL"
         echo "\$ip" >> /tmp/healthy_hosts.txt
+        RESULT=\$(run_benchmark "\$ip" "Benchmark latency for radar copilots" 3 8)
 
-        # Use double quotes for JSON to allow variable expansion
-        JSON_DATA="{\"model\": \"$BENCHMARK_MODEL\", \"prompt\": \"1\", \"stream\": false}"
-
-        # Capture response body and curl error output for better diagnostics when benchmarks fail
-        BENCH_BODY="/tmp/bench_body_\$ip.txt"
-        BENCH_ERR="/tmp/bench_err_\$ip.txt"
-        rm -f "\$BENCH_BODY" "\$BENCH_ERR"
-
-        RESPONSE=\$(curl -s -o "\$BENCH_BODY" -w "%{time_total}:%{http_code}" --connect-timeout 2 -m 5 \
-                   -X POST "http://\$ip:$OLLAMA_PORT/api/generate" -d "\$JSON_DATA" 2>"\$BENCH_ERR" || true)
-
-        TIME=\$(echo "\$RESPONSE" | cut -d: -f1)
-        CODE=\$(echo "\$RESPONSE" | cut -d: -f2)
-        CODE=\${CODE:-000}
-
-        if [ "\$CODE" = "404" ]; then
-            echo "   ⚠️  \$ip - Benchmark model '$BENCHMARK_MODEL' missing (HTTP 404). Skipping latency ranking."
+        if [ -z "\$RESULT" ]; then
+            SOFT_CODES="000 408 425 429 500 502 503 504"
+            if echo " \$SOFT_CODES " | grep -q " \${BENCH_ERROR_CODE:-000} "; then
+                echo "   ⚠️  \$ip - Benchmark incomplete (\${BENCH_ERROR:-unknown error}). Using fallback latency to keep host eligible."
+                echo "9999 \$ip" >> /tmp/servers.txt
+            else
+                echo "   ❌ \$ip - Benchmark failed (\${BENCH_ERROR:-no response captured})"
+            fi
             continue
         fi
 
-        if [ "\$CODE" != "200" ]; then
-            DIAG_BODY=\$(head -c 200 "\$BENCH_BODY" | tr '\n' ' ')
-            DIAG_ERR=\$(cat "\$BENCH_ERR" | tr '\n' ' ')
-
-            if [ -n "\$DIAG_ERR" ]; then
-                DIAG_SUMMARY="curl error: \$DIAG_ERR"
-            elif [ -n "\$DIAG_BODY" ]; then
-                DIAG_SUMMARY="response: \$DIAG_BODY"
-            else
-                DIAG_SUMMARY="no response body"
-            fi
-
-            SOFT_CODES="000 408 425 429 500 502 503 504"
-            if echo " \$SOFT_CODES " | grep -q " \$CODE "; then
-                echo "   ⚠️  \$ip - Benchmark incomplete (HTTP \$CODE) - \$DIAG_SUMMARY. Using fallback latency to keep host eligible."
-                echo "9999 \$ip" >> /tmp/servers.txt
-            else
-                echo "   ❌ \$ip - Benchmark failed (HTTP \$CODE) - \$DIAG_SUMMARY"
-            fi
-        else
-            echo "   ⚡ \$ip - \${TIME}s"
-            echo "\$TIME \$ip" >> /tmp/servers.txt
-        fi
+        echo "   ⚡ \$ip - \${RESULT}s (avg of 3 warm runs)"
+        echo "\$RESULT \$ip" >> /tmp/servers.txt
     done
 
     SORTED_SERVERS=\$(sort -n /tmp/servers.txt | awk '{print \$2}')
