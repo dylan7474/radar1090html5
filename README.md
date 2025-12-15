@@ -122,6 +122,7 @@ Raspberry Pi that bundles everything into a single host:
 ## Configuration
 
 Remember you can install nmtui to configure networking
+Also this currently does not work in overlay mode
 
 All user-facing preferences persist automatically. To clear them, delete the
 `radar1090` cookies (e.g., `receiverLat`, `receiverLon`, `airbandMuted`,
