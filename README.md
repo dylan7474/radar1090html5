@@ -10,7 +10,7 @@ Two entry points are available depending on your deployment:
 - `radar.html`: the AI-enabled dashboard that layers Ollama-assisted commentary and
   controls on top of the standard radar UI.
 
-**Current Version:** V1.9.83
+**Current Version:** V1.9.84
 
 ---
 
@@ -159,7 +159,8 @@ host reports via `/api/tags`:
 - Defaults: the script pre-fills the model selection from `ai-config.json` when available; otherwise
   you can pass `--model` or choose interactively.
 - Output: writes `ai-config.json` with the chosen host and model so the app and installer share the
-  same configuration.
+  same configuration. The dashboard reads these hosts on startup and prioritizes them when
+  probing for reachable Ollama endpoints.
 
 Example lighttpd reverse proxy (requires `mod_proxy`):
 
