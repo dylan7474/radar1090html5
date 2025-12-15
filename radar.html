@@ -356,6 +356,15 @@
             }
 
             const config = await response.json();
+            const configuredHosts = Array.isArray(config?.ollamaHosts)
+                ? config.ollamaHosts.map(normalizeOllamaBase).filter(Boolean)
+                : [];
+            if (configuredHosts.length) {
+                const merged = [...new Set([...configuredHosts, ...ollamaCandidates])];
+                ollamaCandidates = merged;
+                aiLog('AI', `Using deployment-provided Ollama host(s): ${configuredHosts.join(', ')}`);
+            }
+
             const configuredModel = (config?.ollamaModel || '').trim();
             if (configuredModel) {
                 modelPreference = configuredModel;
